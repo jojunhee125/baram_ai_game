@@ -6,29 +6,27 @@
 # both the Tiled maps and the client bundle by walking up from its own file URL, and those
 # relative paths have to mean the same thing here as they do in a checkout.
 
-# PEM of the corporate root CA, empty by default. On the in-house network TLS is
-# intercepted, so neither the Alpine mirror nor the npm registry validates inside a
-# container until this certificate is trusted. Supply it as a KAD/Coolify build variable,
-# or locally with:
-#   docker compose build --build-arg CORP_CA_PEM="$(cat /usr/local/share/ca-certificates/kyungshin-root.crt)"
-# Left empty the build is unchanged, so anywhere without interception needs no argument.
-# It is a public root certificate, not a private key — carrying it in build args is safe.
-ARG CORP_CA_PEM=""
-
-
 FROM node:22-alpine AS base
-ARG CORP_CA_PEM
-# Appended to the existing bundle for apk/curl, and dropped into the source directory so
-# a later `update-ca-certificates` (pulled in with the ca-certificates package) keeps it.
-RUN if [ -n "$CORP_CA_PEM" ]; then \
-      mkdir -p /usr/local/share/ca-certificates && \
-      printf '%s\n' "$CORP_CA_PEM" > /usr/local/share/ca-certificates/corp-ca.crt && \
-      cat /usr/local/share/ca-certificates/corp-ca.crt >> /etc/ssl/certs/ca-certificates.crt; \
-    fi
-# Node ships its own root store and ignores the system bundle, so npm needs the certificate
-# named explicitly. Exported per-RUN rather than as an ENV: pointing NODE_EXTRA_CA_CERTS at
-# a missing file makes every node process warn on startup.
-ENV CORP_CA_FILE=/usr/local/share/ca-certificates/corp-ca.crt
+# KAD/Coolify re-signs all in-house outbound TLS with a corp root CA, so every external
+# fetch in this build (apk mirror, npm registry) fails verification until that CA is
+# trusted. KAD supplies it as a BuildKit secret named `corp_ca` (org-wide convention — see
+# KAD_배포 가이드 §C.2.1); mounted as a file here, never a Dockerfile ARG/ENV, so the PEM
+# never lands in an image layer or build log. `required=true` fails the build immediately
+# with "secret corp_ca: not found" if the secret isn't registered for this app, instead of
+# silently building an untrusted image whose corp-CA gap only surfaces later on an
+# unrelated fetch (see docs/decisions.md, 2026-08-25).
+# §C.2.1's own snippet targets a Debian/apt base; node:22-alpine has no apt-get, but Alpine
+# already ships /etc/ssl/certs/ca-certificates.crt, so appending the corp cert straight into
+# it is enough for apk/openssl/npm to trust it — no `update-ca-certificates` step needed
+# (verified locally via `docker build --secret id=corp_ca,src=<path>`).
+RUN --mount=type=secret,id=corp_ca,target=/tmp/corp-ca.pem,required=true \
+    cat /tmp/corp-ca.pem >> /etc/ssl/certs/ca-certificates.crt
+# Node ignores the system bundle and needs the certificate named explicitly; npm's own
+# `cafile` must point at this same merged bundle, never a corp-only file — pointing it at a
+# single cert *replaces* npm's trust store instead of adding to it, which would break the
+# very registry fetches this exists to unblock.
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+RUN npm config -g set cafile /etc/ssl/certs/ca-certificates.crt
 WORKDIR /app
 
 
@@ -39,8 +37,13 @@ COPY package.json package-lock.json ./
 COPY shared/package.json ./shared/package.json
 COPY server/package.json ./server/package.json
 COPY client/package.json ./client/package.json
-RUN if [ -f "$CORP_CA_FILE" ]; then export NODE_EXTRA_CA_CERTS="$CORP_CA_FILE"; fi; \
-    npm ci
+# `--omit=peer` (see the runtime install below for why): without it, npm also resolves
+# colyseus' optional `@colyseus/uwebsockets-transport` peer here, which fetches
+# uWebSockets.js straight from a GitHub tarball URL rather than the npm registry — on the
+# in-house network that request goes through the TLS-intercepting proxy and fails
+# certificate verification regardless of the corp CA above. The client build never touches
+# this transport, so skipping it removes the dependency on that fetch entirely.
+RUN npm ci --omit=peer
 
 COPY tsconfig.base.json ./tsconfig.base.json
 COPY shared ./shared
@@ -72,8 +75,7 @@ COPY client/package.json ./client/package.json
 # prebuilt binaries reached solely through `getDefaultTransport()`, and server.ts always
 # passes an explicit WebSocketTransport. Dropping the explicit transport would break the
 # boot loudly, not silently. Together: 320MB of node_modules down to ~89MB.
-RUN if [ -f "$CORP_CA_FILE" ]; then export NODE_EXTRA_CA_CERTS="$CORP_CA_FILE"; fi; \
-    npm ci --omit=dev --omit=peer --workspace=@zep-test/server --include-workspace-root && \
+RUN npm ci --omit=dev --omit=peer --workspace=@zep-test/server --include-workspace-root && \
     npm cache clean --force
 
 COPY tsconfig.base.json ./tsconfig.base.json
