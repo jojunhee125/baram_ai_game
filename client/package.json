@@ -1,0 +1,19 @@
+{
+  "name": "@zep-test/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@colyseus/sdk": "^0.17.43",
+    "@zep-test/shared": "*",
+    "phaser": "^4.2.1"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  }
+}

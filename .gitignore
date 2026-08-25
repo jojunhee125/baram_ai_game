@@ -1,0 +1,20 @@
+node_modules/
+
+# Build output. assets/ is *not* ignored: the server reads the Tiled maps from there at
+# runtime and vite copies them into the bundle.
+client/dist/
+**/.vite/
+
+.env
+.env.*
+!.env.example
+
+*.log
+npm-debug.log*
+
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp

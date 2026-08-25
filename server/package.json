@@ -1,0 +1,23 @@
+{
+  "name": "@zep-test/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "tsx --test --test-timeout=30000 \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@colyseus/schema": "^4.0.31",
+    "@zep-test/shared": "*",
+    "colyseus": "^0.17.10",
+    "express": "^5.2.1",
+    "tsx": "^4.20.0"
+  },
+  "devDependencies": {
+    "@colyseus/testing": "^0.17.11",
+    "@types/express": "^5.0.6"
+  }
+}

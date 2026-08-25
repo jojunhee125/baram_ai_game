@@ -1,0 +1,279 @@
+:root {
+  --surface-base: #14131a;
+  --surface-raised: #1e1d28;
+  --surface-hover: #272634;
+  --border-subtle: #2c2b3a;
+  --border-strong: #3a3950;
+  --text-primary: #eceaf4;
+  --text-muted: #9d9ab0;
+  --accent: #6ea8dc;
+  --danger: #e0806f;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius: 8px;
+  --control-height: 34px;
+
+  --font-stack: system-ui, -apple-system, "Segoe UI", "Malgun Gothic",
+    "Apple SD Gothic Neo", sans-serif;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --surface-base: #f4f2ee;
+    --surface-raised: #fdfcfa;
+    --surface-hover: #eceae5;
+    --border-subtle: #dcd8d0;
+    --border-strong: #c2bcb1;
+    --text-primary: #23212a;
+    --text-muted: #6b6779;
+    --accent: #3d7fb8;
+    --danger: #b4503b;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font-family: var(--font-stack);
+  font-size: 14px;
+  line-height: 1.5;
+  /* Korean wraps mid-word by default; keep-all breaks on spaces instead. */
+  word-break: keep-all;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  display: grid;
+  place-items: center;
+  min-height: 100dvh;
+  padding: var(--space-4);
+}
+
+/* 20x15 tiles = 4:3. min() keeps the stage inside both axes without breaking the ratio. */
+.stage {
+  position: relative;
+  width: min(100%, calc((100dvh - var(--space-8)) * 4 / 3), 1280px);
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.stage__canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.boot {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  background: var(--surface-base);
+  text-align: center;
+}
+
+.boot__spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border-subtle);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: boot-spin 900ms linear infinite;
+}
+
+@keyframes boot-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.boot__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.boot__detail {
+  margin: 0;
+  max-width: 34ch;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-wrap: pretty;
+}
+
+.boot__retry {
+  display: none;
+  align-items: center;
+  height: var(--control-height);
+  margin-top: var(--space-1);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.boot__retry:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+.boot__retry:active {
+  background: var(--surface-base);
+}
+
+.boot__retry:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.boot[data-state="error"] .boot__spinner {
+  display: none;
+}
+
+.boot[data-state="error"] .boot__title {
+  color: var(--danger);
+}
+
+.boot[data-state="error"] .boot__retry {
+  display: inline-flex;
+}
+
+/*
+ * The chat overlays the game canvas, which is always the same pixel-art map. It keeps a
+ * dark translucent treatment in both colour schemes rather than following the page.
+ */
+.chat {
+  position: absolute;
+  left: var(--space-3);
+  bottom: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(42%, 320px);
+  /* Only the log and the input are interactive; the rest of the stage stays clickable. */
+  pointer-events: none;
+}
+
+.chat__log {
+  pointer-events: auto;
+  overflow-y: auto;
+  max-height: 160px;
+  padding: var(--space-2);
+  border-radius: var(--radius);
+  background: rgba(20, 19, 26, 0.72);
+  color: #eceaf4;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.chat__empty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: rgba(236, 234, 244, 0.55);
+  font-size: 11px;
+  text-wrap: pretty;
+}
+
+.chat__empty-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.chat__row {
+  margin: 0 0 var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+.chat__row:last-child {
+  margin-bottom: 0;
+}
+
+.chat__nickname {
+  margin-right: var(--space-2);
+  color: rgba(236, 234, 244, 0.6);
+  font-weight: 600;
+}
+
+.chat__row--self .chat__nickname {
+  color: var(--accent);
+}
+
+.chat__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.chat__input {
+  pointer-events: auto;
+  width: 100%;
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(20, 19, 26, 0.72);
+  color: #eceaf4;
+  font: inherit;
+  font-size: 12px;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.chat__input::placeholder {
+  color: rgba(236, 234, 244, 0.42);
+}
+
+.chat__input:hover {
+  border-color: rgba(236, 234, 244, 0.3);
+}
+
+.chat__input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  background: rgba(20, 19, 26, 0.92);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot__spinner {
+    animation: none;
+    border-top-color: var(--border-strong);
+  }
+
+  .boot__retry,
+  .chat__input {
+    transition: none;
+  }
+}

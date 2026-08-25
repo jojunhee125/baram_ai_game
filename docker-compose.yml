@@ -1,0 +1,43 @@
+# KAD deployment descriptor (Coolify + Traefik + Keycloak SSO ForwardAuth).
+#
+# Two deliberate omissions:
+#   - No `environment:` block. KAD merges its injected variables in as a map, and a list
+#     left here survives the merge as integer keys, failing the build outright with
+#     "non-string key in services.app.environment".
+#   - No database service. This app persists nothing; declaring one would have KAD
+#     provision a PostgreSQL instance that never gets used.
+#
+# The filename must stay `docker-compose.yml`. When the buildpack is switched to Compose,
+# Coolify defaults "Docker Compose Location" to `.yaml` — correct it to `.yml`.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    expose:
+      - "8080"
+    restart: unless-stopped
+    labels:
+      kad.app_name: "ksc-metaverse"
+      # Key names are fixed; only the values are editable. `owner` must not be listed.
+      # On an AUTO_APPROVE service a missing `viewer` entry means every authenticated
+      # user gets 403.
+      kad.roles: "admin:관리자,viewer:인증된 모든 사용자"
+      # This label on its own changes nothing: a KAD administrator has to register the
+      # path in the platform env and the service has to be redeployed through KAD Portal
+      # before /api/health answers without SSO. Until then even the health endpoint is
+      # redirected to Keycloak from outside the cluster.
+      # /api/diag/ws-auth is deliberately not listed — it has to stay behind SSO, or its
+      # "did the gateway's auth headers arrive" answer means nothing.
+      kad.public_paths: "/api/health"
+    healthcheck:
+      # /api/health always answers 200 (a 401/403 would read as "not signed in" and send
+      # oauth2-proxy into a redirect loop), so the body is what decides here — `curl -f`
+      # alone would call a degraded server healthy. 127.0.0.1 rather than localhost,
+      # whose IPv6 resolution is what makes probes fail spuriously in this environment.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/api/health | grep -q '\"ok\":true'"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s

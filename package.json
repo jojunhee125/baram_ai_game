@@ -1,0 +1,25 @@
+{
+  "name": "zep-test",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev --workspace=@zep-test/server",
+    "dev:client": "npm run dev --workspace=@zep-test/client",
+    "build": "npm run build --workspace=@zep-test/client",
+    "start": "npm run start --workspace=@zep-test/server",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^26.3.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

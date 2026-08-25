@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>ZEP_test</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' rx='3' fill='%2314131a'/%3E%3Crect x='4' y='2' width='8' height='3' fill='%235b4436'/%3E%3Crect x='3' y='3' width='1' height='4' fill='%235b4436'/%3E%3Crect x='12' y='3' width='1' height='4' fill='%235b4436'/%3E%3Crect x='3' y='5' width='10' height='5' fill='%23f4cda6'/%3E%3Crect x='5' y='6' width='2' height='2' fill='%233a3038'/%3E%3Crect x='9' y='6' width='2' height='2' fill='%233a3038'/%3E%3Crect x='4' y='10' width='8' height='4' fill='%236ea8dc'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <div class="stage">
+        <div id="game-root" class="stage__canvas"></div>
+
+        <div class="chat" id="chat" hidden>
+          <div class="chat__log" id="chat-log" role="log" aria-live="polite" aria-label="채팅 기록">
+            <p class="chat__empty" id="chat-empty">
+              <svg class="chat__empty-icon" viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  d="M2.5 2.5h11a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H6l-3.5 3v-3h-.5a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.2"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              아직 대화가 없습니다. Enter 키를 눌러 말을 걸어보세요.
+            </p>
+          </div>
+          <label class="chat__label" for="chat-input">채팅 입력</label>
+          <input
+            id="chat-input"
+            class="chat__input"
+            type="text"
+            autocomplete="off"
+            placeholder="Enter 키로 입력, Esc 로 취소"
+          />
+        </div>
+
+        <div id="boot-status" class="boot" data-state="loading" role="status" aria-live="polite">
+          <span class="boot__spinner" aria-hidden="true"></span>
+          <p class="boot__title" data-boot-title>화면을 준비하는 중</p>
+          <p class="boot__detail" data-boot-detail>잠시만 기다려 주세요.</p>
+          <button type="button" class="boot__retry" data-boot-retry>다시 시도</button>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

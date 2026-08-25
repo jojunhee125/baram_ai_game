@@ -1,0 +1,18 @@
+# Installed inside the image from the lockfile; a host copy would carry win32 binaries.
+**/node_modules
+
+# Rebuilt by the build stage.
+client/dist
+**/.vite
+
+# Not inputs to the build. assets/ is, and must stay out of this list.
+.git
+.gitignore
+**/*.md
+tools
+.vscode
+.idea
+
+.env
+.env.*
+**/*.log
