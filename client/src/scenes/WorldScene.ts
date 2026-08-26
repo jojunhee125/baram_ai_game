@@ -6,6 +6,7 @@ import { RoomConnection, type PlayerSnapshot } from "../net/roomConnection";
 import { ChatPanel } from "../ui/chatPanel";
 import { ChatBubbles } from "../world/chatBubbles";
 import { LocalPlayer } from "../world/localPlayer";
+import { NameTags } from "../world/nameTags";
 import {
   AVATAR_TEXTURE,
   PlayerSprites,
@@ -27,6 +28,7 @@ export class WorldScene extends Phaser.Scene {
 
   private players!: PlayerSprites;
   private bubbles!: ChatBubbles;
+  private nameTags!: NameTags;
   private connection: RoomConnection | null = null;
   private chat: ChatPanel | null = null;
   private localPlayer: LocalPlayer | null = null;
@@ -59,6 +61,7 @@ export class WorldScene extends Phaser.Scene {
       registerAvatarAnimations(this);
       this.players = new PlayerSprites(this);
       this.bubbles = new ChatBubbles(this);
+      this.nameTags = new NameTags(this);
     } catch (error) {
       console.error(error);
       showBootError("맵을 그리지 못했습니다", "맵 데이터가 올바르지 않습니다. 새로고침해 주세요.");
@@ -80,6 +83,7 @@ export class WorldScene extends Phaser.Scene {
         onPlayerChange: (sessionId, snapshot) => this.changePlayer(sessionId, snapshot),
         onPlayerRemove: (sessionId) => {
           this.bubbles.remove(sessionId);
+          this.nameTags.remove(sessionId);
           this.players.remove(sessionId);
         },
         onMoveRejected: (correction) => this.localPlayer?.applyRejection(correction),
@@ -111,6 +115,7 @@ export class WorldScene extends Phaser.Scene {
 
   override update(time: number): void {
     this.bubbles.update(time);
+    this.nameTags.update();
 
     const dir = this.movementKeys?.active;
     if (dir === null || dir === undefined || !this.localPlayer) {
@@ -126,7 +131,8 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private addPlayer(sessionId: string, snapshot: PlayerSnapshot): void {
-    this.players.add(sessionId, snapshot);
+    const sprite = this.players.add(sessionId, snapshot);
+    this.nameTags.add(sessionId, sprite, snapshot.nickname);
     if (sessionId === this.connection?.sessionId) {
       this.initLocalPlayer();
     }

@@ -1,8 +1,8 @@
 import Phaser from "phaser";
 
 const BUBBLE_LIFETIME_MS = 4000;
-/** Clears the avatar's head: the sprite is 32px tall above its origin at the feet. */
-const BUBBLE_OFFSET_Y = 36;
+/** Clears the avatar's head and the persistent name tag drawn just above it. */
+const BUBBLE_OFFSET_Y = 50;
 /** Above every avatar, whose depth is its y pixel (max 480 on the plaza map). */
 const BUBBLE_DEPTH = 10_000;
 const MAX_BUBBLE_CHARS = 80;
