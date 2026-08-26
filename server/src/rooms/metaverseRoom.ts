@@ -1,5 +1,5 @@
 import { StateView } from "@colyseus/schema";
-import { Room } from "colyseus";
+import { Room, type AuthContext } from "colyseus";
 import {
   AVATAR_SKIN_COUNT,
   CHAT_RADIUS_TILES,
@@ -25,10 +25,12 @@ import { isDirection, TileMovementResolver } from "../game/movement";
 import { NaiveProximityIndex } from "../game/proximity";
 import { TiledMapLoader } from "../game/tiledMap";
 import type {
+  AuthResult,
   CollisionMap,
   MetaverseRoomOptions,
   RoomCreateOptions,
 } from "./contracts";
+import { deriveSsoNickname } from "./ssoIdentity";
 
 type RoomClient = MetaverseRoomOptions["client"];
 
@@ -69,8 +71,16 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     });
   }
 
+  /**
+   * Always returns a truthy object — see {@link AuthResult}. `ssoNickname` is null outside
+   * SSO (local dev, tests), and `onJoin` then falls back to `options.nickname`.
+   */
+  onAuth(_client: RoomClient, _options: JoinOptions | undefined, context: AuthContext): AuthResult {
+    return { ssoNickname: deriveSsoNickname(context.headers) };
+  }
+
   onJoin(client: RoomClient, options?: JoinOptions): void {
-    const nickname = normalizeNickname(options?.nickname);
+    const nickname = normalizeNickname(client.auth?.ssoNickname ?? options?.nickname);
     if (nickname === null) {
       throw new Error("nickname is required");
     }

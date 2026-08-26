@@ -26,10 +26,19 @@ export interface PlayerSession {
   lastChatAt: number;
 }
 
+/**
+ * `onAuth`'s return value from `ssoNickname` — never `string | null` directly: Colyseus
+ * treats a falsy `onAuth` result as authentication failure and rejects the join, so the
+ * "no SSO" case (local dev, tests) must still be a truthy object.
+ */
+export interface AuthResult {
+  ssoNickname: string | null;
+}
+
 /** Generic argument for `extends Room<...>` in Colyseus 0.17. */
 export interface MetaverseRoomOptions {
   state: RoomState;
-  client: Client<{ userData: PlayerSession }>;
+  client: Client<{ userData: PlayerSession; auth: AuthResult }>;
 }
 
 /** Walkability lookup derived from a Tiled collision layer. */

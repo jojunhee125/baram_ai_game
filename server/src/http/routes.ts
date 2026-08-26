@@ -4,7 +4,6 @@ import { fileURLToPath } from "node:url";
 import express, { type Application } from "express";
 import { ROOM_DEFINITIONS } from "../rooms/definitions";
 import { inspectForwardAuth } from "./forwardAuth";
-import { echoIdentity } from "./identityEcho";
 import { getUnhealthyReason } from "./readiness";
 import { getWsAuthProbeSnapshot, observeHttpRequest } from "./wsAuthProbe";
 
@@ -50,12 +49,6 @@ export function configureHttpRoutes(app: Application): void {
       lastHttpRequest: snapshot.lastHttpRequest,
       lastWebSocketUpgrade: snapshot.lastWebSocketUpgrade,
     });
-  });
-
-  // TEMPORARY — see identityEcho.ts. Remove once the title/department claim question is
-  // answered. Not in kad.public_paths, so it stays behind SSO like DIAGNOSTIC_PATH above.
-  app.get("/api/diag/identity-echo", (request, response) => {
-    response.status(200).json({ observedAt: new Date().toISOString(), ...echoIdentity(request.headers) });
   });
 
   app.use((request, _response, next) => {
