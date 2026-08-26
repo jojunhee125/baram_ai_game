@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { TILE_SIZE_PX } from "@zep-test/shared";
 import { showBootError } from "./bootStatus";
+import { BootScene } from "./scenes/BootScene";
 import { WorldScene } from "./scenes/WorldScene";
 
 /** Visible area in tiles. Independent of map size — the camera clamps to the map bounds. */
@@ -19,7 +20,8 @@ try {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [WorldScene],
+    // Only the first scene auto-starts; WorldScene must be started with its init data.
+    scene: [BootScene, WorldScene],
   });
 } catch (error) {
   console.error(error);

@@ -328,12 +328,14 @@ describe("MetaverseRoom — interest management (StateView filtering)", () => {
     const bob = await join(room, "bob");
 
     // Routes are BFS paths across plaza.json; expectServerAt fails loudly if the map changes.
+    // The step counts have to land the pair exactly VIEW_RADIUS_TILES apart, so they follow
+    // the radius constant and are re-derived whenever it changes.
     await stepMany(alice, Direction.Left, 8);
     await stepMany(alice, Direction.Up, 10);
     await expectServerAt(room, alice, 1, 1, "alice walks to the north-west corner");
-    await stepMany(bob, Direction.Down, 2);
-    await stepMany(bob, Direction.Right, 7);
-    await expectServerAt(room, bob, 16, 13, "bob walks to the south-east corner");
+    await stepMany(bob, Direction.Right, 5);
+    await stepMany(bob, Direction.Up, 2);
+    await expectServerAt(room, bob, 14, 9, "bob walks south-east of alice");
 
     const apart = chebyshev(
       serverPlayer(room, alice.sessionId),
@@ -348,7 +350,7 @@ describe("MetaverseRoom — interest management (StateView filtering)", () => {
     // One more tile of horizontal separation crosses the radius even though dy shrinks.
     await stepMany(bob, Direction.Up, 1);
     await stepMany(bob, Direction.Right, 1);
-    await expectServerAt(room, bob, 17, 12, "bob steps past the diagonal boundary");
+    await expectServerAt(room, bob, 15, 8, "bob steps past the diagonal boundary");
     assert.equal(
       chebyshev(serverPlayer(room, alice.sessionId), serverPlayer(room, bob.sessionId)),
       VIEW_RADIUS_TILES + 1,

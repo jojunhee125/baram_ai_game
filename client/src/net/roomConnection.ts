@@ -13,8 +13,6 @@ import {
   type Player,
 } from "@zep-test/shared";
 
-const ROOM_NAME = "plaza";
-
 /** Only used by `vite dev`, where the page (:5173) and the game server are separate origins. */
 const DEV_SERVER_PORT = 2567;
 
@@ -50,6 +48,11 @@ export interface RoomEvents {
   onError?(code: number, message?: string): void;
 }
 
+/** A terminal lifecycle event that arrived before `attach()` had somewhere to deliver it. */
+type PendingLifecycle =
+  | { kind: "leave"; code: number; reason?: string }
+  | { kind: "error"; code: number; message?: string };
+
 /**
  * Owns the Colyseus room and mirrors `state.players` into plain snapshots.
  * Rendering (C4), input (C5) and chat UI (C6) consume this; it draws nothing itself.
@@ -57,23 +60,41 @@ export interface RoomEvents {
 export class RoomConnection {
   private readonly snapshots = new Map<string, PlayerSnapshot>();
   private readonly detachers = new Map<string, () => void>();
+  private events: RoomEvents = {};
+  private attached = false;
+  private pendingLifecycle: PendingLifecycle | null = null;
 
   private constructor(
     private readonly room: Room<unknown, RoomState>,
-    private readonly events: RoomEvents,
+    /** Read from RoomState, so the client can never disagree with the server about the map. */
+    readonly mapKey: string,
   ) {
-    this.bindPlayers();
-    this.bindMessages();
+    this.bindLifecycle();
   }
 
-  static async connect(events: RoomEvents = {}, options?: JoinOptions): Promise<RoomConnection> {
+  /**
+   * Joins `roomName` and resolves only once the first state has arrived, so `mapKey` and
+   * `players` are populated: `joinOrCreate` alone resolves on the JOIN_ROOM frame, which
+   * precedes ROOM_STATE by an ack round trip.
+   */
+  static async connect(roomName: string, options?: JoinOptions): Promise<RoomConnection> {
     const client = new Client(resolveEndpoint());
     const room = await client.joinOrCreate<RoomState>(
-      ROOM_NAME,
+      roomName,
       options ?? createPlaceholderIdentity(),
       RoomState,
     );
-    return new RoomConnection(room, events);
+    await firstState(room);
+    return new RoomConnection(room, room.state.mapKey);
+  }
+
+  /** Wires renderers. `onPlayerAdd` fires at once for everyone already in view. */
+  attach(events: RoomEvents): void {
+    this.events = events;
+    this.attached = true;
+    this.bindPlayers();
+    this.bindMessages();
+    this.replayPendingLifecycle();
   }
 
   get sessionId(): string {
@@ -130,13 +151,63 @@ export class RoomConnection {
     this.room.onMessage(ServerMessage.MoveRejected, (correction: MoveRejected) => {
       this.events.onMoveRejected?.(correction);
     });
+  }
+
+  /**
+   * A drop between `connect()` and `attach()` (the whole map-loading window) would otherwise
+   * vanish into the empty `this.events`, leaving a world that renders and predicts movement
+   * against a socket the server never sees. One slot is enough: a room terminates once.
+   */
+  private bindLifecycle(): void {
     this.room.onLeave((code, reason) => {
+      if (!this.attached) {
+        this.pendingLifecycle ??= { kind: "leave", code, reason };
+        return;
+      }
       this.events.onLeave?.(code, reason);
     });
     this.room.onError((code, message) => {
+      if (!this.attached) {
+        this.pendingLifecycle ??= { kind: "error", code, message };
+        return;
+      }
       this.events.onError?.(code, message);
     });
   }
+
+  /**
+   * Deferred, never inline: `WorldScene.create()` calls `hideBootStatus()` immediately after
+   * `attach()`, so a synchronous replay would raise the error overlay only for that call to
+   * hide it again. A microtask runs after `create()` returns, so the overlay survives.
+   */
+  private replayPendingLifecycle(): void {
+    const pending = this.pendingLifecycle;
+    if (!pending) {
+      return;
+    }
+    this.pendingLifecycle = null;
+    queueMicrotask(() => {
+      if (pending.kind === "leave") {
+        this.events.onLeave?.(pending.code, pending.reason);
+      } else {
+        this.events.onError?.(pending.code, pending.message);
+      }
+    });
+  }
+}
+
+/**
+ * Races the three signals that can follow JOIN_ROOM: waiting on `onStateChange` alone leaves
+ * the boot overlay stuck on "접속하는 중" if the socket dies before ROOM_STATE arrives.
+ */
+function firstState(room: Room<unknown, RoomState>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    room.onStateChange.once(() => resolve());
+    room.onError.once((code, message) =>
+      reject(new Error(`room error ${code}: ${message ?? "unknown"}`)),
+    );
+    room.onLeave.once((code) => reject(new Error(`left before the first state (code ${code})`)));
+  });
 }
 
 function toSnapshot(player: Player): PlayerSnapshot {

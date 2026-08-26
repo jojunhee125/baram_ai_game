@@ -462,19 +462,22 @@ function buildAvatarSheet(sources) {
 /** Tiled's top 3 gid bits are flip/rotation flags; mirrors GID_TILE_MASK in server/src/game/tiledMap.ts. */
 const GID_TILE_MASK = 0x1fffffff;
 
+/** Every map that depends on this tileset; each is re-verified and re-emitted unchanged. */
+const MAP_FILES = ["maps/plaza.json", "maps/grand-plaza.json"];
+
 /**
- * The map is authored art-independently: only the PNG changes on a reskin. Rather than
- * regenerate it we re-assert every contract it makes about the tileset and hand the original
+ * The maps are authored art-independently: only the PNG changes on a reskin. Rather than
+ * regenerate them we re-assert every contract they make about the tileset and hand the original
  * bytes back for re-emission, so a reskin that broke one of them cannot pass unnoticed.
  * Read-only: this must run before anything is written, or a broken reskin fails with the
  * assets already half-overwritten.
  */
-function verifyMapContract(tileset) {
-  const original = readFileSync(resolve(ASSETS_DIR, "maps/plaza.json"));
+function verifyMapContract(tileset, mapFile) {
+  const original = readFileSync(resolve(ASSETS_DIR, mapFile));
   const map = JSON.parse(original.toString("utf8"));
 
   const expect = (actual, wanted, what) => {
-    if (actual !== wanted) throw new Error(`maps/plaza.json: ${what} is ${actual}, expected ${wanted}`);
+    if (actual !== wanted) throw new Error(`${mapFile}: ${what} is ${actual}, expected ${wanted}`);
   };
 
   expect(map.tilewidth, TILE, "tilewidth");
@@ -499,7 +502,7 @@ function verifyMapContract(tileset) {
   );
   for (const { recipe, id } of blocking) {
     const tile = (entry.tiles ?? []).find((candidate) => candidate.id === id);
-    if (!tile) throw new Error(`maps/plaza.json: tile ${id} (${recipe.label}) is missing its collides property`);
+    if (!tile) throw new Error(`${mapFile}: tile ${id} (${recipe.label}) is missing its collides property`);
   }
 
   for (const layer of map.layers) {
@@ -507,14 +510,14 @@ function verifyMapContract(tileset) {
     if (layer.type !== "tilelayer") continue;
     for (const raw of layer.data) {
       if (!Number.isInteger(raw) || raw < 0) {
-        throw new Error(`maps/plaza.json: layer "${layer.name}" holds ${String(raw)}, which is not a gid`);
+        throw new Error(`${mapFile}: layer "${layer.name}" holds ${String(raw)}, which is not a gid`);
       }
       // Decoded exactly like the server's MapLoader: clear the flip flags (H/V/diagonal) first,
       // otherwise a flipped tile reads as a huge gid and gets rejected here for no reason.
       const gid = raw & GID_TILE_MASK;
       if (gid > TILE_RECIPES.length) {
         throw new Error(
-          `maps/plaza.json: layer "${layer.name}" references gid ${raw} (tile gid ${gid}), outside 0..${TILE_RECIPES.length}`,
+          `${mapFile}: layer "${layer.name}" references gid ${raw} (tile gid ${gid}), outside 0..${TILE_RECIPES.length}`,
         );
       }
     }
@@ -540,8 +543,10 @@ const sources = loadSources(root);
 // leave assets/ exactly as it was, not half-reskinned.
 const tileset = buildTileset(sources);
 const avatar = buildAvatarSheet(sources);
-const map = verifyMapContract(tileset);
-console.log(`verified maps/plaza.json against the tileset (${map.length} bytes, unchanged)`);
+const maps = MAP_FILES.map((file) => ({ file, contents: verifyMapContract(tileset, file) }));
+for (const { file, contents } of maps) {
+  console.log(`verified ${file} against the tileset (${contents.length} bytes, unchanged)`);
+}
 
 write("tilesets/plaza-tiles.png", encodePng(tileset));
 console.log(`  ${TILE_RECIPES.length} tiles, ${tileset.width}x${tileset.height}`);
@@ -550,5 +555,5 @@ write("sprites/avatar.png", encodePng(avatar));
 console.log(`  ${SKINS.length} skins (${SKINS.map((s) => s.label).join(", ")}), ${avatar.width}x${avatar.height}`);
 
 // Re-emitted byte for byte from what was just verified - assets/README.md documents that this
-// pipeline never changes the map.
-write("maps/plaza.json", map);
+// pipeline never changes the maps.
+for (const { file, contents } of maps) write(file, contents);

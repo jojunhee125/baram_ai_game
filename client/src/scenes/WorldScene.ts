@@ -1,8 +1,8 @@
 import Phaser from "phaser";
 import { TILE_SIZE_PX, type ChatBroadcast } from "@zep-test/shared";
-import { hideBootStatus, showBootError, showBootLoading } from "../bootStatus";
+import { hideBootStatus, showBootError } from "../bootStatus";
 import { MovementKeys } from "../input/movementKeys";
-import { RoomConnection, type PlayerSnapshot } from "../net/roomConnection";
+import type { PlayerSnapshot, RoomConnection } from "../net/roomConnection";
 import { ChatPanel } from "../ui/chatPanel";
 import { ChatBubbles } from "../world/chatBubbles";
 import { LocalPlayer } from "../world/localPlayer";
@@ -14,8 +14,7 @@ import {
   STEP_TWEEN_MS,
 } from "../world/playerSprites";
 
-const MAP_KEY = "plaza";
-/** Doubles as the loader key for the image and the tileset name embedded in plaza.json. */
+/** Doubles as the loader key for the image and the tileset name embedded in every map. */
 const TILESET_KEY = "plaza-tiles";
 const GROUND_LAYER = "ground";
 const COLLISION_LAYER = "collision";
@@ -23,13 +22,18 @@ const COLLISION_LAYER = "collision";
 /** Where the camera sits until the local player's sprite exists. Spawn tile per assets/README.md. */
 const INITIAL_CAMERA_TILE = { tileX: 9, tileY: 11 };
 
+export interface WorldSceneData {
+  connection: RoomConnection;
+}
+
 export class WorldScene extends Phaser.Scene {
   static readonly KEY = "world";
 
   private players!: PlayerSprites;
   private bubbles!: ChatBubbles;
   private nameTags!: NameTags;
-  private connection: RoomConnection | null = null;
+  private connection!: RoomConnection;
+  private mapKey!: string;
   private chat: ChatPanel | null = null;
   private localPlayer: LocalPlayer | null = null;
   private movementKeys: MovementKeys | null = null;
@@ -37,6 +41,11 @@ export class WorldScene extends Phaser.Scene {
 
   constructor() {
     super(WorldScene.KEY);
+  }
+
+  init(data: WorldSceneData): void {
+    this.connection = data.connection;
+    this.mapKey = data.connection.mapKey;
   }
 
   preload(): void {
@@ -47,7 +56,7 @@ export class WorldScene extends Phaser.Scene {
       );
     });
 
-    this.load.tilemapTiledJSON(MAP_KEY, `/maps/${MAP_KEY}.json`);
+    this.load.tilemapTiledJSON(this.mapKey, `/maps/${this.mapKey}.json`);
     this.load.image(TILESET_KEY, `/tilesets/${TILESET_KEY}.png`);
     this.load.spritesheet(AVATAR_TEXTURE, "/sprites/avatar.png", {
       frameWidth: TILE_SIZE_PX,
@@ -68,49 +77,36 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
 
-    void this.connectToRoom();
+    this.connection.attach({
+      onPlayerAdd: (sessionId, snapshot) => this.addPlayer(sessionId, snapshot),
+      onPlayerChange: (sessionId, snapshot) => this.changePlayer(sessionId, snapshot),
+      onPlayerRemove: (sessionId) => {
+        this.bubbles.remove(sessionId);
+        this.nameTags.remove(sessionId);
+        this.players.remove(sessionId);
+      },
+      onMoveRejected: (correction) => this.localPlayer?.applyRejection(correction),
+      onChat: (message) => this.showChat(message),
+      onLeave: () => {
+        showBootError(
+          "서버와의 연결이 끊어졌습니다",
+          "네트워크 상태를 확인한 뒤 다시 시도해 주세요.",
+        );
+      },
+      onError: (code, message) => {
+        console.error(`room error ${code}: ${message ?? "unknown"}`);
+      },
+    });
+
+    const connection = this.connection;
+    this.chat = new ChatPanel((text) => connection.sendChat(text));
+    // attach() replays the players already in view, so addPlayer() normally does this first.
+    this.initLocalPlayer();
+    hideBootStatus();
   }
 
   followTarget(target: Phaser.GameObjects.GameObject): void {
     this.cameras.main.startFollow(target, true);
-  }
-
-  private async connectToRoom(): Promise<void> {
-    showBootLoading("서버에 접속하는 중", "잠시만 기다려 주세요.");
-    try {
-      this.connection = await RoomConnection.connect({
-        onPlayerAdd: (sessionId, snapshot) => this.addPlayer(sessionId, snapshot),
-        onPlayerChange: (sessionId, snapshot) => this.changePlayer(sessionId, snapshot),
-        onPlayerRemove: (sessionId) => {
-          this.bubbles.remove(sessionId);
-          this.nameTags.remove(sessionId);
-          this.players.remove(sessionId);
-        },
-        onMoveRejected: (correction) => this.localPlayer?.applyRejection(correction),
-        onChat: (message) => this.showChat(message),
-        onLeave: () => {
-          showBootError(
-            "서버와의 연결이 끊어졌습니다",
-            "네트워크 상태를 확인한 뒤 다시 시도해 주세요.",
-          );
-        },
-        onError: (code, message) => {
-          console.error(`room error ${code}: ${message ?? "unknown"}`);
-        },
-      });
-      // The local player's onPlayerAdd can land on either side of this await, so setup
-      // is attempted from both here and addPlayer().
-      this.initLocalPlayer();
-      const connection = this.connection;
-      this.chat = new ChatPanel((text) => connection.sendChat(text));
-      hideBootStatus();
-    } catch (error) {
-      console.error(error);
-      showBootError(
-        "서버에 접속하지 못했습니다",
-        "게임 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인한 뒤 다시 시도해 주세요.",
-      );
-    }
   }
 
   override update(time: number): void {
@@ -133,7 +129,7 @@ export class WorldScene extends Phaser.Scene {
   private addPlayer(sessionId: string, snapshot: PlayerSnapshot): void {
     const sprite = this.players.add(sessionId, snapshot);
     this.nameTags.add(sessionId, sprite, snapshot.nickname);
-    if (sessionId === this.connection?.sessionId) {
+    if (sessionId === this.connection.sessionId) {
       this.initLocalPlayer();
     }
   }
@@ -141,7 +137,7 @@ export class WorldScene extends Phaser.Scene {
   private changePlayer(sessionId: string, snapshot: PlayerSnapshot): void {
     // Our own patches go through the predictor, which decides whether the server has
     // anything new to say; applying them directly would undo every predicted step.
-    if (this.localPlayer && sessionId === this.connection?.sessionId) {
+    if (this.localPlayer && sessionId === this.connection.sessionId) {
       this.localPlayer.applyServerState(snapshot);
       return;
     }
@@ -149,7 +145,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private showChat(message: ChatBroadcast): void {
-    this.chat?.append(message, message.sessionId === this.connection?.sessionId);
+    this.chat?.append(message, message.sessionId === this.connection.sessionId);
     // Chat radius is <= view radius, so the sender is normally on screen; a sender who
     // left between sending and delivery simply gets no bubble.
     const sprite = this.players.get(message.sessionId);
@@ -160,7 +156,7 @@ export class WorldScene extends Phaser.Scene {
 
   private initLocalPlayer(): void {
     const connection = this.connection;
-    if (!connection || this.localPlayer) {
+    if (this.localPlayer) {
       return;
     }
     const snapshot = connection.players.get(connection.sessionId);
@@ -176,11 +172,11 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private buildWorld(): void {
-    const map = this.make.tilemap({ key: MAP_KEY });
+    const map = this.make.tilemap({ key: this.mapKey });
 
     const tileset = map.addTilesetImage(TILESET_KEY, TILESET_KEY);
     if (!tileset) {
-      throw new Error(`tileset "${TILESET_KEY}" is not embedded in ${MAP_KEY}.json`);
+      throw new Error(`tileset "${TILESET_KEY}" is not embedded in ${this.mapKey}.json`);
     }
 
     // Insertion order is render order: walls and props sit above the floor.
@@ -204,7 +200,7 @@ export class WorldScene extends Phaser.Scene {
     const layer = map.createLayer(name, tileset, 0, 0);
     // createLayer can return the GPU variant, which has no collision API.
     if (!(layer instanceof Phaser.Tilemaps.TilemapLayer)) {
-      throw new Error(`tile layer "${name}" missing from ${MAP_KEY}.json`);
+      throw new Error(`tile layer "${name}" missing from ${this.mapKey}.json`);
     }
     return layer;
   }

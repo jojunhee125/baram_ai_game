@@ -1,15 +1,24 @@
 import { createServer } from "node:http";
+import { Encoder } from "@colyseus/schema";
 import { Server, WebSocketTransport } from "colyseus";
 import { TiledMapLoader } from "./game/tiledMap";
 import { markReady, markUnhealthy } from "./http/readiness";
 import { configureHttpRoutes } from "./http/routes";
 import { observeWebSocketUpgrade } from "./http/wsAuthProbe";
+import type { CollisionMap } from "./rooms/contracts";
 import { ROOM_DEFINITIONS } from "./rooms/definitions";
 import { MetaverseRoom } from "./rooms/metaverseRoom";
 
 export const DEFAULT_PORT = 2567;
 
 export function createGameServer(): Server {
+  // Has to be set explicitly: the 8 KB default is nowhere near one patch of a 500-view room,
+  // which PoC #2 load testing measured at ~6.5 MB under clustered load. The encoder grows its
+  // buffer one BUFFER_SIZE step at a time and re-encodes the whole patch — plus logs a warning —
+  // on every step, which at the default is hundreds of re-encodes per patch. `ensureCapacity`
+  // rounds up to a multiple of this, so 1 MB buys the headroom without doubling a large patch.
+  Encoder.BUFFER_SIZE = 1024 * 1024;
+
   // One HTTP server carries the client bundle, the matchmaking API and the websocket
   // upgrade: the KAD gateway authenticates and forwards exactly one origin, so a second
   // port would sit outside SSO entirely.
@@ -42,17 +51,42 @@ export function resolvePort(value: string | undefined): number {
  * A map that fails to load is a packaging error — the asset directory did not make it
  * into the image — and it would otherwise surface as a 500 on the first join of a server
  * that had been reporting itself healthy for hours. Refuse to boot instead.
+ *
+ * The spawn checks are here for the same reason: a spawn centre inside a wall strands every
+ * client that joins that room, and nothing would reveal it until the first join.
  */
 async function validateRoomMaps(): Promise<void> {
   const loader = new TiledMapLoader();
-  for (const mapKey of new Set(ROOM_DEFINITIONS.map((definition) => definition.mapKey))) {
-    try {
-      await loader.load(mapKey);
-    } catch (cause) {
-      const reason = `map "${mapKey}" failed to load`;
-      markUnhealthy(reason);
-      throw new Error(reason, { cause });
+  const maps = new Map<string, CollisionMap>();
+
+  for (const definition of ROOM_DEFINITIONS) {
+    let map = maps.get(definition.mapKey);
+    if (map === undefined) {
+      try {
+        map = await loader.load(definition.mapKey);
+      } catch (cause) {
+        refuseBoot(`map "${definition.mapKey}" failed to load`, cause);
+      }
+      maps.set(definition.mapKey, map);
+    }
+
+    const { spawn } = definition;
+    if (spawn.spreadRadiusInTiles < 0) {
+      refuseBoot(
+        `room "${definition.name}" has a negative spawn spreadRadiusInTiles (${spawn.spreadRadiusInTiles})`,
+      );
+    }
+    // isWalkable() reports out-of-bounds tiles as blocked, so this covers both checks.
+    if (!map.isWalkable(spawn.tileX, spawn.tileY)) {
+      refuseBoot(
+        `room "${definition.name}" spawns at (${spawn.tileX},${spawn.tileY}), which is not a walkable tile of map "${definition.mapKey}"`,
+      );
     }
   }
   markReady();
+}
+
+function refuseBoot(reason: string, cause?: unknown): never {
+  markUnhealthy(reason);
+  throw cause === undefined ? new Error(reason) : new Error(reason, { cause });
 }

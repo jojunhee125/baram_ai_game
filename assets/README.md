@@ -13,7 +13,9 @@ NINJA_ASSET_ROOT=<ninja-adventure-repo-root> node tools/import-ninja-assets.mjs
 
 소스 저장소 위치는 인자 또는 `NINJA_ASSET_ROOT` 로 넘긴다 — 스크립트에 하드코딩된 경로는 없다. 결정적(deterministic) 생성이라 같은 소스면 같은 PNG가 나온다.
 
-**`maps/plaza.json`은 이 파이프라인에서 절대 바뀌지 않는다** — 맵을 읽어 타일셋에 대해 그것이 거는 전제(tile 크기, `firstgid`, `columns`/`tilecount`, 이미지 치수, `collides` 타일 개수, 레이어 gid 범위)를 전부 재검증한 뒤 **원본 바이트를 그대로 다시 쓴다.** 리스킨이 그 전제 중 하나를 깨면 조용히 통과하지 않고 그 자리에서 실패한다.
+**`maps/plaza.json`·`maps/grand-plaza.json`은 이 파이프라인에서 절대 바뀌지 않는다** — 두 맵을 각각 읽어 타일셋에 대해 그것이 거는 전제(tile 크기, `firstgid`, `columns`/`tilecount`, 이미지 치수, `collides` 타일 개수, 레이어 gid 범위)를 전부 재검증한 뒤 **원본 바이트를 그대로 다시 쓴다.** 리스킨이 그 전제 중 하나를 깨면 조용히 통과하지 않고 그 자리에서 실패한다.
+
+> 타일셋을 공유하는 맵을 새로 추가하면 `import-ninja-assets.mjs`의 `MAP_FILES` 에도 넣을 것. 빠뜨리면 그 맵만 검증 없이 남아 다음 리스킨 때 조용히 깨진다.
 
 > **경고: `tools/generate-assets.mjs` 는 Phase1 절차적 placeholder 전용 스크립트다.** 실행하면 `tilesets/plaza-tiles.png` 와 `sprites/avatar.png` 가 placeholder로 되돌아가고, **`maps/plaza.json` 까지 스크립트 내부의 ASCII 레이아웃으로 재생성**된다 — 리스킨 자산을 통째로 덮어쓰는 파괴적 동작이다. 그래서 최상단에 `--force-placeholder` 플래그 가드가 있고, 플래그 없이 실행하면 아무것도 쓰지 않고 즉시 exit 1 한다.
 
@@ -52,7 +54,38 @@ NINJA_ASSET_ROOT=<ninja-adventure-repo-root> node tools/import-ninja-assets.mjs
 
 - 타일을 추가할 때 tileset의 **"0행 통행 가능 / 1행 통행 불가"** 행 분리를 지키면 `collides` 를 빠뜨릴 일이 없다.
 
-현재 맵의 통행 가능 칸은 300칸 중 218칸. **추천 spawn tile은 `{ tileX: 9, tileY: 11 }`** (중앙 분수 남쪽, 통행 가능) — `RoomCreateOptions.spawn`에 넣으면 된다. spawn은 맵이 아니라 room 설정에서 온다(`server/src/rooms/contracts.ts`).
+현재 맵의 통행 가능 칸은 300칸 중 218칸. **추천 spawn tile은 `{ tileX: 9, tileY: 11 }`** (중앙 분수 남쪽, 통행 가능) — `RoomCreateOptions.spawn`에 넣으면 된다. spawn은 맵이 아니라 room 설정에서 온다(`server/src/rooms/contracts.ts`의 `SpawnArea`). `plaza`는 `spreadRadiusInTiles: 0` 이라 전원이 이 타일 하나에 그대로 선다.
+
+## maps/grand-plaza.json
+
+Go/No-go PoC #2(500 CCU broadcast 측정) 전용 맵. 설계 근거와 수치 유도는 `docs/poc2-design.md` §1.
+
+- **160 x 145 tiles**, 통행 가능 **14,800칸** / 통행 불가 8,400칸
+- `plaza.json`과 **완전히 동일한 포맷·동일한 embedded 타일셋**(아트 신규 제작 0). 서버 `MapLoader`·Phaser 로더 양쪽 다 무수정
+- spawn 중심 `{ tileX: 80, tileY: 72 }`, `spreadRadiusInTiles: 70` (중앙 광장 한가운데, 반경이 통행 가능 영역 전체를 덮는다)
+
+레이아웃은 세 겹이다.
+
+| 영역 | 범위 | 내용 |
+|---|---|---|
+| 경계 밴드 | 좌우 10열, 상 7행, 하 8행 | 전부 통행 불가 |
+| 내부 | 140 x 130 | 10x10 super-tile 14 x 13개, 각 super-tile에 5x4 건물 + 나머지는 거리 |
+| 중앙 광장 | `x 60–99`, `y 57–86` | super-tile 12개를 비운 40 x 30 완전 개방 |
+
+**경계 밴드에 통행 가능 칸이 하나라도 생기면 안 된다.** 아바타 origin이 `(0.5, 1)`(타일 아래변)이라 밴드 두께가 상하 비대칭인 것도 같은 이유 — 이 밴드가 비어 있는 동안에만 Phaser 카메라가 `setBounds` 클램프에 걸리지 않고, 로컬 플레이어가 **항상 정확히 화면 중앙**에 있다. 그 불변식 위에서 "화면에 보일 수 있는 최대 Chebyshev 거리 = 10"이 성립하고 `VIEW_RADIUS_TILES`가 그로부터 유도된다. 밴드가 뚫리면 반경 상수의 근거가 통째로 무너진다.
+
+### 재생성
+
+```
+node tools/generate-load-map.mjs                                        # cwd = code/
+node tools/generate-load-map.mjs --width 90 --height 145 --out assets/maps/half.json
+```
+
+난수를 쓰지 않고 좌표 함수만으로 만들어 **같은 인자면 항상 같은 바이트**가 나온다. `--width`/`--height`는 `docs/poc2-design.md` §6.3의 밀도 고정 측정(맵 면적을 봇 수에 비례시켜 이웃 수를 20으로 묶어두는 스윕)용 축소판을 뽑기 위한 것이다. 내부 치수가 10의 배수가 아니면 거부한다.
+
+타일셋 블록은 `plaza.json`에서 **읽어서 그대로 복사**한다 — 리스킨으로 타일셋이 바뀌면 자동으로 따라가고, 이 스크립트에 타일셋을 하드코딩할 일이 없다.
+
+**디스크에 쓰기 전에 메모리에서 전부 검증하고, 하나라도 어긋나면 아무것도 쓰지 않고 exit 1 한다**(`import-ninja-assets.mjs`와 같은 순서, 사유는 `docs/decisions.md` 2026-08-26): 통행 가능 칸 수, `collision` 레이어의 `gid ≠ 0` 칸과 `collides: true` 칸의 일치, spawn 중심의 통행 가능 여부, spawn에서의 4방향 flood fill 도달 수(= 고립 영역 0), 경계 밴드 내 통행 가능 칸 0개.
 
 ## tilesets/plaza-tiles.png
 
