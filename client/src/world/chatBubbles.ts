@@ -1,8 +1,8 @@
 import Phaser from "phaser";
 
 const BUBBLE_LIFETIME_MS = 4000;
-/** Clears the avatar's head: the sprite is 26px tall above its origin at the feet. */
-const BUBBLE_OFFSET_Y = 30;
+/** Clears the avatar's head: the sprite is 32px tall above its origin at the feet. */
+const BUBBLE_OFFSET_Y = 36;
 /** Above every avatar, whose depth is its y pixel (max 480 on the plaza map). */
 const BUBBLE_DEPTH = 10_000;
 const MAX_BUBBLE_CHARS = 80;
@@ -30,7 +30,7 @@ export class ChatBubbles {
       backgroundColor: "#fdf7ea",
       padding: { x: 5, y: 3 },
       align: "center",
-      wordWrap: { width: 150 },
+      wordWrap: { width: 150, useAdvancedWrap: true },
     });
     label.setOrigin(0.5, 1);
     label.setDepth(BUBBLE_DEPTH);

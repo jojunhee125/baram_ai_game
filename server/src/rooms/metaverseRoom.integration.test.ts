@@ -290,7 +290,10 @@ describe("MetaverseRoom — interest management (StateView filtering)", () => {
   it("survives repeated view exit/entry without leaking a stale entry", async () => {
     const room = await createPlaza();
     const alice = await join(room, "alice", 1);
-    const bob = await join(room, "bob", 5);
+    // Highest valid skin: non-default (0) and != alice's, so a stale/reset entry is visible.
+    // Derived from the constant so shrinking AVATAR_SKIN_COUNT cannot silently clamp it to 0.
+    const bobSkin = AVATAR_SKIN_COUNT - 1;
+    const bob = await join(room, "bob", bobSkin);
     await walkX(room, alice, CORRIDOR_MIN_X);
 
     const insideX = CORRIDOR_MIN_X + VIEW_RADIUS_TILES;
@@ -309,7 +312,7 @@ describe("MetaverseRoom — interest management (StateView filtering)", () => {
       const bobSeen = seen(alice, bob.sessionId);
       assert.ok(bobSeen);
       assert.equal(bobSeen.nickname, "bob", `round ${round}: nickname survived re-entry`);
-      assert.equal(bobSeen.avatarSkin, 5, `round ${round}: avatarSkin survived re-entry`);
+      assert.equal(bobSeen.avatarSkin, bobSkin, `round ${round}: avatarSkin survived re-entry`);
       assert.equal(bobSeen.tileX, insideX, `round ${round}: position survived re-entry`);
       assert.equal(
         seenIds(alice).length,

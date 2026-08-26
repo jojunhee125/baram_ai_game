@@ -22,5 +22,10 @@ export const MAX_NICKNAME_LENGTH = 16;
 export const MAX_MOVES_PER_SECOND = 20;
 export const MAX_CHATS_PER_SECOND = 2;
 
-/** Number of selectable avatar color variants. */
-export const AVATAR_SKIN_COUNT = 8;
+/**
+ * Number of selectable avatar variants. Must equal the skin block count baked into
+ * `assets/sprites/avatar.png` — the sheet is `row = skin * 4 + direction`, so its height
+ * is `AVATAR_SKIN_COUNT * 4 * TILE_SIZE_PX`. Raising this without regenerating the sheet
+ * makes the server hand out skins whose rows do not exist and Phaser renders blank frames.
+ */
+export const AVATAR_SKIN_COUNT = 4;
