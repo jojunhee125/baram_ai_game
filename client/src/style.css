@@ -67,16 +67,18 @@ body {
 }
 
 /*
- * 20x15 tiles = 4:3. min() keeps the stage inside both axes without breaking the ratio: the
- * height term subtracts .app's padding on both edges, and is what bounds the stage on any
- * landscape window. No pixel cap on top of that — a cap sized to whole-number pixel scaling
- * (1280px = 2x the 640px canvas) left most of a desktop window empty, and Scale.FIT handles
- * the fractional scale that filling the window implies.
+ * 32x18 tiles = 16:9, matching VIEWPORT_*_TILES in shared/src/camera.ts (canvas 1024x576).
+ * min() keeps the stage inside both axes without breaking the ratio: the height term subtracts
+ * .app's padding on both edges, and is what bounds the stage on any landscape window — the
+ * ratio is wider than a 16:9 window's content box once the padding is taken out, so the stage
+ * stays height-bound and never overflows. No pixel cap on top of that — a cap sized to
+ * whole-number pixel scaling left most of a desktop window empty, and Scale.FIT handles the
+ * fractional scale that filling the window implies.
  */
 .stage {
   position: relative;
-  width: min(100%, calc((100dvh - var(--space-8)) * 4 / 3));
-  aspect-ratio: 4 / 3;
+  width: min(100%, calc((100dvh - var(--space-8)) * 16 / 9));
+  aspect-ratio: 16 / 9;
   overflow: hidden;
   background: var(--surface-raised);
   border: 1px solid var(--border-subtle);

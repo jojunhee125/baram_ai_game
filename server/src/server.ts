@@ -14,11 +14,18 @@ import { PORTAL_DEFINITIONS } from "./rooms/portalDefinitions";
 export const DEFAULT_PORT = 2567;
 
 export function createGameServer(): Server {
-  // Has to be set explicitly: the 8 KB default is nowhere near one patch of a 500-view room,
-  // which PoC #2 load testing measured at ~6.5 MB under clustered load. The encoder grows its
-  // buffer one BUFFER_SIZE step at a time and re-encodes the whole patch — plus logs a warning —
-  // on every step, which at the default is hundreds of re-encodes per patch. `ensureCapacity`
-  // rounds up to a multiple of this, so 1 MB buys the headroom without doubling a large patch.
+  // Has to be set explicitly: the 8 KB default is nowhere near one patch of a 500-view room.
+  // Every client's view is appended to one shared buffer, so a patch needs the sum of all 500
+  // views at once — PoC #2 measured ~6.5 MB, and the 2026-08-27 viewport widening
+  // (VIEW_RADIUS_TILES 13 -> 19) took that peak to ~10.9 MB.
+  //
+  // Still 1 MB, because this is the growth step and not a target. The encoder warns and
+  // re-encodes only when one view's chunk overruns the free space, and a chunk is ~20 KB
+  // (10.9 MB spread over 500 views): `tools/loadtest-poc2.mjs` counts 380-500 warnings per
+  // 25 patches at the 8 KB default and 0 at 1 MB, in every scenario it runs. Raising it only
+  // buys memory — `ensureCapacity` rounds up to a multiple of this, so the 10.9 MB peak settles
+  // at 12 MB here and at 24 MB with an 8 MB step, and every room allocates two of these buffers
+  // (the encoder's and the serializer's full-state one) before its first client arrives.
   Encoder.BUFFER_SIZE = 1024 * 1024;
 
   // One HTTP server carries the client bundle, the matchmaking API and the websocket

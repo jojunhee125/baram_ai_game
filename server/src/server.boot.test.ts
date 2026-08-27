@@ -29,13 +29,13 @@ function restoreTable(): void {
   table.push(...REAL_ROWS);
 }
 
-/** Walkable in plaza.json / grand-plaza.json; row 14 of plaza is its south wall. */
-const PLAZA_WALKABLE = { tileX: 15, tileY: 11 };
-const PLAZA_BLOCKED = { tileX: 19, tileY: 14 };
-const GRAND_WALKABLE = { tileX: 18, tileY: 8 };
+/** Walkable in plaza.json / grand-plaza.json; (30,15) is the plaza fountain's top-left tile. */
+const PLAZA_WALKABLE = { tileX: 20, tileY: 13 };
+const PLAZA_BLOCKED = { tileX: 30, tileY: 15 };
+const GRAND_WALKABLE = { tileX: 24, tileY: 9 };
 const VALID_TARGET = {
   room: "grand-plaza",
-  arrival: { tileX: 80, tileY: 72, spreadRadiusInTiles: 0 },
+  arrival: { tileX: 86, tileY: 73, spreadRadiusInTiles: 0 },
 };
 
 /** One row per reject case of the design's §3.6 list, appended to the real table at once. */
@@ -59,18 +59,18 @@ const BAD_ROWS: readonly PortalDefinition[] = [
   {
     id: "bad-spread",
     from: { room: "plaza", tiles: [PLAZA_WALKABLE] },
-    to: { room: "grand-plaza", arrival: { tileX: 80, tileY: 72, spreadRadiusInTiles: -1 } },
+    to: { room: "grand-plaza", arrival: { tileX: 86, tileY: 73, spreadRadiusInTiles: -1 } },
   },
 ];
 
 /**
- * Only issue is a sticky arrival: `plaza-south-door` already triggers at (15,13), so landing a
+ * Only issue is a sticky arrival: `plaza-south-door` already triggers at (31,25), so landing a
  * client there is the authoring smell §3.6 warns about without refusing boot.
  */
 const STICKY_ROW: PortalDefinition = {
   id: "sticky-arrival-door",
   from: { room: "grand-plaza", tiles: [GRAND_WALKABLE] },
-  to: { room: "plaza", arrival: { tileX: 15, tileY: 13, spreadRadiusInTiles: 0 } },
+  to: { room: "plaza", arrival: { tileX: 31, tileY: 25, spreadRadiusInTiles: 0 } },
 };
 
 async function isPortFree(port: number): Promise<boolean> {
@@ -120,8 +120,8 @@ describe("boot-time portal validation is wired into listen()", () => {
       /"bad-doorless" has no trigger tiles/,
       /"bad-from-room" leaves from "nowhere", which is not a registered room/,
       /"bad-to-room" points at "elsewhere", which is not a registered room/,
-      /"bad-trigger" triggers at \(19,14\), which is not a walkable tile of room "plaza"/,
-      /"bad-arrival" arrives at \(19,14\), which is not a walkable tile of room "plaza"/,
+      /"bad-trigger" triggers at \(30,15\), which is not a walkable tile of room "plaza"/,
+      /"bad-arrival" arrives at \(30,15\), which is not a walkable tile of room "plaza"/,
       /"bad-spread" has a negative arrival spreadRadiusInTiles \(-1\)/,
     ]) {
       assert.match(message, expected);
@@ -176,7 +176,7 @@ describe("boot-time portal validation is wired into listen()", () => {
     );
     assert.match(
       warnings.join("\n"),
-      /"sticky-arrival-door" arrives at \(15,13\), which is itself a portal trigger tile in room "plaza"/,
+      /"sticky-arrival-door" arrives at \(31,25\), which is itself a portal trigger tile in room "plaza"/,
     );
   });
 });

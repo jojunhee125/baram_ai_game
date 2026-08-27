@@ -3,7 +3,7 @@ import Phaser from "phaser";
 const BUBBLE_LIFETIME_MS = 4000;
 /** Clears the avatar's head and the persistent name tag drawn just above it. */
 const BUBBLE_OFFSET_Y = 50;
-/** Above every avatar, whose depth is its y pixel (max 480 on the plaza map). */
+/** Above every avatar, whose depth is its y pixel (max 4,704 on grand-plaza). */
 const BUBBLE_DEPTH = 10_000;
 const MAX_BUBBLE_CHARS = 80;
 
@@ -25,7 +25,8 @@ export class ChatBubbles {
     const body = text.length > MAX_BUBBLE_CHARS ? `${text.slice(0, MAX_BUBBLE_CHARS)}…` : text;
     const label = this.scene.add.text(sprite.x, sprite.y - BUBBLE_OFFSET_Y, body, {
       fontFamily: '"Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif',
-      fontSize: "11px",
+      // Matches the name tag: see nameTags.ts for why 12px and not 13px.
+      fontSize: "12px",
       color: "#23212a",
       backgroundColor: "#fdf7ea",
       padding: { x: 5, y: 3 },

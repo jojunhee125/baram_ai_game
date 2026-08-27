@@ -11,7 +11,7 @@ import type { PortalDefinition } from "./contracts";
  * the tile the map art draws a door on — that stays an eyeball check.
  *
  * Trigger tiles deliberately avoid plaza's spawn row: `metaverseRoom.integration.test.ts`
- * walks the whole of row 11 between x=1 and x=18, and a door on that row would fire mid-test.
+ * walks the whole of row 20 between x=16 and x=47, and a door on that row would fire mid-test.
  */
 export const PORTAL_DEFINITIONS: readonly PortalDefinition[] = [
   {
@@ -19,21 +19,21 @@ export const PORTAL_DEFINITIONS: readonly PortalDefinition[] = [
     from: {
       room: "plaza",
       tiles: [
-        { tileX: 15, tileY: 13 },
-        { tileX: 16, tileY: 13 },
+        { tileX: 31, tileY: 25 },
+        { tileX: 32, tileY: 25 },
       ],
     },
-    to: { room: "grand-plaza", arrival: { tileX: 16, tileY: 8, spreadRadiusInTiles: 0 } },
+    to: { room: "grand-plaza", arrival: { tileX: 22, tileY: 9, spreadRadiusInTiles: 0 } },
   },
   {
     id: "grand-plaza-north-door",
     from: {
       room: "grand-plaza",
       tiles: [
-        { tileX: 16, tileY: 7 },
-        { tileX: 17, tileY: 7 },
+        { tileX: 22, tileY: 8 },
+        { tileX: 23, tileY: 8 },
       ],
     },
-    to: { room: "plaza", arrival: { tileX: 15, tileY: 12, spreadRadiusInTiles: 0 } },
+    to: { room: "plaza", arrival: { tileX: 31, tileY: 24, spreadRadiusInTiles: 0 } },
   },
 ];

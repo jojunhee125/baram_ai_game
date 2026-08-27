@@ -1,6 +1,6 @@
 // Builds the Go/No-go PoC #2 load-test map (docs/poc2-design.md §1) into assets/maps/.
 //
-//   node tools/generate-load-map.mjs [--width 160] [--height 145] [--out assets/maps/grand-plaza.json]
+//   node tools/generate-load-map.mjs [--width 172] [--height 147] [--out assets/maps/grand-plaza.json]
 //                                                                                    (cwd = code/)
 //
 // Every cell is a pure function of its coordinates - no randomness - so the same arguments
@@ -13,21 +13,35 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { VIEWPORT_HEIGHT_TILES, VIEWPORT_WIDTH_TILES, cameraBorderTiles } from "../shared/src/camera.ts";
+
 const CODE_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const TEMPLATE_MAP = "assets/maps/plaza.json";
-
-const DEFAULT_WIDTH = 160;
-const DEFAULT_HEIGHT = 145;
-const DEFAULT_OUT = "assets/maps/grand-plaza.json";
 
 /**
  * Non-walkable margin, in tiles, that keeps the Phaser camera off its own `setBounds` clamp:
  * while no walkable tile lies inside it the local player stays exactly screen-centred, which is
- * what pins the visible Chebyshev distance at 10 and lets VIEW_RADIUS_TILES be 13 (design §1.3a).
- * `bottom` is one row thicker than `top` because the avatar origin is (0.5, 1) - the tile's
- * bottom edge - so the sprite sits a full tile lower than its tile index suggests.
+ * what pins the visible Chebyshev distance at `maxVisibleTileDistance` and lets VIEW_RADIUS_TILES
+ * be a true upper bound (design §1.3a). Derived, never restated: shared/src/camera.ts is the one
+ * place that knows the viewport size and the avatar-origin asymmetry that makes `bottom` one row
+ * thicker than `top`. At the current 32x18 viewport this is { 16, 16, 8, 9 }.
  */
-const BORDER = { left: 10, right: 10, top: 7, bottom: 8 };
+const BORDER = cameraBorderTiles(VIEWPORT_WIDTH_TILES, VIEWPORT_HEIGHT_TILES);
+
+/**
+ * The map is sized from the interior out, not the other way round: the PoC #2 numbers on record
+ * were measured on a 140x130 interior (14800 walkable cells), so holding it fixed is what keeps a
+ * re-measurement comparable - otherwise density and view radius would both have moved and no
+ * single-variable comparison is possible (docs/poc2-design.md §6.3). Widening the viewport
+ * therefore grows the outer map (160x145 -> 172x147) and shifts every tile coordinate by the
+ * border delta, while leaving the walkable layout byte-identical in shape.
+ */
+const INTERIOR_WIDTH = 140;
+const INTERIOR_HEIGHT = 130;
+
+const DEFAULT_WIDTH = INTERIOR_WIDTH + BORDER.left + BORDER.right;
+const DEFAULT_HEIGHT = INTERIOR_HEIGHT + BORDER.top + BORDER.bottom;
+const DEFAULT_OUT = "assets/maps/grand-plaza.json";
 
 const SUPER_TILE = 10;
 /** Leaves a 5-wide vertical and 6-tall horizontal corridor per super-tile, so buildings never touch. */

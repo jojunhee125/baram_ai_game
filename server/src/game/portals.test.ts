@@ -307,23 +307,23 @@ describe("PORTAL_DEFINITIONS", () => {
 
   it("keeps plaza's triggers clear of the tiles the integration suite walks", () => {
     // metaverseRoom.integration.test.ts asserts relative movement from plaza's spawn tile and
-    // walks the whole of row 11 plus the column at x=1; a door on those tiles would fire
+    // walks the whole of row 20 plus the column at x=16; a door on those tiles would fire
     // mid-test and rewrite an unrelated failure into a confusing one.
     const walked = new Set<string>();
-    for (let tileX = 1; tileX <= 18; tileX++) {
-      walked.add(`${tileX},11`);
+    for (let tileX = 16; tileX <= 47; tileX++) {
+      walked.add(`${tileX},20`);
     }
-    for (let tileY = 1; tileY <= 12; tileY++) {
-      walked.add(`1,${tileY}`);
+    // Up to y=8 for the diagonal-visibility route, down to y=21 for the border refusal.
+    for (let tileY = 8; tileY <= 21; tileY++) {
+      walked.add(`16,${tileY}`);
     }
     for (const tile of [
-      { tileX: 9, tileY: 8 },
-      { tileX: 9, tileY: 9 },
-      { tileX: 9, tileY: 10 },
-      { tileX: 14, tileY: 8 },
-      { tileX: 14, tileY: 9 },
-      { tileX: 14, tileY: 10 },
-      { tileX: 15, tileY: 8 },
+      // The fountain approach, one step up from the spawn tile.
+      { tileX: 31, tileY: 19 },
+      // The second walker's leg of the diagonal-visibility route.
+      { tileX: 35, tileY: 19 },
+      { tileX: 35, tileY: 18 },
+      { tileX: 36, tileY: 18 },
     ]) {
       walked.add(`${tile.tileX},${tile.tileY}`);
     }

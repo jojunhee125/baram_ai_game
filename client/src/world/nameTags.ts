@@ -21,7 +21,10 @@ export class NameTags {
 
     const label = this.scene.add.text(sprite.x, sprite.y - NAME_TAG_OFFSET_Y, nickname, {
       fontFamily: '"Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif',
-      fontSize: "11px",
+      // Sized against the 32x18 canvas: 11px shrank to ~17px on screen once the viewport
+      // widened, below what the old 20x15 layout rendered at. Kept at 12px rather than 13px so
+      // a tag stays inside its own tile column next to an adjacent avatar.
+      fontSize: "12px",
       color: "#ffffff",
       stroke: "#23212a",
       strokeThickness: 3,

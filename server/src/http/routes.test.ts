@@ -530,8 +530,17 @@ describe("static serving falls through instead of swallowing later routes", () =
   });
 
   it("registers no catch-all: an unknown path 404s rather than being answered", async () => {
-    // An SPA fallback here would answer `/matchmake/*` before Colyseus ever saw it.
-    for (const path of ["/", "/index.html", "/anything", "/api/unknown", "/deep/nested/path"]) {
+    // An SPA fallback here would answer `/matchmake/*` before Colyseus ever saw it, and it
+    // would answer every path below — none of which a `client/dist` build ever contains, so
+    // the verdict does not depend on whether `npm run build` has run in this checkout.
+    // `/` and `/index.html` are deliberately absent: `express.static` serves those with 200
+    // from a built bundle, which is static serving working, not a catch-all.
+    for (const path of [
+      "/anything",
+      "/api/unknown",
+      "/deep/nested/path",
+      "/definitely-not-a-bundled-asset.js",
+    ]) {
       const response = await send({ path });
       assert.equal(response.status, 404, `${path} must not be answered by a catch-all`);
     }

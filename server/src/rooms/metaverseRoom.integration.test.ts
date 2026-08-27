@@ -64,12 +64,19 @@ const SETTLE_MS = PATCH_RATE_MS * 4;
  */
 const CLIENT_STEP_INTERVAL_MS = PATCH_RATE_MS + 20;
 
-/** Row 11 of plaza.json is open from x=1 to x=18, so all distance work happens along it. */
-const CORRIDOR_ROW = 11;
-const CORRIDOR_MIN_X = 1;
-const CORRIDOR_MAX_X = 18;
-/** Fountain block in plaza.json: tiles (9,6) (10,6) (9,7) (10,7). */
-const FOUNTAIN_TOP_LEFT = { tileX: 9, tileY: 7 };
+/**
+ * Row 20 of plaza.json is open across the whole interior, so all distance work happens along
+ * it. It is also the spawn row, which is what lets `walkX` start from the spawn tile.
+ */
+const CORRIDOR_ROW = 20;
+const CORRIDOR_MIN_X = 16;
+const CORRIDOR_MAX_X = 47;
+/**
+ * The 4x4 fountain block in plaza.json spans x=30..33, y=15..18. This is its *bottom* left
+ * tile — the edge a player walking up from the spawn row runs into — so `tileY + 1` is the
+ * last walkable tile of that approach.
+ */
+const FOUNTAIN_BOTTOM_LEFT = { tileX: 30, tileY: 18 };
 
 /**
  * 17 UTF-16 code units, so truncating at MAX_NICKNAME_LENGTH (16) cuts the last emoji in
@@ -355,15 +362,15 @@ describe("MetaverseRoom — interest management (StateView filtering)", () => {
     const alice = await join(room, "alice");
     const bob = await join(room, "bob");
 
-    // Routes are BFS paths across plaza.json; expectServerAt fails loudly if the map changes.
-    // The step counts have to land the pair exactly VIEW_RADIUS_TILES apart, so they follow
-    // the radius constant and are re-derived whenever it changes.
-    await stepMany(alice, Direction.Left, 8);
-    await stepMany(alice, Direction.Up, 10);
-    await expectServerAt(room, alice, 1, 1, "alice walks to the north-west corner");
-    await stepMany(bob, Direction.Right, 5);
-    await stepMany(bob, Direction.Up, 2);
-    await expectServerAt(room, bob, 14, 9, "bob walks south-east of alice");
+    // Routes are straight runs along open rows and columns of plaza.json; expectServerAt fails
+    // loudly if the map changes. The step counts have to land the pair exactly VIEW_RADIUS_TILES
+    // apart, so they follow the radius constant and are re-derived whenever it changes.
+    await stepMany(alice, Direction.Left, 15);
+    await stepMany(alice, Direction.Up, 12);
+    await expectServerAt(room, alice, 16, 8, "alice walks to the north-west corner");
+    await stepMany(bob, Direction.Right, 4);
+    await stepMany(bob, Direction.Up, 1);
+    await expectServerAt(room, bob, 35, 19, "bob walks south-east of alice");
 
     const apart = chebyshev(
       serverPlayer(room, alice.sessionId),
@@ -378,7 +385,7 @@ describe("MetaverseRoom — interest management (StateView filtering)", () => {
     // One more tile of horizontal separation crosses the radius even though dy shrinks.
     await stepMany(bob, Direction.Up, 1);
     await stepMany(bob, Direction.Right, 1);
-    await expectServerAt(room, bob, 15, 8, "bob steps past the diagonal boundary");
+    await expectServerAt(room, bob, 36, 18, "bob steps past the diagonal boundary");
     assert.equal(
       chebyshev(serverPlayer(room, alice.sessionId), serverPlayer(room, bob.sessionId)),
       VIEW_RADIUS_TILES + 1,
@@ -397,7 +404,8 @@ describe("MetaverseRoom — interest management (StateView filtering)", () => {
 
     await walkX(room, alice, CORRIDOR_MIN_X);
     await walkX(room, carol, CORRIDOR_MIN_X + VIEW_RADIUS_TILES + 1);
-    // bob stays on the spawn tile, 8 tiles from each end.
+    // bob stays on the spawn tile: 15 tiles from alice and 5 from carol, so inside both radii
+    // while the two ends are VIEW_RADIUS_TILES + 1 apart.
 
     await waitUntil(
       () =>
@@ -714,13 +722,13 @@ describe("MetaverseRoom — movement authority", () => {
     const alice = await join(room, "alice");
     const inbox = collect(alice);
 
-    const stepsToFountain = plaza.spawn.tileY - FOUNTAIN_TOP_LEFT.tileY - 1;
+    const stepsToFountain = plaza.spawn.tileY - FOUNTAIN_BOTTOM_LEFT.tileY - 1;
     await stepMany(alice, Direction.Up, stepsToFountain);
     await expectServerAt(
       room,
       alice,
       plaza.spawn.tileX,
-      FOUNTAIN_TOP_LEFT.tileY + 1,
+      FOUNTAIN_BOTTOM_LEFT.tileY + 1,
       "alice walks up to the fountain edge",
     );
 
@@ -728,10 +736,10 @@ describe("MetaverseRoom — movement authority", () => {
     await waitUntil(() => inbox.rejects.length === 1, "the fountain refusal");
     assert.deepEqual(inbox.rejects[0], {
       tileX: plaza.spawn.tileX,
-      tileY: FOUNTAIN_TOP_LEFT.tileY + 1,
+      tileY: FOUNTAIN_BOTTOM_LEFT.tileY + 1,
       facing: Direction.Up,
     });
-    assert.equal(serverPlayer(room, alice.sessionId).tileY, FOUNTAIN_TOP_LEFT.tileY + 1);
+    assert.equal(serverPlayer(room, alice.sessionId).tileY, FOUNTAIN_BOTTOM_LEFT.tileY + 1);
   });
 
   it("ignores malformed move payloads without moving, turning or answering", async () => {
@@ -883,7 +891,7 @@ describe("MetaverseRoom — portals", () => {
     await walkToDoor(room, walker);
     await waitUntil(() => inbox.portals.length === 1, "the first PortalEntered");
 
-    // Row 14 of plaza.json is the south wall. A refused step enters no tile, so it must not
+    // Row 26 of plaza.json is the south wall. A refused step enters no tile, so it must not
     // re-fire the door the player is already standing on.
     walker.send(ClientMessage.Move, { dir: Direction.Down });
     await waitUntil(() => inbox.rejects.length === 1, "the wall refusal");

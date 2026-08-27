@@ -143,14 +143,17 @@ describe("MetaverseRoom — smoke test", () => {
       rejections.push(payload);
     });
 
-    client.send(ClientMessage.Move, { dir: Direction.Up });
-    client.send(ClientMessage.Move, { dir: Direction.Up });
+    // Rightwards along the spawn row, which is open the whole width of the interior: this test
+    // needs *two* accepted moves, and a step refused on its merits would emit a rejection of its
+    // own — indistinguishable here from the throttle notice the test is counting.
+    client.send(ClientMessage.Move, { dir: Direction.Right });
+    client.send(ClientMessage.Move, { dir: Direction.Right });
     await waitFor(() => (rejections.length === 1 ? true : undefined), "the first throttle notice");
 
     // Past the throttle window: the next move is accepted, which re-arms the notice.
     await new Promise((resolve) => setTimeout(resolve, 1000 / MAX_MOVES_PER_SECOND + 40));
-    client.send(ClientMessage.Move, { dir: Direction.Up });
-    client.send(ClientMessage.Move, { dir: Direction.Up });
+    client.send(ClientMessage.Move, { dir: Direction.Right });
+    client.send(ClientMessage.Move, { dir: Direction.Right });
     await waitFor(() => (rejections.length === 2 ? true : undefined), "the second throttle notice");
 
     await testServer.cleanup();

@@ -1,294 +1,33 @@
-// Rebuilds the tileset and avatar sheet under code/assets from a local checkout of the
-// Ninja Adventure Pack (github.com/pixel-boy/NinjaAdventure, CC0). See code/assets/README.md.
+// Rebuilds the tileset under code/assets from a local checkout of the Ninja Adventure Pack
+// (github.com/pixel-boy/NinjaAdventure, CC0). See code/assets/README.md.
 //
 //   node tools/import-ninja-assets.mjs <ninja-adventure-repo-root>     (cwd = code/)
 //   NINJA_ASSET_ROOT=<...> node tools/import-ninja-assets.mjs
 //
 // Sources are 16px native art; every frame is cropped on the 16px grid and scaled 2x with
 // nearest-neighbour so the pixel edges stay hard at our 32px tile size.
-import { deflateSync, inflateSync } from "node:zlib";
+//
+// The character sheet does NOT come from this pack: assets/sprites/avatar.png is built by
+// tools/import-avatar.mjs from the Tiny Characters Set. This script never touches it.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  Canvas,
+  SCALE,
+  SRC_TILE,
+  TILE,
+  cell,
+  composite,
+  decodePng,
+  encodePng,
+  pad,
+  tileRows,
+  upscale,
+} from "./lib/png.mjs";
+
 const ASSETS_DIR = resolve(fileURLToPath(new URL("../assets", import.meta.url)));
-const SRC_TILE = 16;
-const TILE = 32;
-const SCALE = TILE / SRC_TILE;
-
-/* ---------------------------------------------------------------- png ---- */
-
-const CRC_TABLE = (() => {
-  const table = new Int32Array(256);
-  for (let n = 0; n < 256; n += 1) {
-    let c = n;
-    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    table[n] = c;
-  }
-  return table;
-})();
-
-function crc32(buf) {
-  let c = -1;
-  for (let i = 0; i < buf.length; i += 1) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
-  return (c ^ -1) >>> 0;
-}
-
-function chunk(type, data) {
-  const length = Buffer.alloc(4);
-  length.writeUInt32BE(data.length);
-  const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(body));
-  return Buffer.concat([length, body, crc]);
-}
-
-function encodePng(canvas) {
-  const stride = canvas.width * 4;
-  const raw = Buffer.alloc((stride + 1) * canvas.height);
-  for (let y = 0; y < canvas.height; y += 1) {
-    const at = y * (stride + 1);
-    raw[at] = 0;
-    canvas.data.copy(raw, at + 1, y * stride, (y + 1) * stride);
-  }
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(canvas.width, 0);
-  ihdr.writeUInt32BE(canvas.height, 4);
-  ihdr[8] = 8;
-  ihdr[9] = 6;
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk("IHDR", ihdr),
-    chunk("IDAT", deflateSync(raw, { level: 9 })),
-    chunk("IEND", Buffer.alloc(0)),
-  ]);
-}
-
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-
-function paeth(a, b, c) {
-  const p = a + b - c;
-  const pa = Math.abs(p - a);
-  const pb = Math.abs(p - b);
-  const pc = Math.abs(p - c);
-  if (pa <= pb && pa <= pc) return a;
-  return pb <= pc ? b : c;
-}
-
-/** Reverses the per-scanline PNG filters (spec 9.2) for 8-bit RGBA, i.e. 4 bytes per pixel. */
-function unfilter(raw, width, height, label) {
-  const bpp = 4;
-  const stride = width * bpp;
-  if (raw.length < (stride + 1) * height) {
-    throw new Error(`${label}: inflated to ${raw.length} bytes, expected ${(stride + 1) * height}`);
-  }
-  const out = Buffer.alloc(stride * height);
-  for (let y = 0; y < height; y += 1) {
-    const from = y * (stride + 1);
-    const filter = raw[from];
-    const row = y * stride;
-    const prior = row - stride;
-    for (let x = 0; x < stride; x += 1) {
-      const left = x >= bpp ? out[row + x - bpp] : 0;
-      const up = y > 0 ? out[prior + x] : 0;
-      const upLeft = x >= bpp && y > 0 ? out[prior + x - bpp] : 0;
-      const value = raw[from + 1 + x];
-      let restored;
-      switch (filter) {
-        case 0:
-          restored = value;
-          break;
-        case 1:
-          restored = value + left;
-          break;
-        case 2:
-          restored = value + up;
-          break;
-        case 3:
-          restored = value + ((left + up) >> 1);
-          break;
-        case 4:
-          restored = value + paeth(left, up, upLeft);
-          break;
-        default:
-          throw new Error(`${label}: unsupported filter type ${filter} on row ${y}`);
-      }
-      out[row + x] = restored & 0xff;
-    }
-  }
-  return out;
-}
-
-function decodePng(buffer, label) {
-  if (buffer.length < 8 || !buffer.subarray(0, 8).equals(PNG_SIGNATURE)) {
-    throw new Error(`${label}: not a PNG file`);
-  }
-  let header = null;
-  const idat = [];
-  let offset = 8;
-  while (offset + 12 <= buffer.length) {
-    const length = buffer.readUInt32BE(offset);
-    const type = buffer.toString("latin1", offset + 4, offset + 8);
-    const body = buffer.subarray(offset + 8, offset + 8 + length);
-    if (type === "IHDR") {
-      header = {
-        width: body.readUInt32BE(0),
-        height: body.readUInt32BE(4),
-        bitDepth: body[8],
-        colorType: body[9],
-        compression: body[10],
-        filter: body[11],
-        interlace: body[12],
-      };
-    } else if (type === "IDAT") {
-      // Encoders split the pixel stream across several IDATs; only their concatenation inflates.
-      idat.push(Buffer.from(body));
-    } else if (type === "IEND") {
-      break;
-    }
-    offset += 12 + length;
-  }
-  if (!header) throw new Error(`${label}: no IHDR chunk`);
-  if (idat.length === 0) throw new Error(`${label}: no IDAT chunk`);
-  if (header.bitDepth !== 8 || header.colorType !== 6) {
-    throw new Error(
-      `${label}: expected bitdepth 8 / colortype 6 (RGBA), got ${header.bitDepth}/${header.colorType}`,
-    );
-  }
-  if (header.interlace !== 0) throw new Error(`${label}: interlaced PNGs are not supported`);
-  if (header.compression !== 0 || header.filter !== 0) {
-    throw new Error(`${label}: unsupported compression/filter method`);
-  }
-  const raw = inflateSync(Buffer.concat(idat));
-  return new Canvas(header.width, header.height, unfilter(raw, header.width, header.height, label));
-}
-
-/* ------------------------------------------------------------- canvas ---- */
-
-class Canvas {
-  constructor(width, height, data) {
-    this.width = width;
-    this.height = height;
-    this.data = data ?? Buffer.alloc(width * height * 4);
-  }
-
-  at(x, y) {
-    return (y * this.width + x) * 4;
-  }
-
-  /** Copies every channel, alpha included, so transparent padding stays transparent. */
-  blit(source, x, y) {
-    for (let dy = 0; dy < source.height; dy += 1) {
-      source.data.copy(
-        this.data,
-        this.at(x, y + dy),
-        source.at(0, dy),
-        source.at(0, dy) + source.width * 4,
-      );
-    }
-  }
-}
-
-function crop(source, x, y, width, height, label) {
-  if (x < 0 || y < 0 || x + width > source.width || y + height > source.height) {
-    throw new Error(
-      `${label}: crop ${width}x${height} at (${x},${y}) is outside the ${source.width}x${source.height} source`,
-    );
-  }
-  const out = new Canvas(width, height);
-  for (let dy = 0; dy < height; dy += 1) {
-    source.data.copy(out.data, out.at(0, dy), source.at(x, y + dy), source.at(x + width, y + dy));
-  }
-  return out;
-}
-
-/** Crops one cell of the source's 16px grid; `col`/`row` are 0-indexed cell coordinates. */
-function cell(source, col, row) {
-  return crop(source, col * SRC_TILE, row * SRC_TILE, SRC_TILE, SRC_TILE, source.label ?? "source");
-}
-
-/** Places an undersized prop on a transparent 16x16 cell at the given offset. */
-function pad(source, offsetX, offsetY) {
-  if (source.width + offsetX > SRC_TILE || source.height + offsetY > SRC_TILE) {
-    throw new Error(
-      `${source.label ?? "source"}: ${source.width}x${source.height} at (${offsetX},${offsetY}) overflows a ${SRC_TILE}px cell`,
-    );
-  }
-  const out = new Canvas(SRC_TILE, SRC_TILE);
-  out.blit(source, offsetX, offsetY);
-  return out;
-}
-
-/**
- * Repeats a horizontal slice of `source` down a whole cell. `height` must divide SRC_TILE so
- * the tile edge lands on a repeat boundary; the seam is then an adjacency the art already
- * contains, which is what lets one tile run in any direction.
- */
-function tileRows(source, y, height) {
-  if (SRC_TILE % height !== 0) {
-    throw new Error(`tileRows: ${height} does not divide the ${SRC_TILE}px cell`);
-  }
-  const strip = crop(source, 0, y, SRC_TILE, height, source.label ?? "source");
-  const out = new Canvas(SRC_TILE, SRC_TILE);
-  for (let dy = 0; dy < SRC_TILE; dy += height) out.blit(strip, 0, dy);
-  return out;
-}
-
-/** Straight-alpha source-over: `over` is drawn on top of a copy of `base`. */
-function composite(base, over) {
-  if (base.width !== over.width || base.height !== over.height) {
-    throw new Error("composite: layers must have the same size");
-  }
-  const out = new Canvas(base.width, base.height, Buffer.from(base.data));
-  for (let i = 0; i < out.data.length; i += 4) {
-    const srcAlpha = over.data[i + 3];
-    if (srcAlpha === 0) continue;
-    if (srcAlpha === 255) {
-      over.data.copy(out.data, i, i, i + 4);
-      continue;
-    }
-    const src = srcAlpha / 255;
-    const dst = (out.data[i + 3] / 255) * (1 - src);
-    const alpha = src + dst;
-    for (let c = 0; c < 3; c += 1) {
-      out.data[i + c] = Math.round((over.data[i + c] * src + out.data[i + c] * dst) / alpha);
-    }
-    out.data[i + 3] = Math.round(alpha * 255);
-  }
-  return out;
-}
-
-/** Exact RGB substitution; alpha is never read or written, so anti-aliased edges survive. */
-function recolor(source, pairs) {
-  const out = new Canvas(source.width, source.height, Buffer.from(source.data));
-  let replaced = 0;
-  for (let i = 0; i < out.data.length; i += 4) {
-    for (const [from, to] of pairs) {
-      if (out.data[i] === from[0] && out.data[i + 1] === from[1] && out.data[i + 2] === from[2]) {
-        out.data[i] = to[0];
-        out.data[i + 1] = to[1];
-        out.data[i + 2] = to[2];
-        replaced += 1;
-        break;
-      }
-    }
-  }
-  if (replaced === 0) throw new Error("recolor: none of the source colours were found");
-  return out;
-}
-
-/** Nearest-neighbour only — any interpolation would blur the pixel art. */
-function upscale(source, factor) {
-  const out = new Canvas(source.width * factor, source.height * factor);
-  for (let y = 0; y < out.height; y += 1) {
-    const srcRow = Math.floor(y / factor);
-    for (let x = 0; x < out.width; x += 1) {
-      const from = source.at(Math.floor(x / factor), srcRow);
-      source.data.copy(out.data, out.at(x, y), from, from + 4);
-    }
-  }
-  return out;
-}
 
 /* -------------------------------------------------------------- input ---- */
 
@@ -301,9 +40,6 @@ const SOURCE_FILES = {
   grass: "content/destroyable/grass.png",
   crate: "content/destroyable/crate.png",
   pot: "content/destroyable/pot.png",
-  ninjaBlue: "content/character/ninja_blue/sprite.png",
-  samuraiBlue: "content/character/samurai_blue/sprite.png",
-  samuraiGreen: "content/character/samurai_green/samurai_green.png",
 };
 
 function resolveSourceRoot() {
@@ -397,66 +133,6 @@ function buildTileset(sources) {
   return sheet;
 }
 
-/* ------------------------------------------------------------- avatar ---- */
-
-/** ninja_blue's two cloth tones, restated in crimson for the fourth skin. */
-const CRIMSON_RECOLOR = [
-  [
-    [121, 184, 206],
-    [214, 116, 110],
-  ],
-  [
-    [95, 113, 96],
-    [120, 68, 72],
-  ],
-];
-
-/** Index is the skin id; must stay in sync with AVATAR_SKIN_COUNT in shared/src/constants.ts. */
-const SKINS = [
-  { label: "ninja_blue", source: "ninjaBlue", recolor: null },
-  { label: "samurai_blue", source: "samuraiBlue", recolor: null },
-  { label: "samurai_green", source: "samuraiGreen", recolor: null },
-  { label: "ninja_crimson", source: "ninjaBlue", recolor: CRIMSON_RECOLOR },
-];
-
-const SOURCE_HFRAMES = 4;
-const SOURCE_VFRAMES = 7;
-
-/** Our Direction enum (Down, Left, Right, Up) -> the source sheet's column. */
-const SRC_COL_FOR_DIR = [0, 2, 3, 1];
-/** Our frame columns (stepA, idle, stepB) -> the source sheet's animation row. */
-const SRC_ROW_FOR_FRAME = [1, 0, 3];
-
-function buildAvatarSheet(sources) {
-  const sheet = new Canvas(
-    SRC_ROW_FOR_FRAME.length * TILE,
-    SKINS.length * SRC_COL_FOR_DIR.length * TILE,
-  );
-  SKINS.forEach((skin, skinIndex) => {
-    const source = sources[skin.source];
-    if (
-      source.width !== SOURCE_HFRAMES * SRC_TILE ||
-      source.height !== SOURCE_VFRAMES * SRC_TILE
-    ) {
-      throw new Error(
-        `${skin.label}: expected a ${SOURCE_HFRAMES}x${SOURCE_VFRAMES} frame sheet, got ${source.width}x${source.height}`,
-      );
-    }
-    SRC_COL_FOR_DIR.forEach((sourceCol, direction) => {
-      SRC_ROW_FOR_FRAME.forEach((sourceRow, frameCol) => {
-        let frame = cell(source, sourceCol, sourceRow);
-        if (skin.recolor) frame = recolor(frame, skin.recolor);
-        sheet.blit(
-          upscale(frame, SCALE),
-          frameCol * TILE,
-          (skinIndex * SRC_COL_FOR_DIR.length + direction) * TILE,
-        );
-      });
-    });
-  });
-  return sheet;
-}
-
 /* ---------------------------------------------------------------- map ---- */
 
 /** Tiled's top 3 gid bits are flip/rotation flags; mirrors GID_TILE_MASK in server/src/game/tiledMap.ts. */
@@ -542,7 +218,6 @@ const sources = loadSources(root);
 // Build and verify everything in memory before the first byte lands: a failure here has to
 // leave assets/ exactly as it was, not half-reskinned.
 const tileset = buildTileset(sources);
-const avatar = buildAvatarSheet(sources);
 const maps = MAP_FILES.map((file) => ({ file, contents: verifyMapContract(tileset, file) }));
 for (const { file, contents } of maps) {
   console.log(`verified ${file} against the tileset (${contents.length} bytes, unchanged)`);
@@ -550,9 +225,6 @@ for (const { file, contents } of maps) {
 
 write("tilesets/plaza-tiles.png", encodePng(tileset));
 console.log(`  ${TILE_RECIPES.length} tiles, ${tileset.width}x${tileset.height}`);
-
-write("sprites/avatar.png", encodePng(avatar));
-console.log(`  ${SKINS.length} skins (${SKINS.map((s) => s.label).join(", ")}), ${avatar.width}x${avatar.height}`);
 
 // Re-emitted byte for byte from what was just verified - assets/README.md documents that this
 // pipeline never changes the maps.

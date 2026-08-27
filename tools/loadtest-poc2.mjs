@@ -2,6 +2,7 @@
 //
 //   npx tsx tools/loadtest-poc2.mjs                 # move cost + patch cost (deterministic)
 //   npx tsx tools/loadtest-poc2.mjs --socket        # also the websocket tier (real bots)
+//   npx tsx tools/loadtest-poc2.mjs --cluster-halves 6,8,10   # override the scenario B sweep
 //                                                     (cwd = code/)
 //
 // Deliberately not a *.test.ts: it takes minutes and its output is a measurement, not an
@@ -25,8 +26,17 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const CODE_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
-const { ClientMessage, Direction, PATCH_RATE_MS, ServerMessage, VIEW_RADIUS_TILES, MAX_MOVES_PER_SECOND } =
-  await import(pathToFileURL(join(CODE_DIR, "shared/src/index.ts")).href);
+const {
+  ClientMessage,
+  Direction,
+  PATCH_RATE_MS,
+  ServerMessage,
+  VIEW_RADIUS_TILES,
+  MAX_MOVES_PER_SECOND,
+  VIEWPORT_HEIGHT_TILES,
+  VIEWPORT_WIDTH_TILES,
+  cameraBorderTiles,
+} = await import(pathToFileURL(join(CODE_DIR, "shared/src/index.ts")).href);
 const { MetaverseRoom } = await import(
   pathToFileURL(join(CODE_DIR, "server/src/rooms/metaverseRoom.ts")).href
 );
@@ -93,17 +103,35 @@ const rssMb = () => (process.memoryUsage().rss / 1024 / 1024).toFixed(0);
  * the new design curve upward, so it cannot tell them apart. Map area has to scale with n so
  * that k stays put and only n varies. Sizes chosen so walkable area halves with n:
  * 80*ab+240 walkable cells for an interior of 10a x 10b super-tiles.
+ *
+ * Stated as *interior* size on purpose. The outer size the generator wants is the interior plus
+ * the camera border, and that border moves whenever the viewport does (2026-08-27: 20x15 -> 32x18
+ * grew it from {10,10,7,8} to {16,16,8,9}). Pinning the interior is what keeps every number this
+ * harness has already published comparable across that change - the walkable count, and therefore
+ * the density k each row was built to hold, is unchanged.
  */
 const SWEEP = [
-  { bots: 125, width: 130, height: 55 },
-  { bots: 250, width: 120, height: 105 },
-  { bots: 500, width: 160, height: 145 },
+  { bots: 125, interiorWidth: 110, interiorHeight: 40 },
+  { bots: 250, interiorWidth: 100, interiorHeight: 90 },
+  { bots: 500, interiorWidth: 140, interiorHeight: 130 },
 ];
+
+/** Same source the generator derives its border from; never restate the numbers here. */
+const BORDER = cameraBorderTiles(VIEWPORT_WIDTH_TILES, VIEWPORT_HEIGHT_TILES);
+
+function sweepMapSize({ interiorWidth, interiorHeight }) {
+  return {
+    width: interiorWidth + BORDER.left + BORDER.right,
+    height: interiorHeight + BORDER.top + BORDER.bottom,
+  };
+}
 
 function generateMaps() {
   const directory = mkdtempSync(join(tmpdir(), "poc2-maps-"));
   const maps = [];
-  for (const { bots, width, height } of SWEEP) {
+  for (const entry of SWEEP) {
+    const { bots } = entry;
+    const { width, height } = sweepMapSize(entry);
     const mapKey = `sweep-${bots}`;
     const stdout = execFileSync(
       process.execPath,
@@ -118,24 +146,28 @@ function generateMaps() {
 
 /** The generator's own geometry rules (tools/generate-load-map.mjs), needed to find the plaza. */
 function plazaRect(width, height) {
-  const superCountX = (width - 20) / 10;
-  const superCountY = (height - 15) / 10;
+  const superCountX = (width - BORDER.left - BORDER.right) / 10;
+  const superCountY = (height - BORDER.top - BORDER.bottom) / 10;
   const i0 = Math.floor((superCountX - 4) / 2);
   const j0 = Math.floor((superCountY - 3) / 2);
   return {
-    minX: 10 + i0 * 10,
-    maxX: 10 + (i0 + 4) * 10 - 1,
-    minY: 7 + j0 * 10,
-    maxY: 7 + (j0 + 3) * 10 - 1,
+    minX: BORDER.left + i0 * 10,
+    maxX: BORDER.left + (i0 + 4) * 10 - 1,
+    minY: BORDER.top + j0 * 10,
+    maxY: BORDER.top + (j0 + 3) * 10 - 1,
   };
 }
 
 /**
  * Where a scenario's bots are placed. `undefined` spreads them over the whole walkable map
  * (design §6.1); `"plaza"` confines them to the open central plaza; a number confines them to a
- * Chebyshev square of that half-extent at the plaza centre, which is how k is pushed to the
- * ~305 of design §6.2 — spreading over the whole 40x30 plaza only reaches ~195, because bots
- * near its edge have a view square that hangs off the crowd.
+ * Chebyshev square of that half-extent at the plaza centre, which is how k is pushed past what
+ * the plaza alone reaches — bots near the plaza edge have a view square that hangs off the crowd,
+ * so spreading over all of it leaves k well short of the crowd size.
+ *
+ * The square is clamped to the plaza, so a half-extent larger than the plaza allows silently
+ * degenerates into the `"plaza"` case. Callers that sweep half-extents must report that clamp
+ * (see `clusterPlan`) instead of presenting the result as a tighter cluster than it is.
  */
 function placementRect(map, cluster) {
   if (cluster === undefined) return undefined;
@@ -148,6 +180,53 @@ function placementRect(map, cluster) {
     maxX: Math.min(plaza.maxX, centreX + cluster),
     minY: Math.max(plaza.minY, centreY - cluster),
     maxY: Math.min(plaza.maxY, centreY + cluster),
+  };
+}
+
+function rectSpan(rect) {
+  if (rect === undefined) return null;
+  return { width: rect.maxX - rect.minX + 1, height: rect.maxY - rect.minY + 1 };
+}
+
+/** Table cell for a placement: its tile span, or `whole` for the unconfined map-wide case. */
+function rectLabel(rect) {
+  const span = rectSpan(rect);
+  return span === null ? "whole" : `${span.width}x${span.height}`;
+}
+
+/**
+ * Half-extents swept to find the clustered worst case, tightest first.
+ *
+ * Deliberately *not* derived from VIEW_RADIUS_TILES, which is what this list replaced
+ * (2026-08-27). Tying it to the camera radius meant the 13 -> 19 widening asked for a 39x39
+ * square, `placementRect` clamped that to the 40x30 plaza, and scenario B silently stopped being
+ * a cluster: it re-measured the whole plaza and published that easier number as the worst case.
+ *
+ * Swept rather than pinned to one corrected constant because the peak moves with the radius —
+ * it sat at 27x27 when the radius was 13 and at 21x21 once it became 19 — so any single pinned
+ * extent goes stale the next time the viewport moves, and finding the new one by hand is exactly
+ * the work this list exists to avoid. 13 stays in it so the 27x27 row already on record
+ * (docs/decisions.md 2026-08-26) remains a like-for-like comparison.
+ *
+ * Why a tighter square can be *cheaper* than a looser one, i.e. why there is a peak to find at
+ * all: once the crowd fits inside one view radius every bot already sees every other, so a step
+ * adds and removes nothing and only the mover's own view is rebuilt. The cost peaks just before
+ * that, where views are nearly full *and* still churn at the boundary on every step.
+ */
+const CLUSTER_HALF_EXTENTS = [6, 8, 10, 13, 16, 19];
+
+/** One sweep point, resolved against a map so the clamp is known before the run starts. */
+function clusterPlan(map, half) {
+  const rect = placementRect(map, half);
+  const span = rectSpan(rect);
+  const requested = half * 2 + 1;
+  return {
+    half,
+    rect,
+    span,
+    requested,
+    clamped: span.width < requested || span.height < requested,
+    key: `${rect.minX},${rect.minY},${rect.maxX},${rect.maxY}`,
   };
 }
 
@@ -250,6 +329,11 @@ function measureMoveCost(room, clients, random, { samples, warmup }) {
   const timings = [];
   let accepted = 0;
   let rejected = 0;
+  // Read *before* the loop, and reported alongside the after value rather than instead of it:
+  // the loop walks each bot ~50 random steps, which diffuses a cluster by ~7 tiles RMS, so a k
+  // read only at the end understates the density the scenario was built to hold (2026-08-27: the
+  // whole-plaza row placed at k=324 and was published as 294.5).
+  const meanViewSizePlaced = meanViewSize(room);
 
   for (let index = 0; index < samples + warmup; index++) {
     const client = clients[Math.floor(random() * clients.length)];
@@ -274,7 +358,7 @@ function measureMoveCost(room, clients, random, { samples, warmup }) {
     if (index >= warmup) timings.push(elapsedMs);
   }
 
-  return { ...summarize(timings), accepted, rejected, meanViewSize: meanViewSize(room) };
+  return { ...summarize(timings), accepted, rejected, meanViewSizePlaced, meanViewSizeEnd: meanViewSize(room) };
 }
 
 async function runMoveScenario({ label, legacy, map, bots, cluster, samples, warmup, seed }) {
@@ -292,22 +376,20 @@ async function runMoveScenario({ label, legacy, map, bots, cluster, samples, war
   try {
     const clients = populate(room, bots, uniformWalkable(room, layoutRandom, spawnRect));
     const result = measureMoveCost(room, clients, moveRandom, { samples, warmup });
-    return { label, legacy, bots, map, ...result };
+    return { label, legacy, bots, map, cluster, rect: spawnRect, ...result };
   } finally {
     room.setPatchRate(null);
   }
 }
 
 /** Median of per-run medians: one run's median moves by up to 2x on a machine with turbo. */
-async function repeatMoveScenario(config, repeat) {
-  const runs = [];
-  for (let index = 0; index < repeat; index++) {
-    runs.push(await runMoveScenario(config));
-  }
+function aggregateTimings(runs) {
   const medians = runs.map((run) => run.medianMs).sort((a, b) => a - b);
   const p95s = runs.map((run) => run.p95Ms).sort((a, b) => a - b);
   const middle = Math.floor(runs.length / 2);
   return {
+    // Everything the run reports that is a function of the seed rather than of the clock — k,
+    // byte counts, accept/reject split — is identical in every round, so round 0 carries it.
     ...runs[0],
     medianMs: medians[middle],
     p95Ms: p95s[middle],
@@ -315,6 +397,37 @@ async function repeatMoveScenario(config, repeat) {
     fastestMedianMs: medians[0],
     runs: runs.length,
   };
+}
+
+/**
+ * Runs every configuration once per round, round after round, instead of finishing one
+ * configuration before starting the next.
+ *
+ * Ordering is not a detail here, it decides the answer. On a throttling laptop part (the machine
+ * of record is a 15 W i7-1255U) a multi-minute run gets monotonically slower, so configurations
+ * measured late look worse than ones measured early by more than the effect being searched for:
+ * measured back to back, the 39x30 and 40x30 placements — one column apart, k 330 vs 324 — came
+ * out 47% apart, and the reported "worst" cluster simply followed whichever square the sweep
+ * happened to visit around the throttle knee. Interleaving spreads that drift over every
+ * configuration alike, which is what makes the per-configuration median comparable at all.
+ *
+ * This is also why the spread columns are printed rather than the median alone: if a peak is not
+ * separated by more than the fastest-to-slowest band, it has not been resolved.
+ */
+async function measureInterleaved(runOnce, configs, rounds, progressLabel) {
+  const runs = configs.map(() => []);
+  for (let round = 0; round < rounds; round++) {
+    for (const [index, config] of configs.entries()) {
+      runs[index].push(await runOnce(config));
+      // Only on a terminal: these runs are captured to a file for the record, and a carriage
+      // return leaves every progress tick in it as one unreadable line.
+      if (process.stdout.isTTY) {
+        process.stdout.write(`\r  ${progressLabel}: round ${round + 1}/${rounds}, configuration ${index + 1}/${configs.length}   `);
+      }
+    }
+  }
+  if (process.stdout.isTTY) process.stdout.write(`\r${"".padEnd(72)}\r`);
+  return runs.map(aggregateTimings);
 }
 
 /* ------------------------------------------------------ tier 2: per patch ---- */
@@ -351,6 +464,9 @@ async function runPatchScenario({ label, map, bots, cluster, patches, movesPerPa
   const moveRandom = seededRandom(seed ^ 0x1234_5678);
   try {
     const clients = populate(room, bots, uniformWalkable(room, layoutRandom, spawnRect));
+    // Same reason as the move tier: `patches * movesPerPatch` steps diffuse the cluster, so the
+    // density this scenario was built to hold is only readable before the first patch.
+    const meanViewSizePlaced = meanViewSize(room);
     // The serializer only encodes for clients in `room.clients`; `raw` is where the socket would be.
     let bytes = 0;
     for (const client of clients) {
@@ -384,10 +500,12 @@ async function runPatchScenario({ label, map, bots, cluster, patches, movesPerPa
       movesPerPatch,
       encoderBufferBytes,
       overflowWarnings,
+      rect: spawnRect,
       finalBufferBytes: serializer.encoder.sharedBuffer.byteLength,
       ...summarize(timings),
       meanBytesPerPatch: byteCounts.reduce((sum, value) => sum + value, 0) / byteCounts.length,
-      meanViewSize: meanViewSize(room),
+      meanViewSizePlaced,
+      meanViewSizeEnd: meanViewSize(room),
     };
   } finally {
     console.warn = realWarn;
@@ -494,14 +612,17 @@ async function runSocketScenario({ bots, movesPerSecondPerBot, durationMs }) {
 
 /* ------------------------------------------------------------------ main ---- */
 
+// `k placed` is the density the scenario was built to hold, `k end` what the random walk had
+// diffused it to by the last sample; the move cost belongs to the range between them.
 function printMoveTable(title, rows) {
   console.log(`\n${title}`);
-  console.log("  impl     n     map        k      median ms   p95 ms    med spread        moves/s (1 core)");
+  console.log("  impl     n     map        rect     k placed  k end    median ms   p95 ms    med spread        moves/s (1 core)");
   for (const row of rows) {
     const perSecond = row.medianMs > 0 ? Math.round(1000 / row.medianMs) : Number.NaN;
     console.log(
       `  ${(row.legacy ? "legacy" : "new").padEnd(8)} ${String(row.bots).padEnd(5)} ` +
-        `${`${row.map.width}x${row.map.height}`.padEnd(10)} ${row.meanViewSize.toFixed(1).padEnd(6)} ` +
+        `${`${row.map.width}x${row.map.height}`.padEnd(10)} ${rectLabel(row.rect).padEnd(8)} ` +
+        `${row.meanViewSizePlaced.toFixed(1).padEnd(9)} ${row.meanViewSizeEnd.toFixed(1).padEnd(8)} ` +
         `${ms(row.medianMs).padEnd(11)} ${ms(row.p95Ms).padEnd(9)} ` +
         `${`${ms(row.fastestMedianMs)}-${ms(row.slowestMedianMs)}`.padEnd(17)} ` +
         `${perSecond.toLocaleString("en-US")}`,
@@ -515,6 +636,17 @@ const repeatIndex = process.argv.indexOf("--repeat");
 const repeat = repeatIndex === -1 ? 3 : Number.parseInt(process.argv[repeatIndex + 1] ?? "3", 10);
 const botsIndex = process.argv.indexOf("--socket-bots");
 const socketBots = botsIndex === -1 ? 500 : Number.parseInt(process.argv[botsIndex + 1] ?? "500", 10);
+const halvesIndex = process.argv.indexOf("--cluster-halves");
+const clusterHalfExtents =
+  halvesIndex === -1
+    ? CLUSTER_HALF_EXTENTS
+    : (process.argv[halvesIndex + 1] ?? "").split(",").map((value) => Number.parseInt(value, 10));
+if (clusterHalfExtents.length === 0 || clusterHalfExtents.some((half) => !Number.isInteger(half) || half < 1)) {
+  console.error(
+    `--cluster-halves: expected a comma-separated list of positive integers, got ${JSON.stringify(process.argv[halvesIndex + 1])}`,
+  );
+  process.exit(1);
+}
 
 async function runSocketTier() {
   for (const movesPerSecondPerBot of [8.33, MAX_MOVES_PER_SECOND]) {
@@ -549,48 +681,123 @@ for (const map of maps) {
 }
 const grandPlaza = maps[maps.length - 1];
 
-console.log(`\nmove tier: median of ${repeat} runs per configuration`);
+const plazaPlacement = rectLabel(placementRect(grandPlaza, "plaza"));
 
-const dispersed = [];
-for (const map of maps) {
-  dispersed.push(
-    await repeatMoveScenario({ label: "A dispersed", legacy: false, map, bots: map.bots, cluster: undefined, samples: 20000, warmup: 5000, seed: 0xa11ce }, repeat),
-  );
-}
+const dispersedConfigs = maps.map((map) => ({
+  label: "A dispersed", legacy: false, map, bots: map.bots, cluster: undefined, samples: 20000, warmup: 5000, seed: 0xa11ce,
+}));
 for (const map of maps) {
   // Fewer samples: the legacy path is ~2 orders of magnitude slower and the spread is tiny.
-  dispersed.push(
-    await repeatMoveScenario({ label: "A dispersed", legacy: true, map, bots: map.bots, cluster: undefined, samples: 1500, warmup: 300, seed: 0xa11ce }, repeat),
-  );
+  dispersedConfigs.push({ label: "A dispersed", legacy: true, map, bots: map.bots, cluster: undefined, samples: 1500, warmup: 300, seed: 0xa11ce });
 }
+
+const clusterConfigs = [
+  { label: "B plaza", legacy: false, map: grandPlaza, bots: 500, cluster: "plaza", samples: 20000, warmup: 5000, seed: 0xb0b },
+  { label: "B plaza", legacy: true, map: grandPlaza, bots: 500, cluster: "plaza", samples: 600, warmup: 100, seed: 0xb0b },
+];
+console.log(`\nclustered sweep: half-extents ${clusterHalfExtents.join(", ")} at the ${plazaPlacement} plaza centre`);
+const measuredRects = new Set();
+for (const half of clusterHalfExtents) {
+  const plan = clusterPlan(grandPlaza, half);
+  if (plan.clamped) {
+    console.log(
+      `  half-extent ${half}: asked for ${plan.requested}x${plan.requested}, the ${plazaPlacement} plaza allows only ` +
+        `${plan.span.width}x${plan.span.height} - CLAMPED, so this row is looser than requested`,
+    );
+  }
+  // Two half-extents that clamp to the same rect would be the same measurement run twice.
+  if (measuredRects.has(plan.key)) {
+    console.log(`  half-extent ${half}: skipped, clamps onto the ${rectLabel(plan.rect)} rect already measured`);
+    continue;
+  }
+  measuredRects.add(plan.key);
+  clusterConfigs.push({ label: "B tight", legacy: false, map: grandPlaza, bots: 500, cluster: half, samples: 20000, warmup: 5000, seed: 0xb0b });
+}
+
+// Both scenarios in one interleaved pass, so that A and B are comparable to each other and not
+// just within themselves - the cross-table claim ("dispersed has N times the headroom of a
+// crowd") is read off exactly that comparison.
+console.log(`\nmove tier: ${repeat} interleaved rounds over ${dispersedConfigs.length + clusterConfigs.length} configurations, median of each`);
+const moveRows = await measureInterleaved(runMoveScenario, [...dispersedConfigs, ...clusterConfigs], repeat, "move tier");
+const dispersed = moveRows.slice(0, dispersedConfigs.length);
+const clustered = moveRows.slice(dispersedConfigs.length);
+
 printMoveTable("Scenario A - dispersed, density held constant (k fixed, n varies)", dispersed);
 
-const clustered = [
-  await repeatMoveScenario({ label: "B plaza", legacy: false, map: grandPlaza, bots: 500, cluster: "plaza", samples: 20000, warmup: 5000, seed: 0xb0b }, repeat),
-  await repeatMoveScenario({ label: "B plaza", legacy: true, map: grandPlaza, bots: 500, cluster: "plaza", samples: 600, warmup: 100, seed: 0xb0b }, repeat),
-  await repeatMoveScenario({ label: "B tight", legacy: false, map: grandPlaza, bots: 500, cluster: VIEW_RADIUS_TILES, samples: 20000, warmup: 5000, seed: 0xb0b }, repeat),
-  await repeatMoveScenario({ label: "B tight", legacy: true, map: grandPlaza, bots: 500, cluster: VIEW_RADIUS_TILES, samples: 400, warmup: 100, seed: 0xb0b }, repeat),
-];
-printMoveTable("Scenario B - clustered, n=500 (plaza = whole 40x30 plaza, tight = 27x27 at its centre)", clustered);
+// The whole plaza is in the running, not just the swept squares: the peak is a churn effect, not
+// a pure density one, so the loosest clustered placement can beat every tighter one and picking
+// the worst from the sweep alone would under-report again, in a new way.
+const worstCluster = clustered
+  .filter((row) => !row.legacy)
+  .reduce((worst, row) => (row.medianMs > worst.medianMs ? row : worst));
+// The head-to-head only has to be paid on the row that decides the verdict: the legacy path costs
+// ~200x per sample, so sweeping it too would dominate runtime. If the plaza won, it already has one.
+if (typeof worstCluster.cluster === "number") {
+  const [legacyWorst] = await measureInterleaved(
+    runMoveScenario,
+    [{ label: "B tight", legacy: true, map: grandPlaza, bots: 500, cluster: worstCluster.cluster, samples: 400, warmup: 100, seed: 0xb0b }],
+    repeat,
+    "legacy head-to-head",
+  );
+  clustered.push(legacyWorst);
+}
+
+printMoveTable(
+  `Scenario B - clustered, n=500 (plaza = the whole ${plazaPlacement} plaza; tight = a Chebyshev square at its centre)`,
+  clustered,
+);
+const clusterName = (row) =>
+  typeof row.cluster === "number" ? `half-extent ${row.cluster}` : "the whole plaza";
+console.log(
+  `  worst clustered placement: ${rectLabel(worstCluster.rect)} (${clusterName(worstCluster)}), ` +
+    `median ${ms(worstCluster.medianMs)} ms/move = ${((worstCluster.medianMs / ACCEPTANCE_BAR_MS_PER_MOVE) * 100).toFixed(1)}% of the ` +
+    `${ACCEPTANCE_BAR_MS_PER_MOVE} ms bar`,
+);
+const densestCluster = clustered
+  .filter((row) => !row.legacy)
+  .reduce((densest, row) => (row.meanViewSizePlaced > densest.meanViewSizePlaced ? row : densest));
+console.log(
+  `  densest clustered placement: ${rectLabel(densestCluster.rect)} (${clusterName(densestCluster)}), ` +
+    `k ${densestCluster.meanViewSizePlaced.toFixed(1)} as placed`,
+);
 
 // Both buffer sizes on purpose: the 8 KB default grows 8 KB at a time and re-encodes the whole
 // patch on every step, so measuring only the default would report the growth, not the encoder.
 const PRESIZED_ENCODER_BUFFER_BYTES = 8 * 1024 * 1024;
-const patchRows = [];
-for (const encoderBufferBytes of [DEFAULT_ENCODER_BUFFER_BYTES, PRESIZED_ENCODER_BUFFER_BYTES]) {
-  patchRows.push(
-    await runPatchScenario({ label: "A dispersed", map: grandPlaza, bots: 500, cluster: undefined, patches: 25, movesPerPatch: 1000, seed: 0xa11ce, encoderBufferBytes }),
-    await runPatchScenario({ label: "B plaza", map: grandPlaza, bots: 500, cluster: "plaza", patches: 25, movesPerPatch: 1000, seed: 0xb0b, encoderBufferBytes }),
-    await runPatchScenario({ label: "B tight", map: grandPlaza, bots: 500, cluster: VIEW_RADIUS_TILES, patches: 25, movesPerPatch: 1000, seed: 0xb0b, encoderBufferBytes }),
-  );
+// The move tier's worst placement and its densest one need not be the same square - move cost
+// peaks on view *churn*, encode cost tracks k and therefore bytes - so both get an encode row,
+// deduplicated when they coincide. Carrying the move tier's own worst placement over is what lets
+// the two tiers' worst-case rows be added into one core budget.
+const patchScenarios = [
+  { label: "A dispersed", cluster: undefined, seed: 0xa11ce },
+  { label: "B plaza", cluster: "plaza", seed: 0xb0b },
+];
+for (const row of [worstCluster, densestCluster]) {
+  if (patchScenarios.some((scenario) => scenario.cluster === row.cluster)) continue;
+  patchScenarios.push({ label: "B tight", cluster: row.cluster, seed: 0xb0b });
 }
+const patchConfigs = [];
+for (const encoderBufferBytes of [DEFAULT_ENCODER_BUFFER_BYTES, PRESIZED_ENCODER_BUFFER_BYTES]) {
+  for (const scenario of patchScenarios) {
+    patchConfigs.push({ ...scenario, map: grandPlaza, bots: 500, patches: 25, movesPerPatch: 1000, encoderBufferBytes });
+  }
+}
+// Interleaved for the same reason the move tier is, and it matters more here: these rows land
+// near 100% of the patch budget, so an ordering artefact is the difference between "fits in a
+// core" and "does not". The seed is fixed per scenario, so byte counts and k repeat exactly
+// across rounds and only the timings move.
+console.log(`\npatch tier: ${repeat} interleaved rounds over ${patchConfigs.length} configurations, median of each`);
+const patchRows = await measureInterleaved(runPatchScenario, patchConfigs, repeat, "patch tier");
 console.log("\nPer-patch encode cost (design §6.5) - 500 views, 1000 moves per patch");
-console.log("  scenario      buf     k      median ms   p95 ms    kB/patch   %of 100ms   overflow warns");
+console.log("  scenario      rect     buf     k placed  k end    median ms   p95 ms    med spread        kB/patch   %of 100ms   overflow warns");
 for (const row of patchRows) {
   const budget = ((row.medianMs / PATCH_RATE_MS) * 100).toFixed(1);
   console.log(
-    `  ${row.label.padEnd(13)} ${`${row.encoderBufferBytes / 1024}k`.padEnd(7)} ${row.meanViewSize.toFixed(1).padEnd(6)} ` +
-      `${ms(row.medianMs).padEnd(11)} ${ms(row.p95Ms).padEnd(9)} ${(row.meanBytesPerPatch / 1024).toFixed(1).padEnd(10)} ` +
+    `  ${row.label.padEnd(13)} ${rectLabel(row.rect).padEnd(8)} ${`${row.encoderBufferBytes / 1024}k`.padEnd(7)} ` +
+      `${row.meanViewSizePlaced.toFixed(1).padEnd(9)} ${row.meanViewSizeEnd.toFixed(1).padEnd(8)} ` +
+      `${ms(row.medianMs).padEnd(11)} ${ms(row.p95Ms).padEnd(9)} ` +
+      `${`${ms(row.fastestMedianMs)}-${ms(row.slowestMedianMs)}`.padEnd(17)} ` +
+      `${(row.meanBytesPerPatch / 1024).toFixed(1).padEnd(10)} ` +
       `${`${budget}%`.padEnd(11)} ${row.overflowWarnings} (grew to ${(row.finalBufferBytes / 1024 / 1024).toFixed(1)} MB)`,
   );
 }

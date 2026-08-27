@@ -1,4 +1,9 @@
-// Regenerates the Phase1 placeholder art and the Tiled map under code/assets. See code/assets/README.md.
+// Regenerates the Phase1 placeholder art - the tileset and the avatar sheet - under code/assets.
+// See code/assets/README.md.
+//
+// The map is no longer built here: tools/generate-plaza.mjs owns assets/maps/plaza.json. The two
+// were tied together only by history, and it made the layout uneditable - a one-tile change meant
+// running this script, which reverts the reskinned art at the same time.
 import { deflateSync } from "node:zlib";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -383,7 +388,6 @@ const TILE_PAINTERS = [
 ];
 
 const TILESET_COLUMNS = 8;
-const FIRST_BLOCKING_TILE_ID = 8;
 
 function buildTileset() {
   const rows = TILE_PAINTERS.length / TILESET_COLUMNS;
@@ -560,123 +564,6 @@ function buildAvatarSheet() {
   return sheet;
 }
 
-/* ---------------------------------------------------------------- map ---- */
-
-const MAP_WIDTH = 20;
-const MAP_HEIGHT = 15;
-
-const GROUND_LEGEND = { ".": 1, ",": 2, g: 3, w: 4, d: 5, m: 6, s: 7, f: 8 };
-const COLLISION_LEGEND = { ".": 0, S: 10, W: 9, P: 11, H: 12, "~": 13, C: 14, T: 15, N: 16 };
-
-const GROUND_ROWS = [
-  "....................",
-  ".ggg.....dd.....ggg.",
-  ".gfg.....dd.....gfg.",
-  ".ggg.....dd.....ggg.",
-  ".ggg.,...dd...,.ggg.",
-  "........mmmm........",
-  ".dddddddmmmmddddddd.",
-  ".dddddddmmmmddddddd.",
-  "........mmmm........",
-  ".....,...dd...,.....",
-  ".ggg.....dd.....ggg.",
-  ".ggg.....dd.....ggg.",
-  ".gfg.....dd.....gfg.",
-  ".ggg.....dd.....ggg.",
-  "....................",
-];
-
-const COLLISION_ROWS = [
-  "SWWWWWWWWWWWWWWWWWWS",
-  "W..................W",
-  "W.H..............H.W",
-  "W....N.............W",
-  "W...P..........P...W",
-  "W..................W",
-  "W........~~........W",
-  "W........~~........W",
-  "W..................W",
-  "W..................W",
-  "W...P..........P...W",
-  "W..................W",
-  "W..CC.........T....W",
-  "W.H..............H.W",
-  "SWWWWWWWWWWWWWWWWWWS",
-];
-
-function toGids(rows, legend, label) {
-  if (rows.length !== MAP_HEIGHT) throw new Error(`${label}: expected ${MAP_HEIGHT} rows, got ${rows.length}`);
-  const data = [];
-  rows.forEach((row, y) => {
-    if (row.length !== MAP_WIDTH) {
-      throw new Error(`${label} row ${y}: expected ${MAP_WIDTH} chars, got ${row.length} ("${row}")`);
-    }
-    for (const ch of row) {
-      const gid = legend[ch];
-      if (gid === undefined) throw new Error(`${label} row ${y}: unknown legend char "${ch}"`);
-      data.push(gid);
-    }
-  });
-  return data;
-}
-
-function tileLayer(id, name, rows, legend) {
-  return {
-    data: toGids(rows, legend, name),
-    height: MAP_HEIGHT,
-    id,
-    name,
-    opacity: 1,
-    type: "tilelayer",
-    visible: true,
-    width: MAP_WIDTH,
-    x: 0,
-    y: 0,
-  };
-}
-
-function buildMap(tilesetWidth, tilesetHeight) {
-  const blockingTiles = TILE_PAINTERS.map((_, id) => id)
-    .filter((id) => id >= FIRST_BLOCKING_TILE_ID)
-    .map((id) => ({ id, properties: [{ name: "collides", type: "bool", value: true }] }));
-
-  return {
-    compressionlevel: -1,
-    height: MAP_HEIGHT,
-    infinite: false,
-    layers: [
-      tileLayer(1, "ground", GROUND_ROWS, GROUND_LEGEND),
-      tileLayer(2, "collision", COLLISION_ROWS, COLLISION_LEGEND),
-    ],
-    nextlayerid: 3,
-    nextobjectid: 1,
-    orientation: "orthogonal",
-    renderorder: "right-down",
-    tiledversion: "1.11.2",
-    tileheight: TILE,
-    tilesets: [
-      {
-        columns: TILESET_COLUMNS,
-        firstgid: 1,
-        image: "../tilesets/plaza-tiles.png",
-        imageheight: tilesetHeight,
-        imagewidth: tilesetWidth,
-        margin: 0,
-        name: "plaza-tiles",
-        spacing: 0,
-        tilecount: TILE_PAINTERS.length,
-        tileheight: TILE,
-        tiles: blockingTiles,
-        tilewidth: TILE,
-      },
-    ],
-    tilewidth: TILE,
-    type: "map",
-    version: "1.10",
-    width: MAP_WIDTH,
-  };
-}
-
 /* --------------------------------------------------------------- emit ---- */
 
 function write(relativePath, contents) {
@@ -691,5 +578,3 @@ write("tilesets/plaza-tiles.png", encodePng(tileset));
 
 const avatar = buildAvatarSheet();
 write("sprites/avatar.png", encodePng(avatar));
-
-write("maps/plaza.json", `${JSON.stringify(buildMap(tileset.width, tileset.height), null, 2)}\n`);

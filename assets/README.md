@@ -6,6 +6,8 @@ Phase1.5 리스킨 적용본. 절차적 placeholder가 아니라 **[Ninja Advent
 
 ## 재생성
 
+### 타일셋 + 맵 (Ninja Adventure 기반 리스킨)
+
 ```
 node tools/import-ninja-assets.mjs <ninja-adventure-repo-root>      # cwd = code/
 NINJA_ASSET_ROOT=<ninja-adventure-repo-root> node tools/import-ninja-assets.mjs
@@ -17,12 +19,37 @@ NINJA_ASSET_ROOT=<ninja-adventure-repo-root> node tools/import-ninja-assets.mjs
 
 > 타일셋을 공유하는 맵을 새로 추가하면 `import-ninja-assets.mjs`의 `MAP_FILES` 에도 넣을 것. 빠뜨리면 그 맵만 검증 없이 남아 다음 리스킨 때 조용히 깨진다.
 
-> **경고: `tools/generate-assets.mjs` 는 Phase1 절차적 placeholder 전용 스크립트다.** 실행하면 `tilesets/plaza-tiles.png` 와 `sprites/avatar.png` 가 placeholder로 되돌아가고, **`maps/plaza.json` 까지 스크립트 내부의 ASCII 레이아웃으로 재생성**된다 — 리스킨 자산을 통째로 덮어쓰는 파괴적 동작이다. 그래서 최상단에 `--force-placeholder` 플래그 가드가 있고, 플래그 없이 실행하면 아무것도 쓰지 않고 즉시 exit 1 한다.
+> **`tools/generate-assets.mjs` 는 Phase1 절차적 placeholder 전용 스크립트로 축소됨.** 실행하면 `tilesets/plaza-tiles.png` 와 `sprites/avatar.png` 가 placeholder로 되돌아간다. 더 이상 `maps/plaza.json`을 재생성하지 않음 — plaza 맵은 이제 `tools/generate-plaza.mjs`(신규, 비파괴)가 전담하고, `generate-assets.mjs`는 placeholder 아트 생성 전용으로 축소됐다. 맵은 더 이상 안 건드리지만 아트 2장(타일셋/아바타)은 여전히 파괴적으로 되돌리므로, 실행 후 `import-ninja-assets.mjs`와 `import-avatar.mjs`를 다시 돌려야 한다.
+
+### 아바타 (Tiny Characters Set 기반 리스킨)
+
+```
+node tools/import-avatar.mjs                                        # cwd = code/
+```
+
+Tiny Characters Set(Fleurman, CC0) 소스로부터 4스킨×4방향×3프레임 아바타 시트를 재생성한다. 스킨 선정·원본 좌표 변환은 스크립트 내부에 고정(사용자 확정된 4스킨만 생성). 결정적 생성이라 같은 소스면 항상 같은 PNG가 나온다.
+
+### plaza 맵 (비파괴, 손 배치 + 절차적 테두리)
+
+```
+node tools/generate-plaza.mjs                                        # cwd = code/
+```
+
+plaza 내부 walkable(32×18)을 손으로 배치하고 테두리 밴드(1,664칸)를 절차적으로 채운다(성벽→마을→정원→숲→해변→물 6층). 결정적 생성(난수 없음)이고, 검증 8종(통행 가능 칸 수 일치/gid↔collides 일치/spawn 도달성/테두리 무침반/통로 21칸 이상 등)을 디스크 쓰기 전에 메모리에서 전부 확인 후 하나라도 어긋나면 아무것도 쓰지 않고 exit 1.
+
+### grand-plaza 맵 (재생성, 크기/좌표 재설정)
+
+```
+node tools/generate-load-map.mjs                                        # cwd = code/
+node tools/generate-load-map.mjs --width 92 --height 147 --out assets/maps/half.json
+```
+
+grand-plaza를 맵 크기 172×147, 내부 140×130(BORDER {16,16,8,9})로 재생성한다(기존 160×145 구형 제거). 난수를 쓰지 않고 좌표 함수만으로 만들어 **같은 인자면 항상 같은 바이트**가 나온다. `--width`/`--height`는 `docs/poc2-design.md` 밀도 고정 측정용 축소판을 뽑기 위한 것. 내부 치수가 10의 배수가 아니면 거부.
 
 ## maps/plaza.json
 
 - Tiled JSON format `1.10`, orthogonal, renderorder `right-down`, `infinite: false`
-- **20 x 15 tiles**, tile size **32 x 32 px** (= shared `TILE_SIZE_PX`)
+- **64 x 35 tiles**, tile size **32 x 32 px** (= shared `TILE_SIZE_PX`). 내부 walkable 영역은 **32 x 18**(x16–47, y8–25)로 뷰포트 16:9 확대에 대응. 테두리 밴드(좌우 16열, 상 8행, 하 9행)는 통행 불가 장식 레이어.
 - tileset은 **embedded**(인라인). Phaser tilemap loader가 external tileset(`source` 참조)을 해석하지 못하므로 의도적으로 map 안에 넣었다. 서버 입장에서도 파일 1개만 읽으면 된다.
 
 레이어는 2개이며 배열 순서가 곧 렌더 순서다.
@@ -50,11 +77,11 @@ NINJA_ASSET_ROOT=<ninja-adventure-repo-root> node tools/import-ninja-assets.mjs
 
 **1번(flip bit 마스킹)을 빼먹지 말 것.** 지금 맵은 flip을 쓰지 않지만, 나중에 Tiled에서 타일 하나만 뒤집어도 raw gid 상위 비트가 켜져서 `gid - firstgid` 가 엉뚱한 id를 만들고 → property 매칭 실패 → **벽이 통과 가능해진다.** 조용히 터지는 종류의 버그다.
 
-> 참고(규칙 아님): 현재 `plaza.json`은 `collision` 레이어의 gid ≠ 0 인 칸과 `collides: true` 인 칸이 정확히 일치한다(82칸). 다만 이건 이 파일이 애초에 그렇게 배치돼 고정(`import-ninja-assets.mjs`도 이 파일을 재검증 후 원본 그대로 재출력할 뿐 손대지 않는다)됐기 때문에 생기는 *현재 사실*일 뿐, 파일 포맷이 보장하는 성질이 아니다. Tiled에서 맵을 직접 편집하면서 장식용으로 통행 가능 타일(id 0-7)을 `collision` 레이어에 올리는 순간 둘은 갈라진다. **어느 쪽도 `gid !== 0` 로 구현하지 말 것** — 한쪽만 그렇게 구현하면 서버는 통과시키는데 클라이언트는 막는(또는 그 반대) 조용한 desync가 된다.
+> 참고(규칙 아님): 현재 `grand-plaza.json`은 `collision` 레이어의 gid ≠ 0 인 칸과 `collides: true` 인 칸이 정확히 일치한다(1,701칸). 다만 이건 이 파일이 애초에 그렇게 배치돼 고정(`import-ninja-assets.mjs`도 이 파일을 재검증 후 원본 그대로 재출력할 뿐 손대지 않는다)됐기 때문에 생기는 *현재 사실*일 뿐, 파일 포맷이 보장하는 성질이 아니다. Tiled에서 맵을 직접 편집하면서 장식용으로 통행 가능 타일(id 0-7)을 `collision` 레이어에 올리는 순간 둘은 갈라진다. **어느 쪽도 `gid !== 0` 로 구현하지 말 것** — 한쪽만 그렇게 구현하면 서버는 통과시키는데 클라이언트는 막는(또는 그 반대) 조용한 desync가 된다.
 
 - 타일을 추가할 때 tileset의 **"0행 통행 가능 / 1행 통행 불가"** 행 분리를 지키면 `collides` 를 빠뜨릴 일이 없다.
 
-현재 맵의 통행 가능 칸은 300칸 중 218칸. **추천 spawn tile은 `{ tileX: 9, tileY: 11 }`** (중앙 분수 남쪽, 통행 가능) — `RoomCreateOptions.spawn`에 넣으면 된다. spawn은 맵이 아니라 room 설정에서 온다(`server/src/rooms/contracts.ts`의 `SpawnArea`). `plaza`는 `spreadRadiusInTiles: 0` 이라 전원이 이 타일 하나에 그대로 선다.
+현재 맵의 통행 가능 칸은 2,240칸 중 **539칸**. **추천 spawn tile은 `{ tileX: 31, tileY: 20 }`** (중앙 분수 남쪽, 통행 가능) — `RoomCreateOptions.spawn`에 넣으면 된다. spawn은 맵이 아니라 room 설정에서 온다(`server/src/rooms/contracts.ts`의 `SpawnArea`). `plaza`는 `spreadRadiusInTiles: 0` 이라 전원이 이 타일 하나에 그대로 선다.
 
 ### plaza 포탈 타일
 
@@ -62,48 +89,41 @@ NINJA_ASSET_ROOT=<ninja-adventure-repo-root> node tools/import-ninja-assets.mjs
 
 | 역할 | 타일 | 포탈 |
 |---|---|---|
-| 트리거 (남쪽 문) | `{15,13}` `{16,13}` | `plaza-south-door` → `grand-plaza` |
-| 도착 | `{15,12}` | `grand-plaza-north-door` 로 들어올 때 |
+| 트리거 (남쪽 문) | `{31,25}` `{32,25}` | `plaza-south-door` → `grand-plaza` |
+| 도착 | `{31,24}` | `grand-plaza-north-door` 로 들어올 때 |
 
-트리거는 남쪽 벽(row 14) 바로 위 2칸이고 도착은 그 북쪽 옆 칸이다. **spawn row 11(x 1–18)과 x=1 열에는 문을 두지 말 것** — `metaverseRoom.integration.test.ts`가 그 경로를 통째로 걸어 다니므로 포탈과 무관한 테스트가 문을 밟는다. 이 제약은 `server/src/game/portals.test.ts`가 검증한다.
+트리거는 walkable 최남단 행(row 25)이고 도착은 그 북쪽 칸이다. **spawn row 20(x 16–47)과 테두리 밴드(x<16, x>47, y<8, y>25)에는 문을 두지 말 것** — `metaverseRoom.integration.test.ts`가 그 영역을 통째로 걸어 다니므로 포탈과 무관한 테스트가 문을 밟는다. 이 제약은 `server/src/game/portals.test.ts`가 검증한다.
 
 ## maps/grand-plaza.json
 
 Go/No-go PoC #2(500 CCU broadcast 측정) 전용 맵. 설계 근거와 수치 유도는 `docs/poc2-design.md` §1.
 
-- **160 x 145 tiles**, 통행 가능 **14,800칸** / 통행 불가 8,400칸
+- **172 x 147 tiles**, 내부 walkable **140 x 130**, 통행 가능 **14,800칸** / 통행 불가 10,484칸
 - `plaza.json`과 **완전히 동일한 포맷·동일한 embedded 타일셋**(아트 신규 제작 0). 서버 `MapLoader`·Phaser 로더 양쪽 다 무수정
-- spawn 중심 `{ tileX: 80, tileY: 72 }`, `spreadRadiusInTiles: 70` (중앙 광장 한가운데, 반경이 통행 가능 영역 전체를 덮는다)
+- spawn 중심 `{ tileX: 86, tileY: 73 }`, `spreadRadiusInTiles: 70` (중앙 광장 한가운데, 반경이 통행 가능 영역 전체를 덮는다). 기존 좌표 대비 `+6,+1` 시프트
 
 레이아웃은 세 겹이다.
 
 | 영역 | 범위 | 내용 |
 |---|---|---|
-| 경계 밴드 | 좌우 10열, 상 7행, 하 8행 | 전부 통행 불가 |
+| 경계 밴드 | 좌우 16열, 상 8행, 하 9행 | 전부 통행 불가 (뷰포트 32x18 무클램프 유지) |
 | 내부 | 140 x 130 | 10x10 super-tile 14 x 13개, 각 super-tile에 5x4 건물 + 나머지는 거리 |
-| 중앙 광장 | `x 60–99`, `y 57–86` | super-tile 12개를 비운 40 x 30 완전 개방 |
+| 중앙 광장 | `x 66–105`, `y 58–87` | super-tile 12개를 비운 40 x 30 완전 개방 |
 
 ### grand-plaza 포탈 타일
 
 | 역할 | 타일 | 포탈 |
 |---|---|---|
-| 트리거 (북서 골목 북단) | `{16,7}` `{17,7}` | `grand-plaza-north-door` → `plaza` |
-| 도착 | `{16,8}` | `plaza-south-door` 로 들어올 때 |
+| 트리거 (북서 골목 북단) | `{22,8}` `{23,8}` | `grand-plaza-north-door` → `plaza` |
+| 도착 | `{22,9}` | `plaza-south-door` 로 들어올 때 |
 
-북서 골목(`x 15–19`, `y 7–10`)의 막힌 북쪽 끝 2칸이다. 도착 타일은 그 바로 남쪽 칸 — 도착 타일이 역방향 트리거와 정확히 겹치면 부팅이 **경고**를 낸다(거부는 아니다. 폭 1칸 통로처럼 옆 칸이 없는 정당한 레이아웃이 있으므로). 트리거·도착이 통행 불가면 **부팅 거부**다(`validateRoomMaps`).
+북서 골목(`x 21–25`, `y 8–11`)의 막힌 북쪽 끝 2칸이다. 도착 타일은 그 바로 남쪽 칸 — 도착 타일이 역방향 트리거와 정확히 겹치면 부팅이 **경고**를 낸다(거부는 아니다. 폭 1칸 통로처럼 옆 칸이 없는 정당한 레이아웃이 있으므로). 트리거·도착이 통행 불가면 **부팅 거부**다(`validateRoomMaps`).
 
-**경계 밴드에 통행 가능 칸이 하나라도 생기면 안 된다.** 아바타 origin이 `(0.5, 1)`(타일 아래변)이라 밴드 두께가 상하 비대칭인 것도 같은 이유 — 이 밴드가 비어 있는 동안에만 Phaser 카메라가 `setBounds` 클램프에 걸리지 않고, 로컬 플레이어가 **항상 정확히 화면 중앙**에 있다. 그 불변식 위에서 "화면에 보일 수 있는 최대 Chebyshev 거리 = 10"이 성립하고 `VIEW_RADIUS_TILES`가 그로부터 유도된다. 밴드가 뚫리면 반경 상수의 근거가 통째로 무너진다.
+**경계 밴드에 통행 가능 칸이 하나라도 생기면 안 된다.** 아바타 origin이 `(0.5, 1)`(타일 아래변)이라 밴드 두께가 상하 비대칭인 것도 같은 이유 — 이 밴드가 비어 있는 동안에만 Phaser 카메라가 `setBounds` 클램프에 걸리지 않고, 로컬 플레이어가 **항상 정확히 화면 중앙**에 있다. 그 불변식 위에서 "화면에 보일 수 있는 최대 Chebyshev 거리"가 성립하고 `VIEW_RADIUS_TILES`가 그로부터 유도된다. 밴드가 뚫리면 반경 상수의 근거가 통째로 무너진다.
 
-### 재생성
+위 "## 재생성" 섹션의 "grand-plaza 맵" 항목(`generate-load-map.mjs`)으로 생성/재생성한다.
 
-```
-node tools/generate-load-map.mjs                                        # cwd = code/
-node tools/generate-load-map.mjs --width 90 --height 145 --out assets/maps/half.json
-```
-
-난수를 쓰지 않고 좌표 함수만으로 만들어 **같은 인자면 항상 같은 바이트**가 나온다. `--width`/`--height`는 `docs/poc2-design.md` §6.3의 밀도 고정 측정(맵 면적을 봇 수에 비례시켜 이웃 수를 20으로 묶어두는 스윕)용 축소판을 뽑기 위한 것이다. 내부 치수가 10의 배수가 아니면 거부한다.
-
-타일셋 블록은 `plaza.json`에서 **읽어서 그대로 복사**한다 — 리스킨으로 타일셋이 바뀌면 자동으로 따라가고, 이 스크립트에 타일셋을 하드코딩할 일이 없다.
+타일셋 블록은 `plaza.json`에서 **읽어서 그대로 복사**된다 — 리스킨으로 타일셋이 바뀌면 자동으로 따라가고, 스크립트에 타일셋을 하드코딩할 일이 없다.
 
 **디스크에 쓰기 전에 메모리에서 전부 검증하고, 하나라도 어긋나면 아무것도 쓰지 않고 exit 1 한다**(`import-ninja-assets.mjs`와 같은 순서, 사유는 `docs/decisions.md` 2026-08-26): 통행 가능 칸 수, `collision` 레이어의 `gid ≠ 0` 칸과 `collides: true` 칸의 일치, spawn 중심의 통행 가능 여부, spawn에서의 4방향 flood fill 도달 수(= 고립 영역 0), 경계 밴드 내 통행 가능 칸 0개.
 
@@ -118,10 +138,10 @@ node tools/generate-load-map.mjs --width 90 --height 145 --out assets/maps/half.
 | 0 | 1 | 석재 바닥 | |
 | 1 | 2 | 석재 바닥(균열) | |
 | 2 | 3 | 잔디 | |
-| 3 | 4 | 나무 바닥 *(현재 맵엔 미사용, 시트엔 존재)* | |
+| 3 | 4 | 나무 바닥 (plaza 남문 문턱용) | |
 | 4 | 5 | 흙길 | |
 | 5 | 6 | 광장 문양 타일 | |
-| 6 | 7 | 모래 *(현재 맵엔 미사용, 시트엔 존재)* | |
+| 6 | 7 | 모래 (plaza 테두리 해변 아트용) | |
 | 7 | 8 | 꽃 잔디 | |
 | 8 | 9 | 벽돌 벽(running-bond 벽돌쌓기) | O |
 | 9 | 10 | 벽돌 벽(모서리용, id 8과 동일 아트) | O |
@@ -140,9 +160,9 @@ node tools/generate-load-map.mjs --width 90 --height 145 --out assets/maps/half.
 
 - **96 x 512 px**, frame **32 x 32**, `margin 0` / `spacing 0` → 3 columns x 16 rows = 48 frames
 - 행 배치: **`row = skin * 4 + direction`**
-  - `skin`: 0–3 (shared `AVATAR_SKIN_COUNT` = 4). skin 0=닌자(청), 1=사무라이(청), 2=사무라이(녹) — Ninja Adventure Asset Pack의 서로 다른 캐릭터. skin 3은 skin 0(닌자 청)의 팔레트 리컬러(크림즌)로 실루엣이 동일하다. 4방향 시트 그리드를 갖춘 캐릭터가 소스에 3종뿐이라 4번째를 리컬러로 채웠다(2026-08-26 사용자 승인, `docs/decisions.md` 참고)
-  - `direction`: shared `Direction` enum 값 **그대로** — `Down 0, Left 1, Right 2, Up 3`
-- 열 배치: **`0` = 한쪽 발 step, `1` = idle/contact, `2` = 반대쪽 발 step**
+  - `skin`: 0–3 (shared `AVATAR_SKIN_COUNT` = 4). **Tiny Characters Set(Fleurman, CC0)** 에서 선정한 4스킨 — skin 0=갈색롱헤어/빨강상의, 1=금발/녹색튜닉, 2=적발트윈테일/파랑원피스, 3=어두운피부+아프로/핑크상의. 머리색·피부톤·실루엣·복장이 모두 달라 32px 축소에서도 구분된다.
+  - `direction`: shared `Direction` enum 값 **그대로** — `Down 0, Left 1, Right 2, Up 3`. 소스 및 목표 시트 규약과 일치.
+- 열 배치: **`0` = stepA, `1` = idle, `2` = stepB** (소스와 목표의 열 배치가 동일)
 
 Phaser 프레임 인덱스:
 
@@ -152,5 +172,25 @@ const base = (skin * 4 + direction) * 3;
 // walk  = [base, base + 1, base + 2, base + 1]  (loop)
 ```
 
-- 새 아트는 32x32 프레임을 거의 꽉 채운다(최악 케이스 기준 y 0–31 불투명). 이 때문에 말풍선 오프셋(`code/client/src/world/chatBubbles.ts` 의 `BUBBLE_OFFSET_Y`)이 30 → 36 으로 조정됐다(사유는 해당 코드 주석 참고 — 여기 중복 기술하지 않는다). origin을 `(0.5, 1)` 로 두고 타일의 아래 변에 맞추면 그리드에 정렬된다.
-- `Right(2)`는 `Left(1)`의 좌우 반전이지만 런타임 `flipX` 대신 시트에 구워 넣었다. direction → row 매핑을 분기 없이 유지하기 위함.
+- 32x32 프레임을 거의 꽉 채운다(최악 케이스 기준 y 0–31 불투명). 이 때문에 말풍선 오프셋(`code/client/src/world/chatBubbles.ts` 의 `BUBBLE_OFFSET_Y`)이 30 → 36 으로 조정됐다(사유는 해당 코드 주석 참고 — 여기 중복 기술하지 않는다). origin을 `(0.5, 1)` 로 두고 타일의 아래 변에 맞추면 그리드에 정렬된다.
+- `Right(2)`는 `Left(1)`의 좌우 반전이 아니라 소스에서 각각 독립 프레임으로 구워 넣었다. 목표 규약의 direction → row 매핑을 분기 없이 유지하기 위함.
+
+## 뷰포트 / 카메라 설정값
+
+와이드스크린(16:9) 전환에 따른 공통 뷰포트 설정. 모든 room이 동일하게 적용되며, 개별 room별 커스터마이징은 없다.
+
+| 상수 | 값 | 의미 |
+|---|---|---|
+| `VIEWPORT_WIDTH_TILES` | 32 | 화면에 보이는 타일 가로 수 (1024px @ 32px/tile) |
+| `VIEWPORT_HEIGHT_TILES` | 18 | 화면에 보이는 타일 세로 수 (576px @ 32px/tile) |
+| `VIEW_RADIUS_TILES` | 19 | 아바타 상태 동기화 반경 (interest management) |
+| `CHAT_RADIUS_TILES` | 8 | 근접 채팅 수신 반경 |
+
+역산 도출(아바타 origin `(0.5,1)` 기준):
+- 가로 오프셋: `floor(32/2) = 16`
+- 세로 위쪽: `floor((18-1)/2) = 8`
+- 세로 아래쪽: `floor(18/2) = 9`
+- `VIEW_RADIUS = max(16, 9) + 3 = 19`
+- `CHAT_RADIUS = 위 오프셋 = 8`
+
+이 값들은 타일맵 크기와 비의존적으로 설계돼, plaza(64×35)와 grand-plaza(172×147) 둘 다 같은 상수를 사용하면서 각 맵의 경계 밴드가 무클램프를 보장한다.

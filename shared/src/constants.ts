@@ -4,22 +4,34 @@ export const TILE_SIZE_PX = 32;
 export const PATCH_RATE_MS = 100;
 
 /**
+ * Approach margin added on top of the furthest visible tile. Two players walking at each other
+ * close ~1.7 tiles per patch (PATCH_RATE_MS at the client's send cadence), so 3 tiles buys
+ * ~180ms to spawn the sprite before it would pop in on screen, and absorbs the name tag that
+ * overhangs the sprite by a tile.
+ */
+export const VIEW_RADIUS_MARGIN_TILES = 3;
+
+/**
  * Players outside this radius are not synced to the client at all (Colyseus StateView filtering).
  *
- * Derived from the camera, not picked: on a map whose walkable area is inset far enough that
- * the camera never clamps, the local player sits dead centre, so the furthest tile that can
- * put a pixel on screen is 10 away (Chebyshev). The extra 3 tiles are approach margin — two
- * players walking at each other close ~1.7 tiles per patch, so 3 buys ~180ms to spawn the
- * sprite before it would pop in on screen.
+ * Derived from the camera, not picked:
+ * `maxVisibleTileDistance(VIEWPORT_WIDTH_TILES, VIEWPORT_HEIGHT_TILES) + VIEW_RADIUS_MARGIN_TILES`
+ * = 16 + 3. Kept a literal rather than computed so that widening the viewport fails a test
+ * instead of silently changing every proximity query's cost - the value gates a load test
+ * (`docs/poc2-design.md` §6, `tools/loadtest-poc2.mjs`), not just what you can see.
  */
-export const VIEW_RADIUS_TILES = 13;
+export const VIEW_RADIUS_TILES = 19;
 
 /**
  * Chat delivery radius. Must stay <= VIEW_RADIUS_TILES: a client that receives a chat
  * message but not the sender's state would render a message from an unknown player.
- * 7 is the viewport's vertical half-extent, so anyone audible is at least partly on screen.
+ *
+ * Equals the viewport's *upward* visible extent (`cameraBorderTiles(...).top`), which is the
+ * smallest of the four directions, so anyone audible is at least partly on screen whichever way
+ * they stand. Not `floor(height / 2)`: on an even-height viewport that is one row past the top
+ * edge of the screen.
  */
-export const CHAT_RADIUS_TILES = 7;
+export const CHAT_RADIUS_TILES = 8;
 
 /** Message is rejected if longer. Counted in UTF-16 code units. */
 export const MAX_CHAT_LENGTH = 200;

@@ -14,24 +14,25 @@ describe("TiledMapLoader.load — the real plaza map", () => {
   });
 
   it("resolves assets/maps/plaza.json from the default directory", () => {
-    assert.equal(map.widthInTiles, 20);
-    assert.equal(map.heightInTiles, 15);
+    assert.equal(map.widthInTiles, 64);
+    assert.equal(map.heightInTiles, 35);
   });
 
   it("treats an empty collision cell (gid 0) as walkable", () => {
-    assert.equal(map.isWalkable(1, 1), true);
+    // (16,8) is the map's first gid-0 cell: the north-west corner of the walkable interior.
+    assert.equal(map.isWalkable(16, 8), true);
   });
 
   it("blocks a cell for every collides tile id in the tileset", () => {
     const blockedCells = [
-      { tileId: 8, tileX: 1, tileY: 0 },
-      { tileId: 9, tileX: 0, tileY: 0 },
-      { tileId: 10, tileX: 4, tileY: 4 },
-      { tileId: 11, tileX: 2, tileY: 2 },
-      { tileId: 12, tileX: 9, tileY: 6 },
-      { tileId: 13, tileX: 3, tileY: 12 },
-      { tileId: 14, tileX: 14, tileY: 12 },
-      { tileId: 15, tileX: 5, tileY: 3 },
+      { tileId: 8, tileX: 11, tileY: 5 },
+      { tileId: 9, tileX: 15, tileY: 7 },
+      { tileId: 10, tileX: 3, tileY: 2 },
+      { tileId: 11, tileX: 2, tileY: 1 },
+      { tileId: 12, tileX: 0, tileY: 0 },
+      { tileId: 13, tileX: 13, tileY: 5 },
+      { tileId: 14, tileX: 12, tileY: 6 },
+      { tileId: 15, tileX: 4, tileY: 1 },
     ];
     for (const { tileId, tileX, tileY } of blockedCells) {
       assert.equal(
@@ -42,7 +43,7 @@ describe("TiledMapLoader.load — the real plaza map", () => {
     }
   });
 
-  it("counts 218 walkable tiles out of 300", () => {
+  it("counts 539 walkable tiles out of 2240", () => {
     let walkable = 0;
     for (let tileY = 0; tileY < map.heightInTiles; tileY++) {
       for (let tileX = 0; tileX < map.widthInTiles; tileX++) {
@@ -51,7 +52,7 @@ describe("TiledMapLoader.load — the real plaza map", () => {
         }
       }
     }
-    assert.equal(walkable, 218);
+    assert.equal(walkable, 539);
   });
 
   it("walls off the entire perimeter", () => {
@@ -66,16 +67,16 @@ describe("TiledMapLoader.load — the real plaza map", () => {
   });
 
   it("keeps the documented spawn tile walkable", () => {
-    assert.equal(map.isWalkable(9, 11), true);
+    assert.equal(map.isWalkable(31, 20), true);
   });
 
   it("reports out-of-bounds coordinates as not walkable", () => {
     for (const [tileX, tileY] of [
       [-1, 0],
       [0, -1],
-      [20, 0],
-      [0, 15],
-      [20, 15],
+      [64, 0],
+      [0, 35],
+      [64, 35],
       [999, 999],
       [-999, -999],
     ] as const) {

@@ -1,13 +1,21 @@
 import Phaser from "phaser";
-import { TILE_SIZE_PX } from "@zep-test/shared";
+import {
+  TILE_SIZE_PX,
+  VIEWPORT_HEIGHT_TILES,
+  VIEWPORT_WIDTH_TILES,
+} from "@zep-test/shared";
 import { showBootError } from "./bootStatus";
 import { BootScene } from "./scenes/BootScene";
 import { WorldScene } from "./scenes/WorldScene";
 
-/** Visible area in tiles. Independent of map size — the camera clamps to the map bounds. */
-const VIEWPORT_WIDTH_TILES = 20;
-const VIEWPORT_HEIGHT_TILES = 15;
-
+/*
+ * Canvas size comes from shared/src/camera.ts, never from a local copy: the view radius, the
+ * map border band and the .stage aspect ratio are all derived from the same two numbers, and a
+ * second definition here would let them drift apart silently. 32x18 tiles = 1024x576 px.
+ *
+ * Scale.FIT scales that fixed backing resolution to whatever .stage measures, so the canvas
+ * stays 1024x576 internally at every window size and the tile count on screen never changes.
+ */
 try {
   new Phaser.Game({
     type: Phaser.AUTO,
