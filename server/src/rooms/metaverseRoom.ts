@@ -19,19 +19,23 @@ import {
   type JoinOptions,
   type MoveRejected,
   type MoveRequest,
+  type PortalEntered,
   type TilePosition,
 } from "@zep-test/shared";
 import { isDirection, TileMovementResolver } from "../game/movement";
+import { TablePortalIndex } from "../game/portals";
 import { chebyshevDistance, UniformGridProximityIndex } from "../game/proximity";
 import { TiledMapLoader } from "../game/tiledMap";
 import type {
   AuthResult,
   CollisionMap,
   MetaverseRoomOptions,
+  PortalIndex,
   ProximityIndex,
   RoomCreateOptions,
   SpawnArea,
 } from "./contracts";
+import { PORTAL_DEFINITIONS } from "./portalDefinitions";
 import { deriveSsoNickname } from "./ssoIdentity";
 
 type RoomClient = MetaverseRoomOptions["client"];
@@ -77,6 +81,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   private readonly inRange = new Set<string>();
   private collisionMap!: CollisionMap;
   private proximityIndex!: ProximityIndex;
+  private portalIndex!: PortalIndex;
   private spawn!: SpawnArea;
 
   async onCreate(options: RoomCreateOptions): Promise<void> {
@@ -90,6 +95,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
 
     this.collisionMap = await this.mapLoader.load(options.mapKey);
     this.proximityIndex = this.createProximityIndex(this.collisionMap);
+    this.portalIndex = this.createPortalIndex(this.collisionMap);
 
     this.onMessage(ClientMessage.Move, (client: RoomClient, message: MoveRequest) => {
       this.handleMove(client, message);
@@ -109,6 +115,18 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   }
 
   /**
+   * Overridable seam: a test subclass injects a hand-built table instead of the real one.
+   *
+   * `this.roomName` is the room's matchmaking name, and a name in no row of the table — or the
+   * runtime-undefined name of a room built without the matchmaker — yields an index that
+   * answers null to everything. That is the normal path for a room with no doors, not an error,
+   * so nothing is asserted about it here.
+   */
+  protected createPortalIndex(map: CollisionMap): PortalIndex {
+    return new TablePortalIndex(this.roomName, PORTAL_DEFINITIONS, map);
+  }
+
+  /**
    * Always returns a truthy object — see {@link AuthResult}. `ssoNickname` is null outside
    * SSO (local dev, tests), and `onJoin` then falls back to `options.nickname`.
    */
@@ -122,7 +140,14 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       throw new Error("nickname is required");
     }
 
-    const spawnTile = this.pickSpawnTile();
+    // An id this room does not own — unknown, or one belonging to a door out of this room —
+    // falls back to the generic spawn rather than refusing the join, which would strand a
+    // client whose portal row changed while its tab was open.
+    const viaPortal = typeof options?.viaPortal === "string" ? options.viaPortal : undefined;
+    const area =
+      (viaPortal === undefined ? null : this.portalIndex.arrivalFor(viaPortal)) ?? this.spawn;
+
+    const spawnTile = this.pickSpawnTile(area);
     this.state.players.set(
       client.sessionId,
       new Player({
@@ -215,6 +240,17 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // swapping these two lines fails no test today — but a warp step would break it.
     this.proximityIndex.move(client.sessionId, destination);
     this.refreshViewsAround(client.sessionId, from, destination);
+
+    // Last, strictly after the index and view bookkeeping above: a throw on this path must not
+    // leave that bookkeeping half-applied, which is the failure that makes a player permanently
+    // invisible (or permanently visible) to their neighbours.
+    const portal = this.portalIndex.triggerAt(destination.tileX, destination.tileY);
+    if (portal !== null) {
+      client.send(ServerMessage.PortalEntered, {
+        portalId: portal.id,
+        toRoom: portal.to.room,
+      } satisfies PortalEntered);
+    }
   }
 
   private handleChat(client: RoomClient, message: ChatRequest): void {
@@ -248,30 +284,33 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   }
 
   /**
-   * A walkable tile within `spreadRadiusInTiles` of the room's spawn centre. Spreading matters
+   * A walkable tile within `area.spreadRadiusInTiles` of `area`'s centre. Spreading matters
    * beyond looks: with everyone stacked on one tile every client sits inside every other
    * client's view radius, so interest management filters nothing and a load test measures the
    * worst case only.
+   *
+   * The area is a parameter rather than `this.spawn` so that a portal arrival and a plain join
+   * share this one placement path; both centres are boot-validated as walkable.
    *
    * Rejection sampling rather than a precomputed list of walkable tiles — 74% of grand-plaza's
    * spawn square is walkable, so a draw succeeds in ~1.3 attempts and 16 consecutive misses has
    * probability ~5e-10. The fallback is the centre tile, which boot validates as walkable.
    */
-  private pickSpawnTile(): TilePosition {
-    const radius = this.spawn.spreadRadiusInTiles;
+  private pickSpawnTile(area: SpawnArea): TilePosition {
+    const radius = area.spreadRadiusInTiles;
     if (radius <= 0) {
-      return { tileX: this.spawn.tileX, tileY: this.spawn.tileY };
+      return { tileX: area.tileX, tileY: area.tileY };
     }
     const span = radius * 2 + 1;
     for (let attempt = 0; attempt < SPAWN_SAMPLE_ATTEMPTS; attempt++) {
       // Draws outside the map need no separate guard: isWalkable() already reports them blocked.
-      const tileX = this.spawn.tileX - radius + Math.floor(Math.random() * span);
-      const tileY = this.spawn.tileY - radius + Math.floor(Math.random() * span);
+      const tileX = area.tileX - radius + Math.floor(Math.random() * span);
+      const tileY = area.tileY - radius + Math.floor(Math.random() * span);
       if (this.collisionMap.isWalkable(tileX, tileY)) {
         return { tileX, tileY };
       }
     }
-    return { tileX: this.spawn.tileX, tileY: this.spawn.tileY };
+    return { tileX: area.tileX, tileY: area.tileY };
   }
 
   /**

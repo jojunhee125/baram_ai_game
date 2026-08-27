@@ -41,6 +41,10 @@
           />
         </div>
 
+        <!-- Before #boot-status so a boot error raised during the new room's load stays visible. -->
+        <div id="transition" class="transition" data-state="clear" aria-hidden="true"></div>
+        <p id="transition-notice" class="notice" role="status" aria-live="polite" hidden></p>
+
         <div id="boot-status" class="boot" data-state="loading" role="status" aria-live="polite">
           <span class="boot__spinner" aria-hidden="true"></span>
           <p class="boot__title" data-boot-title>화면을 준비하는 중</p>

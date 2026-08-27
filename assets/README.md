@@ -56,6 +56,17 @@ NINJA_ASSET_ROOT=<ninja-adventure-repo-root> node tools/import-ninja-assets.mjs
 
 현재 맵의 통행 가능 칸은 300칸 중 218칸. **추천 spawn tile은 `{ tileX: 9, tileY: 11 }`** (중앙 분수 남쪽, 통행 가능) — `RoomCreateOptions.spawn`에 넣으면 된다. spawn은 맵이 아니라 room 설정에서 온다(`server/src/rooms/contracts.ts`의 `SpawnArea`). `plaza`는 `spreadRadiusInTiles: 0` 이라 전원이 이 타일 하나에 그대로 선다.
 
+### plaza 포탈 타일
+
+좌표 정본은 `server/src/rooms/portalDefinitions.ts`(코드 측 테이블, 근거는 `docs/design-portal-object.md` §1). 여기 기록은 맵을 편집할 때 대조하기 위한 것이다 — 문 그림을 옮기면 양쪽을 같이 고쳐야 한다.
+
+| 역할 | 타일 | 포탈 |
+|---|---|---|
+| 트리거 (남쪽 문) | `{15,13}` `{16,13}` | `plaza-south-door` → `grand-plaza` |
+| 도착 | `{15,12}` | `grand-plaza-north-door` 로 들어올 때 |
+
+트리거는 남쪽 벽(row 14) 바로 위 2칸이고 도착은 그 북쪽 옆 칸이다. **spawn row 11(x 1–18)과 x=1 열에는 문을 두지 말 것** — `metaverseRoom.integration.test.ts`가 그 경로를 통째로 걸어 다니므로 포탈과 무관한 테스트가 문을 밟는다. 이 제약은 `server/src/game/portals.test.ts`가 검증한다.
+
 ## maps/grand-plaza.json
 
 Go/No-go PoC #2(500 CCU broadcast 측정) 전용 맵. 설계 근거와 수치 유도는 `docs/poc2-design.md` §1.
@@ -71,6 +82,15 @@ Go/No-go PoC #2(500 CCU broadcast 측정) 전용 맵. 설계 근거와 수치 �
 | 경계 밴드 | 좌우 10열, 상 7행, 하 8행 | 전부 통행 불가 |
 | 내부 | 140 x 130 | 10x10 super-tile 14 x 13개, 각 super-tile에 5x4 건물 + 나머지는 거리 |
 | 중앙 광장 | `x 60–99`, `y 57–86` | super-tile 12개를 비운 40 x 30 완전 개방 |
+
+### grand-plaza 포탈 타일
+
+| 역할 | 타일 | 포탈 |
+|---|---|---|
+| 트리거 (북서 골목 북단) | `{16,7}` `{17,7}` | `grand-plaza-north-door` → `plaza` |
+| 도착 | `{16,8}` | `plaza-south-door` 로 들어올 때 |
+
+북서 골목(`x 15–19`, `y 7–10`)의 막힌 북쪽 끝 2칸이다. 도착 타일은 그 바로 남쪽 칸 — 도착 타일이 역방향 트리거와 정확히 겹치면 부팅이 **경고**를 낸다(거부는 아니다. 폭 1칸 통로처럼 옆 칸이 없는 정당한 레이아웃이 있으므로). 트리거·도착이 통행 불가면 **부팅 거부**다(`validateRoomMaps`).
 
 **경계 밴드에 통행 가능 칸이 하나라도 생기면 안 된다.** 아바타 origin이 `(0.5, 1)`(타일 아래변)이라 밴드 두께가 상하 비대칭인 것도 같은 이유 — 이 밴드가 비어 있는 동안에만 Phaser 카메라가 `setBounds` 클램프에 걸리지 않고, 로컬 플레이어가 **항상 정확히 화면 중앙**에 있다. 그 불변식 위에서 "화면에 보일 수 있는 최대 Chebyshev 거리 = 10"이 성립하고 `VIEW_RADIUS_TILES`가 그로부터 유도된다. 밴드가 뚫리면 반경 상수의 근거가 통째로 무너진다.
 

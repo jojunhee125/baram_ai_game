@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { Encoder } from "@colyseus/schema";
 import { Server, WebSocketTransport } from "colyseus";
+import { validatePortalDefinitions } from "./game/portals";
 import { TiledMapLoader } from "./game/tiledMap";
 import { markReady, markUnhealthy } from "./http/readiness";
 import { configureHttpRoutes } from "./http/routes";
@@ -8,6 +9,7 @@ import { observeWebSocketUpgrade } from "./http/wsAuthProbe";
 import type { CollisionMap } from "./rooms/contracts";
 import { ROOM_DEFINITIONS } from "./rooms/definitions";
 import { MetaverseRoom } from "./rooms/metaverseRoom";
+import { PORTAL_DEFINITIONS } from "./rooms/portalDefinitions";
 
 export const DEFAULT_PORT = 2567;
 
@@ -53,11 +55,15 @@ export function resolvePort(value: string | undefined): number {
  * that had been reporting itself healthy for hours. Refuse to boot instead.
  *
  * The spawn checks are here for the same reason: a spawn centre inside a wall strands every
- * client that joins that room, and nothing would reveal it until the first join.
+ * client that joins that room, and nothing would reveal it until the first join. Portal
+ * triggers and arrivals are checked on the same grounds — a portal is only ever exercised by
+ * someone walking into that one door.
  */
 async function validateRoomMaps(): Promise<void> {
   const loader = new TiledMapLoader();
   const maps = new Map<string, CollisionMap>();
+  /** Keyed by room name, not mapKey: the portal table names rooms, and rooms may share a map. */
+  const mapsByRoom = new Map<string, CollisionMap>();
 
   for (const definition of ROOM_DEFINITIONS) {
     let map = maps.get(definition.mapKey);
@@ -69,6 +75,7 @@ async function validateRoomMaps(): Promise<void> {
       }
       maps.set(definition.mapKey, map);
     }
+    mapsByRoom.set(definition.name, map);
 
     const { spawn } = definition;
     if (spawn.spreadRadiusInTiles < 0) {
@@ -83,6 +90,15 @@ async function validateRoomMaps(): Promise<void> {
       );
     }
   }
+
+  const { errors, warnings } = validatePortalDefinitions(PORTAL_DEFINITIONS, mapsByRoom);
+  for (const warning of warnings) {
+    console.warn(`[zep-test] ${warning}`);
+  }
+  if (errors.length > 0) {
+    refuseBoot(`invalid portal definitions: ${errors.join("; ")}`);
+  }
+
   markReady();
 }
 

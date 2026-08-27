@@ -40,6 +40,14 @@ export class MovementKeys {
     return this.held.at(-1) ?? null;
   }
 
+  /** Mandatory before constructing a successor (a portal hop does): the listeners are global. */
+  destroy(): void {
+    window.removeEventListener("keydown", this.handleKeyDown);
+    window.removeEventListener("keyup", this.handleKeyUp);
+    window.removeEventListener("blur", this.clear);
+    document.removeEventListener("focusin", this.handleFocusIn);
+  }
+
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
     const direction = KEY_DIRECTIONS[event.code];
     if (direction === undefined || isTextEntry(document.activeElement)) {

@@ -24,6 +24,16 @@ export class ChatPanel {
     this.root.hidden = false;
   }
 
+  /**
+   * Mandatory before constructing a successor (a portal hop does): the DOM nodes are shared, so
+   * an abandoned panel's keydown listener still runs first, sends to the room it left, and
+   * empties the composer before the live panel ever sees the text.
+   */
+  destroy(): void {
+    this.input.removeEventListener("keydown", this.handleInputKey);
+    window.removeEventListener("keydown", this.handleGlobalKey);
+  }
+
   append(message: ChatBroadcast, isSelf: boolean): void {
     this.empty.hidden = true;
 

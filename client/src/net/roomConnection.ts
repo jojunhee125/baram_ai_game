@@ -1,6 +1,5 @@
 import { Client, getStateCallbacks, type Room } from "@colyseus/sdk";
 import {
-  AVATAR_SKIN_COUNT,
   ClientMessage,
   RoomState,
   ServerMessage,
@@ -11,7 +10,9 @@ import {
   type MoveRejected,
   type MoveRequest,
   type Player,
+  type PortalEntered,
 } from "@zep-test/shared";
+import { resolveJoinOptions } from "./identity";
 
 /** Only used by `vite dev`, where the page (:5173) and the game server are separate origins. */
 const DEV_SERVER_PORT = 2567;
@@ -43,6 +44,8 @@ export interface RoomEvents {
   onPlayerRemove?(sessionId: string): void;
   onChat?(message: ChatBroadcast): void;
   onMoveRejected?(correction: MoveRejected): void;
+  /** The local player stepped onto a portal trigger; the consumer owns the room transition. */
+  onPortalEntered?(event: PortalEntered): void;
   /** Connection closed after a successful join — includes kick, server restart, network drop. */
   onLeave?(code: number, reason?: string): void;
   onError?(code: number, message?: string): void;
@@ -62,6 +65,8 @@ export class RoomConnection {
   private readonly detachers = new Map<string, () => void>();
   private events: RoomEvents = {};
   private attached = false;
+  private leaving = false;
+  private left = false;
   private pendingLifecycle: PendingLifecycle | null = null;
 
   private constructor(
@@ -81,7 +86,7 @@ export class RoomConnection {
     const client = new Client(resolveEndpoint());
     const room = await client.joinOrCreate<RoomState>(
       roomName,
-      options ?? createPlaceholderIdentity(),
+      options ?? resolveJoinOptions(),
       RoomState,
     );
     await firstState(room);
@@ -101,6 +106,11 @@ export class RoomConnection {
     return this.room.sessionId;
   }
 
+  /** True once this room has closed, whether we asked for it or the socket dropped. */
+  get hasLeft(): boolean {
+    return this.left;
+  }
+
   /** Every player currently inside this client's view radius, including itself. */
   get players(): ReadonlyMap<string, PlayerSnapshot> {
     return this.snapshots;
@@ -114,7 +124,25 @@ export class RoomConnection {
     this.room.send(ClientMessage.Chat, { text } satisfies ChatRequest);
   }
 
+  /**
+   * Hangs up on purpose, as the last step of a portal hop. `leaving` keeps the resulting
+   * `room.onLeave` out of `RoomEvents.onLeave`, whose consumers treat a leave as a lost
+   * connection and say so on screen.
+   *
+   * A room that is already gone resolves at once instead of hanging: `Room.leave()` waits on a
+   * listener it registers itself, and `onLeave` is a signal with no replay, so a socket that
+   * dropped a moment earlier — the tail of a portal hop is exactly such a moment — would never
+   * settle that promise, and the caller would sit behind the wipe forever.
+   *
+   * That early return is silent by design, so the drop it swallowed is reported elsewhere:
+   * `WorldScene.abandonTransition` reads {@link hasLeft} to tell a hop that merely failed from
+   * one that also lost the room it started in. Removing either half hides a dead connection.
+   */
   async leave(): Promise<void> {
+    if (this.left) {
+      return;
+    }
+    this.leaving = true;
     await this.room.leave(true);
   }
 
@@ -151,6 +179,9 @@ export class RoomConnection {
     this.room.onMessage(ServerMessage.MoveRejected, (correction: MoveRejected) => {
       this.events.onMoveRejected?.(correction);
     });
+    this.room.onMessage(ServerMessage.PortalEntered, (event: PortalEntered) => {
+      this.events.onPortalEntered?.(event);
+    });
   }
 
   /**
@@ -160,6 +191,11 @@ export class RoomConnection {
    */
   private bindLifecycle(): void {
     this.room.onLeave((code, reason) => {
+      // Recorded for every leave, wanted or not, because `leave()` reads it to stay non-blocking.
+      this.left = true;
+      if (this.leaving) {
+        return;
+      }
       if (!this.attached) {
         this.pendingLifecycle ??= { kind: "leave", code, reason };
         return;
@@ -218,13 +254,5 @@ function toSnapshot(player: Player): PlayerSnapshot {
     // `facing` crosses the wire as uint8; the server only ever writes Direction values.
     facing: player.facing as Direction,
     avatarSkin: player.avatarSkin,
-  };
-}
-
-/** Stand-in until a character-select screen exists; not a Phase1 deliverable. */
-function createPlaceholderIdentity(): JoinOptions {
-  return {
-    nickname: `손님${Math.floor(Math.random() * 9000) + 1000}`,
-    avatarSkin: Math.floor(Math.random() * AVATAR_SKIN_COUNT),
   };
 }

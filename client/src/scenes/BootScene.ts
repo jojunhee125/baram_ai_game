@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { showBootError, showBootLoading } from "../bootStatus";
+import { resolveJoinOptions } from "../net/identity";
 import { RoomConnection } from "../net/roomConnection";
 import { resolveRoomName } from "../net/roomTarget";
 import { WorldScene, type WorldSceneData } from "./WorldScene";
@@ -26,7 +27,8 @@ export class BootScene extends Phaser.Scene {
 
     let connection: RoomConnection;
     try {
-      connection = await RoomConnection.connect(roomName);
+      // The same identity a portal hop rejoins with, so walking through a door keeps the avatar.
+      connection = await RoomConnection.connect(roomName, resolveJoinOptions());
     } catch (error) {
       console.error(`failed to join room "${roomName}"`, error);
       showBootError(

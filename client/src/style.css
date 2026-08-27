@@ -266,6 +266,43 @@ body {
   background: rgba(20, 19, 26, 0.92);
 }
 
+/*
+ * Wipe for a portal hop. Always mounted rather than [hidden], because an element coming back
+ * from display:none has no previous opacity to animate from. Click-through while clear, and a
+ * fixed dark fill in both schemes to match the canvas it covers.
+ */
+.transition {
+  position: absolute;
+  inset: 0;
+  background: #14131a;
+  opacity: 0;
+  pointer-events: none;
+  /* Duration mirrors FADE_MS in transitionOverlay.ts, which waits it out. */
+  transition: opacity 200ms ease;
+}
+
+.transition[data-state="opaque"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.notice {
+  position: absolute;
+  top: var(--space-3);
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(80%, 40ch);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(20, 19, 26, 0.92);
+  color: #eceaf4;
+  font-size: 12px;
+  text-align: center;
+  text-wrap: pretty;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .boot__spinner {
     animation: none;
@@ -273,7 +310,8 @@ body {
   }
 
   .boot__retry,
-  .chat__input {
+  .chat__input,
+  .transition {
     transition: none;
   }
 }

@@ -1,8 +1,10 @@
 import Phaser from "phaser";
-import { TILE_SIZE_PX, type ChatBroadcast } from "@zep-test/shared";
+import { TILE_SIZE_PX, type ChatBroadcast, type PortalEntered } from "@zep-test/shared";
 import { hideBootStatus, showBootError } from "../bootStatus";
 import { MovementKeys } from "../input/movementKeys";
-import type { PlayerSnapshot, RoomConnection } from "../net/roomConnection";
+import { resolveJoinOptions } from "../net/identity";
+import { RoomConnection, type PlayerSnapshot } from "../net/roomConnection";
+import { fadeFromBlack, fadeToBlack, showTransitionNotice } from "../transitionOverlay";
 import { ChatPanel } from "../ui/chatPanel";
 import { ChatBubbles } from "../world/chatBubbles";
 import { LocalPlayer } from "../world/localPlayer";
@@ -38,6 +40,7 @@ export class WorldScene extends Phaser.Scene {
   private localPlayer: LocalPlayer | null = null;
   private movementKeys: MovementKeys | null = null;
   private lastStepAt = Number.NEGATIVE_INFINITY;
+  private transitioning = false;
 
   constructor() {
     super(WorldScene.KEY);
@@ -46,6 +49,15 @@ export class WorldScene extends Phaser.Scene {
   init(data: WorldSceneData): void {
     this.connection = data.connection;
     this.mapKey = data.connection.mapKey;
+    // Phaser restarts this scene for a portal hop by re-running these hooks on the same
+    // instance, so every field that outlives create() has to be cleared by hand. A surviving
+    // localPlayer is the loud one: initLocalPlayer() early-returns on it, and the avatar then
+    // sends its steps to the room it already left.
+    this.chat = null;
+    this.localPlayer = null;
+    this.movementKeys = null;
+    this.lastStepAt = Number.NEGATIVE_INFINITY;
+    this.transitioning = false;
   }
 
   preload(): void {
@@ -74,6 +86,10 @@ export class WorldScene extends Phaser.Scene {
     } catch (error) {
       console.error(error);
       showBootError("맵을 그리지 못했습니다", "맵 데이터가 올바르지 않습니다. 새로고침해 주세요.");
+      // Returning alone leaves `update()` running against renderers this run never assigned —
+      // undefined on the first boot, the previous run's destroyed objects after a portal hop —
+      // which throws on every frame behind the error overlay.
+      this.scene.pause();
       return;
     }
 
@@ -87,7 +103,22 @@ export class WorldScene extends Phaser.Scene {
       },
       onMoveRejected: (correction) => this.localPlayer?.applyRejection(correction),
       onChat: (message) => this.showChat(message),
+      onPortalEntered: (event) => {
+        // `catch`, not `finally`: on the success path this promise settles after `scene.start`,
+        // so a `finally` would lift the gate on a run that has already been replaced.
+        void this.transitionTo(event).catch((error: unknown) => {
+          console.error("portal transition failed", error);
+          void this.abandonTransition();
+        });
+      },
       onLeave: () => {
+        // Not the leave we asked for; that one never reaches here (RoomConnection.leaving).
+        // This is a drop mid-hop, which leave() then early-returns on — the hop still lands, so
+        // a "connection lost" modal would be a lie. abandonTransition() reports it via hasLeft,
+        // and only when the hop failed too.
+        if (this.transitioning) {
+          return;
+        }
         showBootError(
           "서버와의 연결이 끊어졌습니다",
           "네트워크 상태를 확인한 뒤 다시 시도해 주세요.",
@@ -103,6 +134,9 @@ export class WorldScene extends Phaser.Scene {
     // attach() replays the players already in view, so addPlayer() normally does this first.
     this.initLocalPlayer();
     hideBootStatus();
+    // No-op on the first boot, where the overlay is already clear; on a portal hop this is the
+    // far side of the wipe that transitionTo() drew.
+    void fadeFromBlack();
   }
 
   followTarget(target: Phaser.GameObjects.GameObject): void {
@@ -112,6 +146,11 @@ export class WorldScene extends Phaser.Scene {
   override update(time: number): void {
     this.bubbles.update(time);
     this.nameTags.update();
+
+    // Behind the wipe the old room is still live; a step taken here would be applied there.
+    if (this.transitioning) {
+      return;
+    }
 
     const dir = this.movementKeys?.active;
     if (dir === null || dir === undefined || !this.localPlayer) {
@@ -124,6 +163,61 @@ export class WorldScene extends Phaser.Scene {
     }
     this.lastStepAt = time;
     this.localPlayer.step(dir);
+  }
+
+  /**
+   * Joins the destination before leaving the source: a failed join leaves the player exactly
+   * where they were, whereas leaving first would strand them in no room at all with nothing to
+   * recover with but a reload. Every await finishes before `scene.start`, which ends this
+   * instance's current run — resuming an await afterwards would run against a dead scene.
+   */
+  private async transitionTo({ portalId, toRoom }: PortalEntered): Promise<void> {
+    // Stepping off the trigger and back on fires again, and the server does not care that we
+    // are mid-hop.
+    if (this.transitioning) {
+      return;
+    }
+    this.transitioning = true;
+    await fadeToBlack();
+
+    let next: RoomConnection;
+    try {
+      next = await RoomConnection.connect(toRoom, {
+        ...resolveJoinOptions(),
+        viaPortal: portalId,
+      });
+    } catch (error) {
+      console.error(`failed to join room "${toRoom}" through portal "${portalId}"`, error);
+      await this.abandonTransition();
+      return;
+    }
+
+    await this.connection.leave();
+    // Both hold window/document listeners, which the scene restart does not touch.
+    this.chat?.destroy();
+    this.movementKeys?.destroy();
+    this.scene.start(WorldScene.KEY, { connection: next } satisfies WorldSceneData);
+  }
+
+  /**
+   * Lifts the wipe and the input gate, leaving the player in the room they never left.
+   *
+   * The gate reopens last, after the fade and after the message is on screen. Reopening it
+   * first would let a held arrow key step along a two-tile doorway and fire the next hop
+   * within a frame, whose `fadeToBlack()` would clear this attempt's notice — which would then
+   * be posted again over a hop that had meanwhile succeeded.
+   */
+  private async abandonTransition(): Promise<void> {
+    await fadeFromBlack();
+    if (this.connection.hasLeft) {
+      // Both rooms are gone: the source dropped while the wipe was up and the hop failed too.
+      // The gate stays shut on purpose — there is no live room to walk around in, and the
+      // overlay's reload button is the only way out.
+      showBootError("서버와의 연결이 끊어졌습니다", "네트워크 상태를 확인한 뒤 다시 시도해 주세요.");
+      return;
+    }
+    showTransitionNotice("문 너머로 이동하지 못했습니다. 잠시 후 다시 지나가 보세요.");
+    this.transitioning = false;
   }
 
   private addPlayer(sessionId: string, snapshot: PlayerSnapshot): void {

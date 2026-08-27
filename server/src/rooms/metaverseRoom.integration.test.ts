@@ -16,10 +16,12 @@ import {
   type ChatBroadcast,
   type MoveRejected,
   type Player,
+  type PortalEntered,
   type RoomState,
 } from "@zep-test/shared";
 import { createGameServer } from "../server";
 import { ROOM_DEFINITIONS } from "./definitions";
+import { PORTAL_DEFINITIONS } from "./portalDefinitions";
 
 /**
  * `boot()` from @colyseus/testing ignores its `port` argument when handed a `Server`
@@ -34,6 +36,19 @@ if (definition === undefined) {
   throw new Error("ROOM_DEFINITIONS is empty; the integration suite has no room to join");
 }
 const plaza = definition;
+
+/** The round trip through plaza: the door out of it, and the door back into it. */
+const outbound = PORTAL_DEFINITIONS.find((portal) => portal.from.room === plaza.name);
+const inbound = PORTAL_DEFINITIONS.find((portal) => portal.to.room === plaza.name);
+const [firstDoorTile] = outbound?.from.tiles ?? [];
+if (outbound === undefined || inbound === undefined || firstDoorTile === undefined) {
+  throw new Error(`PORTAL_DEFINITIONS has no round trip through "${plaza.name}"`);
+}
+// Re-bound, like `plaza` above: a narrowed `const` does not stay narrowed inside the hoisted
+// helper functions below, but a fresh declaration's own type does.
+const outboundPortal = outbound;
+const inboundPortal = inbound;
+const doorTile = firstDoorTile;
 
 const MOVE_INTERVAL_MS = 1000 / MAX_MOVES_PER_SECOND;
 const CHAT_INTERVAL_MS = 1000 / MAX_CHATS_PER_SECOND;
@@ -91,6 +106,7 @@ interface ClientRoom {
 interface Inbox {
   chats: ChatBroadcast[];
   rejects: MoveRejected[];
+  portals: PortalEntered[];
 }
 
 let testServer: ColyseusTestServer;
@@ -131,12 +147,15 @@ function seenIds(client: ClientRoom): string[] {
 }
 
 function collect(client: ClientRoom): Inbox {
-  const inbox: Inbox = { chats: [], rejects: [] };
+  const inbox: Inbox = { chats: [], rejects: [], portals: [] };
   client.onMessage(ServerMessage.Chat, (message: unknown) => {
     inbox.chats.push(message as ChatBroadcast);
   });
   client.onMessage(ServerMessage.MoveRejected, (message: unknown) => {
     inbox.rejects.push(message as MoveRejected);
+  });
+  client.onMessage(ServerMessage.PortalEntered, (message: unknown) => {
+    inbox.portals.push(message as PortalEntered);
   });
   return inbox;
 }
@@ -170,8 +189,17 @@ async function createPlaza(): Promise<PlazaRoom> {
   return (await testServer.createRoom<RoomState>(plaza.name, {})) as PlazaRoom;
 }
 
-async function join(room: PlazaRoom, nickname: string, avatarSkin = 0): Promise<ClientRoom> {
-  const client = (await testServer.connectTo(room, { nickname, avatarSkin })) as unknown as ClientRoom;
+async function join(
+  room: PlazaRoom,
+  nickname: string,
+  avatarSkin = 0,
+  viaPortal?: string,
+): Promise<ClientRoom> {
+  const client = (await testServer.connectTo(room, {
+    nickname,
+    avatarSkin,
+    viaPortal,
+  })) as unknown as ClientRoom;
   await waitUntil(
     () => seen(client, client.sessionId) !== undefined,
     `${nickname} to decode its own player entry`,
@@ -804,6 +832,142 @@ describe("MetaverseRoom — movement authority", () => {
       CORRIDOR_MAX_X,
       "the wall at the corridor edge holds",
     );
+  });
+});
+
+describe("MetaverseRoom — portals", () => {
+  /**
+   * Right along the spawn row, then south to the door. A hand-checked route across plaza.json
+   * rather than a search: `expectServerAt` fails loudly if the map or the portal row moves.
+   */
+  async function walkToDoor(room: PlazaRoom, client: ClientRoom): Promise<void> {
+    await stepMany(client, Direction.Right, doorTile.tileX - plaza.spawn.tileX);
+    await expectServerAt(
+      room,
+      client,
+      doorTile.tileX,
+      plaza.spawn.tileY,
+      "the walker reaches the door's column",
+    );
+    await stepMany(client, Direction.Down, doorTile.tileY - plaza.spawn.tileY);
+    await expectServerAt(room, client, doorTile.tileX, doorTile.tileY, "the walker steps onto the door");
+  }
+
+  it("sends PortalEntered to the mover alone when an accepted step lands on a trigger tile", async () => {
+    const room = await createPlaza();
+    const walker = await join(room, "walker");
+    const bystander = await join(room, "bystander");
+    const walkerInbox = collect(walker);
+    const bystanderInbox = collect(bystander);
+
+    await walkToDoor(room, walker);
+
+    await waitUntil(() => walkerInbox.portals.length === 1, "the walker's PortalEntered");
+    assert.deepEqual(walkerInbox.portals[0], {
+      portalId: outboundPortal.id,
+      toRoom: outboundPortal.to.room,
+    });
+    await sleep(SETTLE_MS);
+    assertEmpty(bystanderInbox.portals, "PortalEntered goes only to the mover");
+    assertEmpty(walkerInbox.rejects, "the walk onto the door is a normal accepted step");
+    // The server keeps no transition state: the client is simply standing on the door.
+    assert.equal(room.state.players.size, 2, "entering a portal does not remove the player");
+    assert.equal(serverPlayer(room, walker.sessionId).tileX, doorTile.tileX);
+    assert.equal(serverPlayer(room, walker.sessionId).tileY, doorTile.tileY);
+  });
+
+  it("fires again on a fresh entry, but not for a refused step off the door", async () => {
+    const room = await createPlaza();
+    const walker = await join(room, "walker");
+    const inbox = collect(walker);
+    await walkToDoor(room, walker);
+    await waitUntil(() => inbox.portals.length === 1, "the first PortalEntered");
+
+    // Row 14 of plaza.json is the south wall. A refused step enters no tile, so it must not
+    // re-fire the door the player is already standing on.
+    walker.send(ClientMessage.Move, { dir: Direction.Down });
+    await waitUntil(() => inbox.rejects.length === 1, "the wall refusal");
+    await sleep(SETTLE_MS);
+    assert.equal(inbox.portals.length, 1, "a refused step must not fire a portal");
+
+    await sleep(MOVE_COOLDOWN_MS);
+    await stepMany(walker, Direction.Up, 1);
+    await expectServerAt(
+      room,
+      walker,
+      doorTile.tileX,
+      doorTile.tileY - 1,
+      "the walker steps off the door",
+    );
+    assert.equal(inbox.portals.length, 1, "stepping off a portal fires nothing");
+
+    await stepMany(walker, Direction.Down, 1);
+    await waitUntil(() => inbox.portals.length === 2, "PortalEntered again after stepping back on");
+  });
+
+  it("places a client joining with viaPortal on that portal's arrival tile", async () => {
+    const room = await createPlaza();
+    const { arrival } = inboundPortal.to;
+    assert.notDeepEqual(
+      { tileX: arrival.tileX, tileY: arrival.tileY },
+      { tileX: plaza.spawn.tileX, tileY: plaza.spawn.tileY },
+      "precondition: the arrival tile is not the generic spawn, or this proves nothing",
+    );
+
+    const arriving = await join(room, "arriving", 0, inboundPortal.id);
+
+    const authoritative = serverPlayer(room, arriving.sessionId);
+    assert.equal(authoritative.tileX, arrival.tileX);
+    assert.equal(authoritative.tileY, arrival.tileY);
+    const self = seen(arriving, arriving.sessionId);
+    assert.ok(self);
+    assert.equal(self.tileX, arrival.tileX, "the client decodes the arrival tile too");
+    assert.equal(self.tileY, arrival.tileY);
+  });
+
+  it("falls back to the room spawn for a viaPortal this room does not own", async () => {
+    const room = await createPlaza();
+    // Holds the room open across the leaves below, which would otherwise dispose it.
+    await join(room, "anchor");
+
+    const notOurs: readonly string[] = [
+      "no-such-portal",
+      // A door *out of* plaza: its arrival belongs to the destination room, not to this one.
+      outboundPortal.id,
+      "",
+      42 as unknown as string,
+    ];
+    for (const viaPortal of notOurs) {
+      const client = await join(room, "fallback", 0, viaPortal);
+      const authoritative = serverPlayer(room, client.sessionId);
+      const label = `viaPortal=${JSON.stringify(viaPortal)}`;
+      assert.equal(authoritative.tileX, plaza.spawn.tileX, label);
+      assert.equal(authoritative.tileY, plaza.spawn.tileY, label);
+      await client.leave();
+      await waitUntil(() => room.state.players.size === 1, `${label} to leave no player behind`);
+    }
+  });
+
+  it("treats a join whose viaPortal key is absent and one whose value is undefined alike", async () => {
+    // `join()` above always puts the key in the options object, undefined when unused, so every
+    // pre-portal test in this file now sends a shape it never sent before. This is the check
+    // that the added key is genuinely inert rather than quietly meaning something.
+    const room = await createPlaza();
+    const explicit = (await testServer.connectTo(room, {
+      nickname: "explicit",
+      avatarSkin: 0,
+      viaPortal: undefined,
+    })) as unknown as ClientRoom;
+    const absent = (await testServer.connectTo(room, {
+      nickname: "absent",
+      avatarSkin: 0,
+    })) as unknown as ClientRoom;
+
+    for (const client of [explicit, absent]) {
+      const authoritative = serverPlayer(room, client.sessionId);
+      assert.equal(authoritative.tileX, plaza.spawn.tileX, `${authoritative.nickname} tileX`);
+      assert.equal(authoritative.tileY, plaza.spawn.tileY, `${authoritative.nickname} tileY`);
+    }
   });
 });
 

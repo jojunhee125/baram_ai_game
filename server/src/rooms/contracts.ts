@@ -28,6 +28,84 @@ export interface RoomDefinition extends RoomCreateOptions {
   name: string;
 }
 
+/**
+ * A one-way link from trigger tiles in one room to an arrival point in another: the portal /
+ * door object of roadmap item 3. Authored in code beside `ROOM_DEFINITIONS` rather than in the
+ * map file, because the destination is a matchmaking room name — a concept map data has no
+ * word for. Rationale and the rejected map-embedded alternative: `docs/design-portal-object.md`.
+ *
+ * One-way by construction. A door you can walk back through is two rows, which is what lets
+ * the two sides have different arrival tiles.
+ */
+export interface PortalDefinition {
+  /**
+   * Stable unique key, e.g. `"plaza-north-door"`. It crosses the wire both ways
+   * (`PortalEntered.portalId`, `JoinOptions.viaPortal`), so it must not be a table index:
+   * reordering the rows would silently reroute a client that is mid-transition.
+   *
+   * Untrusted on the way back in, but it is only ever a lookup key — never a path or a query —
+   * so an unknown value needs no sanitising, just the documented spawn fallback.
+   */
+  id: string;
+  from: PortalSource;
+  to: PortalTarget;
+}
+
+/** Where a portal is entered. */
+export interface PortalSource {
+  /** Matchmaking name of the room holding the trigger tiles — a {@link RoomDefinition} `name`. */
+  room: string;
+  /**
+   * Every tile that fires this portal, so a two-tile-wide doorway is one portal instead of two
+   * rows that have to be kept in step. Must be non-empty, and every tile must be walkable: an
+   * unwalkable trigger can never be stepped onto, which is a portal that silently does nothing.
+   */
+  tiles: readonly TilePosition[];
+}
+
+/** Where a portal comes out. */
+export interface PortalTarget {
+  /** Matchmaking name of the destination room — a {@link RoomDefinition} `name`. */
+  room: string;
+  /**
+   * Arrival placement, a {@link SpawnArea} so that one sampler serves both this and the
+   * room's own spawn. The arrival belongs to the portal, not to the room, which is how several
+   * portals can land in the same room at different spots while `RoomDefinition.spawn` stays a
+   * single value.
+   *
+   * `spreadRadiusInTiles: 0` is the normal choice — a doorway wants a determinate tile — but a
+   * door into a 500-client room can spread rather than pile everyone onto one tile.
+   */
+  arrival: SpawnArea;
+}
+
+/**
+ * One room's view of the portal graph, narrowed from the whole table at `onCreate`.
+ *
+ * Two lookups because a room sits on both ends of the graph: it fires the portals that leave
+ * it, and it places the clients arriving through the portals that point at it. Neither lookup
+ * needs the rest of the table, and a room that appears in no row gets an index that answers
+ * null to everything — which is exactly what a test room or an unnamed room instance wants.
+ */
+export interface PortalIndex {
+  /**
+   * The portal fired by a move that just landed on this tile, or null.
+   *
+   * Runs on every accepted move, so an implementation must not allocate — in particular no
+   * `` `${tileX},${tileY}` `` map keys, which at the target load is per-move garbage on the
+   * hottest path in the room.
+   */
+  triggerAt(tileX: number, tileY: number): PortalDefinition | null;
+
+  /**
+   * Where a client joining with `JoinOptions.viaPortal` belongs, or null when this room is not
+   * that portal's destination — an unknown id, or one belonging to a door into another room.
+   *
+   * Null means "place them at the room's generic spawn", never "refuse the join".
+   */
+  arrivalFor(portalId: string): SpawnArea | null;
+}
+
 /** Data attached to `client.userData`; never synced to clients. */
 export interface PlayerSession {
   nickname: string;
