@@ -104,6 +104,14 @@ export interface PortalIndex {
    * Null means "place them at the room's generic spawn", never "refuse the join".
    */
   arrivalFor(portalId: string): SpawnArea | null;
+
+  /**
+   * Every tile that fires a portal leaving this room, for populating `RoomState.portalMarkers`
+   * at `onCreate` — the only reason this exists is to give the client something to draw. A
+   * duplicate entry (two portals sharing a trigger tile) is fine to emit twice; the client just
+   * draws the same marker twice on the same tile.
+   */
+  triggerTiles(): readonly TilePosition[];
 }
 
 /** Data attached to `client.userData`; never synced to clients. */

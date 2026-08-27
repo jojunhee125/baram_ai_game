@@ -16,6 +16,19 @@ export const Player = schema({
 export type Player = SchemaType<typeof Player>;
 
 /**
+ * A portal trigger tile's position, for rendering an in-world marker only — the client never
+ * learns a portal's id or destination room this way (see `PortalEntered`/`JoinOptions.viaPortal`
+ * for that). Static for the room's lifetime, so it needs no view tagging: every client sees
+ * every marker in the room it is in.
+ */
+export const PortalMarker = schema({
+  tileX: "uint16",
+  tileY: "uint16",
+});
+
+export type PortalMarker = SchemaType<typeof PortalMarker>;
+
+/**
  * Room state. `players` is view-tagged: each client receives only the entries
  * added to its own StateView, which is how proximity filtering is enforced.
  * The map key is the Colyseus sessionId.
@@ -24,6 +37,7 @@ export const RoomState = schema({
   roomType: "string",
   mapKey: "string",
   players: { map: Player, view: true },
+  portalMarkers: { array: PortalMarker },
 });
 
 export type RoomState = SchemaType<typeof RoomState>;

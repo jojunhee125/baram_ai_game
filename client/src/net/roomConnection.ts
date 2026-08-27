@@ -11,6 +11,8 @@ import {
   type MoveRequest,
   type Player,
   type PortalEntered,
+  type PortalMarker,
+  type TilePosition,
 } from "@zep-test/shared";
 import { resolveJoinOptions } from "./identity";
 
@@ -73,14 +75,20 @@ export class RoomConnection {
     private readonly room: Room<unknown, RoomState>,
     /** Read from RoomState, so the client can never disagree with the server about the map. */
     readonly mapKey: string,
+    /**
+     * Where this room's portal triggers are, for drawing an in-world marker. Copied once like
+     * `mapKey`, not held as the schema array: the server writes these in `onCreate` and never
+     * again, and renderers never hold schema instances.
+     */
+    readonly portalMarkers: readonly TilePosition[],
   ) {
     this.bindLifecycle();
   }
 
   /**
-   * Joins `roomName` and resolves only once the first state has arrived, so `mapKey` and
-   * `players` are populated: `joinOrCreate` alone resolves on the JOIN_ROOM frame, which
-   * precedes ROOM_STATE by an ack round trip.
+   * Joins `roomName` and resolves only once the first state has arrived, so `mapKey`,
+   * `portalMarkers` and `players` are populated: `joinOrCreate` alone resolves on the JOIN_ROOM
+   * frame, which precedes ROOM_STATE by an ack round trip.
    */
   static async connect(roomName: string, options?: JoinOptions): Promise<RoomConnection> {
     const client = new Client(resolveEndpoint());
@@ -90,7 +98,7 @@ export class RoomConnection {
       RoomState,
     );
     await firstState(room);
-    return new RoomConnection(room, room.state.mapKey);
+    return new RoomConnection(room, room.state.mapKey, toMarkers(room.state.portalMarkers));
   }
 
   /** Wires renderers. `onPlayerAdd` fires at once for everyone already in view. */
@@ -244,6 +252,14 @@ function firstState(room: Room<unknown, RoomState>): Promise<void> {
     );
     room.onLeave.once((code) => reject(new Error(`left before the first state (code ${code})`)));
   });
+}
+
+function toMarkers(markers: Iterable<PortalMarker>): TilePosition[] {
+  const positions: TilePosition[] = [];
+  for (const marker of markers) {
+    positions.push({ tileX: marker.tileX, tileY: marker.tileY });
+  }
+  return positions;
 }
 
 function toSnapshot(player: Player): PlayerSnapshot {

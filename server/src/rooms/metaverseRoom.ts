@@ -11,6 +11,7 @@ import {
   MAX_NICKNAME_LENGTH,
   PATCH_RATE_MS,
   Player,
+  PortalMarker,
   RoomState,
   ServerMessage,
   VIEW_RADIUS_TILES,
@@ -96,6 +97,11 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.collisionMap = await this.mapLoader.load(options.mapKey);
     this.proximityIndex = this.createProximityIndex(this.collisionMap);
     this.portalIndex = this.createPortalIndex(this.collisionMap);
+    // Static for the room's lifetime — populated once here, never touched again. This is the
+    // only reason the client learns a portal's position at all (never its id or destination).
+    for (const tile of this.portalIndex.triggerTiles()) {
+      this.state.portalMarkers.push(new PortalMarker(tile));
+    }
 
     this.onMessage(ClientMessage.Move, (client: RoomClient, message: MoveRequest) => {
       this.handleMove(client, message);

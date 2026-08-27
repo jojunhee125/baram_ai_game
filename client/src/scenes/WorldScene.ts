@@ -9,6 +9,7 @@ import { ChatPanel } from "../ui/chatPanel";
 import { ChatBubbles } from "../world/chatBubbles";
 import { LocalPlayer } from "../world/localPlayer";
 import { NameTags } from "../world/nameTags";
+import { drawPortalMarkers } from "../world/portalMarkers";
 import {
   AVATAR_TEXTURE,
   PlayerSprites,
@@ -79,6 +80,7 @@ export class WorldScene extends Phaser.Scene {
   create(): void {
     try {
       this.buildWorld();
+      drawPortalMarkers(this, this.connection.portalMarkers);
       registerAvatarAnimations(this);
       this.players = new PlayerSprites(this);
       this.bubbles = new ChatBubbles(this);

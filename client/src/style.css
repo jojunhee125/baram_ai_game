@@ -66,10 +66,16 @@ body {
   padding: var(--space-4);
 }
 
-/* 20x15 tiles = 4:3. min() keeps the stage inside both axes without breaking the ratio. */
+/*
+ * 20x15 tiles = 4:3. min() keeps the stage inside both axes without breaking the ratio: the
+ * height term subtracts .app's padding on both edges, and is what bounds the stage on any
+ * landscape window. No pixel cap on top of that — a cap sized to whole-number pixel scaling
+ * (1280px = 2x the 640px canvas) left most of a desktop window empty, and Scale.FIT handles
+ * the fractional scale that filling the window implies.
+ */
 .stage {
   position: relative;
-  width: min(100%, calc((100dvh - var(--space-8)) * 4 / 3), 1280px);
+  width: min(100%, calc((100dvh - var(--space-8)) * 4 / 3));
   aspect-ratio: 4 / 3;
   overflow: hidden;
   background: var(--surface-raised);

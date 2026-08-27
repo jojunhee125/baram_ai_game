@@ -1,3 +1,4 @@
+import type { TilePosition } from "@zep-test/shared";
 import type {
   CollisionMap,
   PortalDefinition,
@@ -16,6 +17,7 @@ import type {
 export class TablePortalIndex implements PortalIndex {
   private readonly triggers = new Map<number, PortalDefinition>();
   private readonly arrivals = new Map<string, SpawnArea>();
+  private readonly triggerTilePositions: TilePosition[] = [];
   private readonly widthInTiles: number;
 
   /**
@@ -36,6 +38,7 @@ export class TablePortalIndex implements PortalIndex {
       if (portal.from.room === roomName) {
         for (const tile of portal.from.tiles) {
           this.triggers.set(tile.tileY * this.widthInTiles + tile.tileX, portal);
+          this.triggerTilePositions.push({ tileX: tile.tileX, tileY: tile.tileY });
         }
       }
       if (portal.to.room === roomName) {
@@ -55,6 +58,10 @@ export class TablePortalIndex implements PortalIndex {
 
   arrivalFor(portalId: string): SpawnArea | null {
     return this.arrivals.get(portalId) ?? null;
+  }
+
+  triggerTiles(): readonly TilePosition[] {
+    return this.triggerTilePositions;
   }
 }
 
