@@ -12,6 +12,7 @@ import {
   type Player,
   type PortalEntered,
   type PortalMarker,
+  type Teleported,
   type TilePosition,
 } from "@zep-test/shared";
 import { resolveJoinOptions } from "./identity";
@@ -48,6 +49,8 @@ export interface RoomEvents {
   onMoveRejected?(correction: MoveRejected): void;
   /** The local player stepped onto a portal trigger; the consumer owns the room transition. */
   onPortalEntered?(event: PortalEntered): void;
+  /** The server warped the local player. Apply as an absolute position, never as a step. */
+  onTeleported?(event: Teleported): void;
   /** Connection closed after a successful join — includes kick, server restart, network drop. */
   onLeave?(code: number, reason?: string): void;
   onError?(code: number, message?: string): void;
@@ -73,6 +76,12 @@ export class RoomConnection {
 
   private constructor(
     private readonly room: Room<unknown, RoomState>,
+    /**
+     * The matchmaking name this connection joined by. Not read from `RoomState`, which carries
+     * `roomType` — a different concept that only happens to match today. The client passed this
+     * name to `connect()`, so it is already the authority on it.
+     */
+    readonly roomName: string,
     /** Read from RoomState, so the client can never disagree with the server about the map. */
     readonly mapKey: string,
     /**
@@ -98,7 +107,12 @@ export class RoomConnection {
       RoomState,
     );
     await firstState(room);
-    return new RoomConnection(room, room.state.mapKey, toMarkers(room.state.portalMarkers));
+    return new RoomConnection(
+      room,
+      roomName,
+      room.state.mapKey,
+      toMarkers(room.state.portalMarkers),
+    );
   }
 
   /** Wires renderers. `onPlayerAdd` fires at once for everyone already in view. */
@@ -130,6 +144,14 @@ export class RoomConnection {
 
   sendChat(text: string): void {
     this.room.send(ClientMessage.Chat, { text } satisfies ChatRequest);
+  }
+
+  /**
+   * Asks to be warped to this room's home tile. No payload: the destination is the room's own
+   * config, so there is nothing to say and nothing for the server to parse.
+   */
+  sendReturnHome(): void {
+    this.room.send(ClientMessage.ReturnHome);
   }
 
   /**
@@ -189,6 +211,9 @@ export class RoomConnection {
     });
     this.room.onMessage(ServerMessage.PortalEntered, (event: PortalEntered) => {
       this.events.onPortalEntered?.(event);
+    });
+    this.room.onMessage(ServerMessage.Teleported, (event: Teleported) => {
+      this.events.onTeleported?.(event);
     });
   }
 

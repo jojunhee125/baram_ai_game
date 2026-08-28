@@ -44,9 +44,24 @@ export const MAX_MOVES_PER_SECOND = 20;
 export const MAX_CHATS_PER_SECOND = 2;
 
 /**
+ * Minimum interval between two accepted "return home" requests from one client.
+ *
+ * Load-bearing, not cosmetic. A home warp is the only non-adjacent position change the room
+ * performs, and `refreshViewsAround` answers it with one proximity query of radius
+ * `VIEW_RADIUS_TILES + step`; across grand-plaza that spans the whole grid, so a warp costs
+ * O(room population) where a step costs O(neighbours). Without this the only limit is Colyseus'
+ * 60 messages/second, i.e. 500 clients x 60 x 500 = 15M operations/second — several times the
+ * entire movement load. At 2s the worst case is 250 warps/s x 500 = 125k, a third of it.
+ *
+ * Shared rather than server-only because the client mirrors it as the button's disabled window.
+ * That mirror is UX; this is the guard. Raise it if the `encodeView` backlog gets worse.
+ */
+export const HOME_COOLDOWN_MS = 2000;
+
+/**
  * Number of selectable avatar variants. Must equal the skin block count baked into
  * `assets/sprites/avatar.png` — the sheet is `row = skin * 4 + direction`, so its height
  * is `AVATAR_SKIN_COUNT * 4 * TILE_SIZE_PX`. Raising this without regenerating the sheet
  * makes the server hand out skins whose rows do not exist and Phaser renders blank frames.
  */
-export const AVATAR_SKIN_COUNT = 4;
+export const AVATAR_SKIN_COUNT = 24;

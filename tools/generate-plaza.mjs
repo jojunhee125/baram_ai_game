@@ -77,6 +77,17 @@ const GROUND_LEGEND = {
   f: TILE.flowerGrass,
 };
 
+/**
+ * The only blocking tiles that are 100% opaque (assets/README.md): every other one lets the ground
+ * layer show through, and `bush` is literally the grass texture at 67% alpha. A band cell a player
+ * can walk right up to therefore has to come from this set, or the art draws lawn over what the
+ * server treats as a wall and the edge of the world reads as somewhere you could keep going.
+ */
+const OPAQUE_BLOCKERS = new Set([TILE.brickWall, TILE.brickCorner, TILE.water]);
+
+/** Depth, in tiles, of the solid ring around the interior - and how far the check above looks. */
+const BOUNDARY_RING_DEPTH = 2;
+
 const COLLISION_LEGEND = {
   W: TILE.brickWall,
   P: TILE.treeStump,
@@ -293,12 +304,13 @@ function cellAt(x, y) {
   const outX = x < BORDER.left ? BORDER.left - x : x >= interiorRight ? x - interiorRight + 1 : 0;
   const outY = y < BORDER.top ? BORDER.top - y : y >= interiorBottom ? y - interiorBottom + 1 : 0;
 
-  // The ring one tile out from the interior is the plaza's own wall, corners included - the
-  // silhouette the 20x15 map drew by hand.
-  if (Math.max(outX, outY) === 1) {
+  // The rings closest to the interior are the plaza's own wall, corners included - the silhouette
+  // the 20x15 map drew by hand, at BOUNDARY_RING_DEPTH rather than one tile so the boundary reads
+  // as masonry from inside instead of as the first row of the scenery behind it.
+  if (Math.max(outX, outY) <= BOUNDARY_RING_DEPTH) {
     return {
       ground: TILE.stoneFloor,
-      collision: outX === 1 && outY === 1 ? TILE.brickCorner : TILE.brickWall,
+      collision: outX >= 1 && outY >= 1 ? TILE.brickCorner : TILE.brickWall,
     };
   }
 
@@ -393,6 +405,20 @@ function isInBorder(x, y) {
     y < BORDER.top ||
     y >= BORDER.top + INTERIOR.height
   );
+}
+
+/** True if any walkable cell lies within BOUNDARY_RING_DEPTH tiles (Chebyshev) of (x, y). */
+function nearWalkable(walkable, x, y) {
+  const fromY = Math.max(0, y - BOUNDARY_RING_DEPTH);
+  const toY = Math.min(MAP.height - 1, y + BOUNDARY_RING_DEPTH);
+  const fromX = Math.max(0, x - BOUNDARY_RING_DEPTH);
+  const toX = Math.min(MAP.width - 1, x + BOUNDARY_RING_DEPTH);
+  for (let ny = fromY; ny <= toY; ny += 1) {
+    for (let nx = fromX; nx <= toX; nx += 1) {
+      if (walkable[ny * MAP.width + nx] === 1) return true;
+    }
+  }
+  return false;
 }
 
 function floodFill(walkable, startIndex) {
@@ -536,6 +562,29 @@ function selfCheck(layers, firstgid, tileset, blockedTileIds) {
   if (walkableInBorder !== 0) {
     failures.push(`${walkableInBorder} walkable cells inside the border band; the camera would clamp`);
   }
+
+  // The band is scenery nobody can enter, but its innermost rings are the only thing that tells a
+  // player where the world stops, and a translucent blocker there shows the ground layer through
+  // and reads as more of the floor. Nothing at runtime can catch this: the server blocks the cell
+  // either way, so the map is "correct" while the art invites you to walk into it.
+  let seeThroughBoundary = 0;
+  let firstSeeThrough = "";
+  for (let y = 0; y < MAP.height; y += 1) {
+    for (let x = 0; x < MAP.width; x += 1) {
+      if (!isInBorder(x, y) || !nearWalkable(walkable, x, y)) continue;
+      const id = layers.collision[y * MAP.width + x] - firstgid;
+      if (OPAQUE_BLOCKERS.has(id)) continue;
+      seeThroughBoundary += 1;
+      if (firstSeeThrough === "") firstSeeThrough = `(${x}, ${y}) holds tile id ${id}`;
+    }
+  }
+  if (seeThroughBoundary !== 0) {
+    failures.push(
+      `${seeThroughBoundary} band cell(s) within ${BOUNDARY_RING_DEPTH} tiles of walkable ground are not ` +
+        `one of the opaque blockers ${[...OPAQUE_BLOCKERS].join("/")}; first: ${firstSeeThrough}`,
+    );
+  }
+
   if (longestRun < MIN_OPEN_RUN) {
     failures.push(
       `longest straight walkable run is ${longestRun} tiles, need ${MIN_OPEN_RUN} ` +

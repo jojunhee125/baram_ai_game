@@ -41,9 +41,87 @@
           />
         </div>
 
+        <!--
+          One top-right cluster: the controls row, and the minimap unfolding under it. Before
+          #transition so the wipe, the notice and the boot overlay all draw over it. The wrapper
+          is click-through; only the controls take pointer events, or its empty area would eat
+          clicks meant for the world.
+        -->
+        <div class="hud">
+          <div class="hud__controls">
+            <button
+              type="button"
+              class="hud__button"
+              id="home-button"
+              aria-keyshortcuts="H Home"
+              title="홈으로 (H)"
+              hidden
+            >
+              <svg class="hud__icon" viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  d="M2.5 7.2 8 2.6l5.5 4.6M4 8.4v4.6h8V8.4M6.6 13v-3.1h2.8V13"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              홈으로
+            </button>
+            <button
+              type="button"
+              class="hud__button hud__button--square"
+              id="minimap-button"
+              aria-expanded="false"
+              aria-controls="minimap"
+              aria-keyshortcuts="M"
+              title="미니맵 (M)"
+              hidden
+            >
+              <svg class="hud__icon" viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  d="M6 3 2.5 4.4v8.2L6 11.2m0-8.2 4 1.6m-4-1.6v8.2m4-6.6 3.5-1.4v8.2L10 11.2m0-8.2v8.2m-4 0 4 1.4"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span class="visually-hidden">미니맵</span>
+            </button>
+          </div>
+          <div class="minimap" id="minimap" hidden>
+            <canvas class="minimap__canvas" id="minimap-canvas" role="img" aria-label="미니맵"></canvas>
+          </div>
+        </div>
+
         <!-- Before #boot-status so a boot error raised during the new room's load stays visible. -->
         <div id="transition" class="transition" data-state="clear" aria-hidden="true"></div>
         <p id="transition-notice" class="notice" role="status" aria-live="polite" hidden></p>
+
+        <!-- Character select. Runs once, before the first join, and never comes back. -->
+        <div id="avatar-picker" class="picker" hidden>
+          <div
+            class="picker__panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="avatar-picker-title"
+          >
+            <h1 class="picker__title" id="avatar-picker-title">캐릭터 고르기</h1>
+            <p class="picker__hint">방향키로 고르고 Enter 키로 시작합니다.</p>
+            <div
+              class="picker__grid"
+              id="avatar-picker-grid"
+              role="radiogroup"
+              aria-labelledby="avatar-picker-title"
+            ></div>
+            <button type="button" class="picker__start" id="avatar-picker-start">
+              이 캐릭터로 시작
+            </button>
+          </div>
+        </div>
 
         <div id="boot-status" class="boot" data-state="loading" role="status" aria-live="polite">
           <span class="boot__spinner" aria-hidden="true"></span>

@@ -1,4 +1,5 @@
 import { Direction } from "@zep-test/shared";
+import { isTextEntry } from "./textEntry";
 
 /** Physical key codes, so the mapping survives keyboard layout and IME changes. */
 const KEY_DIRECTIONS: Readonly<Record<string, Direction>> = {
@@ -11,14 +12,6 @@ const KEY_DIRECTIONS: Readonly<Record<string, Direction>> = {
   KeyA: Direction.Left,
   KeyD: Direction.Right,
 };
-
-function isTextEntry(node: Element | null): boolean {
-  return (
-    node instanceof HTMLInputElement ||
-    node instanceof HTMLTextAreaElement ||
-    (node instanceof HTMLElement && node.isContentEditable)
-  );
-}
 
 /**
  * Tracks which movement key is currently held. Held directions form a stack so the

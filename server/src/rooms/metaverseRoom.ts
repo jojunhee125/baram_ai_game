@@ -5,6 +5,7 @@ import {
   CHAT_RADIUS_TILES,
   ClientMessage,
   Direction,
+  HOME_COOLDOWN_MS,
   MAX_CHAT_LENGTH,
   MAX_CHATS_PER_SECOND,
   MAX_MOVES_PER_SECOND,
@@ -21,6 +22,7 @@ import {
   type MoveRejected,
   type MoveRequest,
   type PortalEntered,
+  type Teleported,
   type TilePosition,
 } from "@zep-test/shared";
 import { isDirection, TileMovementResolver } from "../game/movement";
@@ -54,6 +56,10 @@ const SPAWN_SAMPLE_ATTEMPTS = 16;
  * Grid cell size for the proximity index. One more than the view radius because that is the
  * widest query the room issues (the move scan in {@link MetaverseRoom.refreshViewsAround}),
  * and it is the smallest cell for which such a query spans only 3x3 cells.
+ *
+ * A home warp breaks that premise — the same scan then queries `VIEW_RADIUS_TILES + warp
+ * distance`, which across grand-plaza spans the whole grid. Answers stay exact; only the 3x3
+ * cost bound is lost, which is what HOME_COOLDOWN_MS budgets for.
  */
 const PROXIMITY_CELL_SIZE_TILES = VIEW_RADIUS_TILES + 1;
 
@@ -84,6 +90,14 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   private proximityIndex!: ProximityIndex;
   private portalIndex!: PortalIndex;
   private spawn!: SpawnArea;
+  /**
+   * Where "return home" lands: the spawn centre with the spawn's spread deliberately dropped.
+   *
+   * Home has to be one determinate tile — a player who warps twice and lands somewhere else
+   * each time has not gone home. That is the opposite of what the spread is for on join, so
+   * this cannot just reuse {@link spawn}: grand-plaza spreads over radius 70.
+   */
+  private home!: SpawnArea;
 
   async onCreate(options: RoomCreateOptions): Promise<void> {
     this.state = new RoomState();
@@ -91,6 +105,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.state.mapKey = options.mapKey;
     this.maxClients = options.maxClients;
     this.spawn = options.spawn;
+    this.home = { tileX: options.spawn.tileX, tileY: options.spawn.tileY, spreadRadiusInTiles: 0 };
     this.setPatchRate(PATCH_RATE_MS);
     this.maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
 
@@ -108,6 +123,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     });
     this.onMessage(ClientMessage.Chat, (client: RoomClient, message: ChatRequest) => {
       this.handleChat(client, message);
+    });
+    this.onMessage(ClientMessage.ReturnHome, (client: RoomClient) => {
+      this.handleReturnHome(client);
     });
   }
 
@@ -150,8 +168,11 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // falls back to the generic spawn rather than refusing the join, which would strand a
     // client whose portal row changed while its tab was open.
     const viaPortal = typeof options?.viaPortal === "string" ? options.viaPortal : undefined;
-    const area =
-      (viaPortal === undefined ? null : this.portalIndex.arrivalFor(viaPortal)) ?? this.spawn;
+    const arrival = viaPortal === undefined ? null : this.portalIndex.arrivalFor(viaPortal);
+    // Portal beats home: it is the more specific request, and the only one of the two the
+    // server itself issued. An unowned portal id falls through to home if home was asked for,
+    // not to the spawn — the client asked for two things and only one of them was rejected.
+    const area = arrival ?? (options?.arriveAtHome === true ? this.home : this.spawn);
 
     const spawnTile = this.pickSpawnTile(area);
     this.state.players.set(
@@ -165,7 +186,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       }),
     );
     this.proximityIndex.insert(client.sessionId, spawnTile);
-    client.userData = { nickname, lastMoveAt: 0, lastChatAt: 0 };
+    client.userData = { nickname, lastMoveAt: 0, lastChatAt: 0, lastHomeAt: 0 };
     client.view = new StateView();
     this.viewedBySession.set(client.sessionId, new Set());
     this.clientsBySession.set(client.sessionId, client);
@@ -287,6 +308,49 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     for (const sessionId of audience) {
       this.clientsBySession.get(sessionId)?.send(ServerMessage.Chat, broadcast);
     }
+  }
+
+  /**
+   * Puts the player back on the room's home tile. The only non-adjacent position change the
+   * room performs, which is what makes the two invariants below load-bearing rather than latent.
+   */
+  private handleReturnHome(client: RoomClient): void {
+    const session = client.userData;
+    const player = this.state.players.get(client.sessionId);
+    if (!session || !player) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - session.lastHomeAt < HOME_COOLDOWN_MS) {
+      // Dropped in silence, unlike a throttled move: the client mirrors this window as the
+      // button's disabled period, so anything arriving inside it is a duplicate rather than a
+      // misprediction to correct — and the player is already standing where it would send them.
+      return;
+    }
+    session.lastHomeAt = now;
+
+    const destination = this.pickSpawnTile(this.home);
+    const from = { tileX: player.tileX, tileY: player.tileY };
+    player.tileX = destination.tileX;
+    player.tileY = destination.tileY;
+    // Same convention as the first placement in onJoin: an arrival has no direction of travel
+    // to inherit, and keeping the pre-warp facing would point the avatar back at a tile it is
+    // no longer next to.
+    player.facing = Direction.Down;
+    // Index strictly before the view refresh. handleMove says a one-tile step masks the
+    // ordering; this is the path it warned about — `from` is normally outside the destination's
+    // view radius, so a stale index entry drops the warper out of their own rebuilt view.
+    this.proximityIndex.move(client.sessionId, destination);
+    this.refreshViewsAround(client.sessionId, from, destination);
+
+    // Sent even though the state patch carries the same position: a client with steps in
+    // flight ignores its own position patches, so a warp landing mid-walk would be swallowed.
+    client.send(ServerMessage.Teleported, {
+      tileX: destination.tileX,
+      tileY: destination.tileY,
+      facing: Direction.Down,
+    } satisfies Teleported);
   }
 
   /**

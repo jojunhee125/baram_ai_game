@@ -1,11 +1,15 @@
 import Phaser from "phaser";
-import { TILE_SIZE_PX, type ChatBroadcast, type PortalEntered } from "@zep-test/shared";
+import { TILE_SIZE_PX, type ChatBroadcast, type JoinOptions } from "@zep-test/shared";
 import { hideBootStatus, showBootError } from "../bootStatus";
 import { MovementKeys } from "../input/movementKeys";
 import { resolveJoinOptions } from "../net/identity";
 import { RoomConnection, type PlayerSnapshot } from "../net/roomConnection";
+import { resolveHomeRoomName } from "../net/roomTarget";
 import { fadeFromBlack, fadeToBlack, showTransitionNotice } from "../transitionOverlay";
 import { ChatPanel } from "../ui/chatPanel";
+import { HomeButton } from "../ui/homeButton";
+import { Minimap, type MinimapView } from "../ui/minimap";
+import { buildMinimapTerrain } from "../ui/minimapTerrain";
 import { ChatBubbles } from "../world/chatBubbles";
 import { LocalPlayer } from "../world/localPlayer";
 import { NameTags } from "../world/nameTags";
@@ -29,6 +33,32 @@ export interface WorldSceneData {
   connection: RoomConnection;
 }
 
+/**
+ * What `buildWorld()` keeps hold of. The tilemap must never be built twice for one room: a
+ * second copy doubles the memory and, worse, carries no `setCollisionByProperty` flags, so
+ * anything reading `Tile.collides` off it would call every wall walkable.
+ */
+interface BuiltWorld {
+  map: Phaser.Tilemaps.Tilemap;
+  collision: Phaser.Tilemaps.TilemapLayer;
+}
+
+/** Where the destination room should put us — the only thing a portal hop and a home hop differ by. */
+type Arrival = { readonly kind: "portal"; readonly portalId: string } | { readonly kind: "home" };
+
+function joinOptionsFor(arrival: Arrival): JoinOptions {
+  const identity = resolveJoinOptions();
+  return arrival.kind === "portal"
+    ? { ...identity, viaPortal: arrival.portalId }
+    : { ...identity, arriveAtHome: true };
+}
+
+function arrivalFailureNotice(arrival: Arrival): string {
+  return arrival.kind === "portal"
+    ? "문 너머로 이동하지 못했습니다. 잠시 후 다시 지나가 보세요."
+    : "홈으로 돌아가지 못했습니다. 잠시 후 다시 시도해 주세요.";
+}
+
 export class WorldScene extends Phaser.Scene {
   static readonly KEY = "world";
 
@@ -37,7 +67,10 @@ export class WorldScene extends Phaser.Scene {
   private nameTags!: NameTags;
   private connection!: RoomConnection;
   private mapKey!: string;
+  private world: BuiltWorld | null = null;
   private chat: ChatPanel | null = null;
+  private homeButton: HomeButton | null = null;
+  private minimap: Minimap | null = null;
   private localPlayer: LocalPlayer | null = null;
   private movementKeys: MovementKeys | null = null;
   private lastStepAt = Number.NEGATIVE_INFINITY;
@@ -54,7 +87,10 @@ export class WorldScene extends Phaser.Scene {
     // instance, so every field that outlives create() has to be cleared by hand. A surviving
     // localPlayer is the loud one: initLocalPlayer() early-returns on it, and the avatar then
     // sends its steps to the room it already left.
+    this.world = null;
     this.chat = null;
+    this.homeButton = null;
+    this.minimap = null;
     this.localPlayer = null;
     this.movementKeys = null;
     this.lastStepAt = Number.NEGATIVE_INFINITY;
@@ -79,7 +115,7 @@ export class WorldScene extends Phaser.Scene {
 
   create(): void {
     try {
-      this.buildWorld();
+      this.world = this.buildWorld();
       drawPortalMarkers(this, this.connection.portalMarkers);
       registerAvatarAnimations(this);
       this.players = new PlayerSprites(this);
@@ -104,15 +140,12 @@ export class WorldScene extends Phaser.Scene {
         this.players.remove(sessionId);
       },
       onMoveRejected: (correction) => this.localPlayer?.applyRejection(correction),
+      onTeleported: (destination) => this.localPlayer?.applyTeleport(destination),
       onChat: (message) => this.showChat(message),
-      onPortalEntered: (event) => {
-        // `catch`, not `finally`: on the success path this promise settles after `scene.start`,
-        // so a `finally` would lift the gate on a run that has already been replaced.
-        void this.transitionTo(event).catch((error: unknown) => {
-          console.error("portal transition failed", error);
-          void this.abandonTransition();
-        });
-      },
+      onPortalEntered: (event) => this.startHop(event.toRoom, {
+        kind: "portal",
+        portalId: event.portalId,
+      }),
       onLeave: () => {
         // Not the leave we asked for; that one never reaches here (RoomConnection.leaving).
         // This is a drop mid-hop, which leave() then early-returns on — the hop still lands, so
@@ -133,11 +166,13 @@ export class WorldScene extends Phaser.Scene {
 
     const connection = this.connection;
     this.chat = new ChatPanel((text) => connection.sendChat(text));
+    this.homeButton = new HomeButton(() => this.returnHome());
+    this.buildMinimap();
     // attach() replays the players already in view, so addPlayer() normally does this first.
     this.initLocalPlayer();
     hideBootStatus();
-    // No-op on the first boot, where the overlay is already clear; on a portal hop this is the
-    // far side of the wipe that transitionTo() drew.
+    // No-op on the first boot, where the overlay is already clear; on a room hop this is the
+    // far side of the wipe that hop() drew.
     void fadeFromBlack();
   }
 
@@ -148,6 +183,8 @@ export class WorldScene extends Phaser.Scene {
   override update(time: number): void {
     this.bubbles.update(time);
     this.nameTags.update();
+    // Renderers, not input: these belong above the transition gate with the other two.
+    this.minimap?.update(this.observeMinimap());
 
     // Behind the wipe the old room is still live; a step taken here would be applied there.
     if (this.transitioning) {
@@ -168,14 +205,50 @@ export class WorldScene extends Phaser.Scene {
   }
 
   /**
+   * Fires and forgets a {@link hop}. `catch`, not `finally`: on the success path the promise
+   * settles after `scene.start`, so a `finally` would lift the gate on a run that has already
+   * been replaced.
+   */
+  private startHop(toRoom: string, arrival: Arrival): void {
+    void this.hop(toRoom, arrival).catch((error: unknown) => {
+      console.error(`${arrival.kind} transition failed`, error);
+      void this.abandonTransition(arrivalFailureNotice(arrival));
+    });
+  }
+
+  /**
+   * Takes the player home: a warp inside this room, or a hop when home is elsewhere. The client
+   * is the only side that knows which room home is; the server only ever knows where a room's
+   * own home tile is.
+   */
+  private returnHome(): void {
+    // The overlay stops the mouse mid-hop but not the keyboard, and a warp into a room we are
+    // leaving would be applied to a connection that is about to close.
+    if (this.transitioning) {
+      return;
+    }
+    const home = resolveHomeRoomName();
+    this.homeButton?.beginCooldown();
+    if (home === this.connection.roomName) {
+      this.connection.sendReturnHome();
+      return;
+    }
+    this.startHop(home, { kind: "home" });
+  }
+
+  /**
+   * Moves this client to another room, whatever asked for it: a portal the server reported, or
+   * the home control. Only `arrival` differs between the two, and the destination room resolves
+   * it against its own config — no coordinates travel.
+   *
    * Joins the destination before leaving the source: a failed join leaves the player exactly
    * where they were, whereas leaving first would strand them in no room at all with nothing to
    * recover with but a reload. Every await finishes before `scene.start`, which ends this
    * instance's current run — resuming an await afterwards would run against a dead scene.
    */
-  private async transitionTo({ portalId, toRoom }: PortalEntered): Promise<void> {
-    // Stepping off the trigger and back on fires again, and the server does not care that we
-    // are mid-hop.
+  private async hop(toRoom: string, arrival: Arrival): Promise<void> {
+    // Stepping off a portal trigger and back on fires again, and the server does not care that
+    // we are mid-hop. The home control is gated on the same flag.
     if (this.transitioning) {
       return;
     }
@@ -184,20 +257,19 @@ export class WorldScene extends Phaser.Scene {
 
     let next: RoomConnection;
     try {
-      next = await RoomConnection.connect(toRoom, {
-        ...resolveJoinOptions(),
-        viaPortal: portalId,
-      });
+      next = await RoomConnection.connect(toRoom, joinOptionsFor(arrival));
     } catch (error) {
-      console.error(`failed to join room "${toRoom}" through portal "${portalId}"`, error);
-      await this.abandonTransition();
+      console.error(`failed to join room "${toRoom}" (${arrival.kind} arrival)`, error);
+      await this.abandonTransition(arrivalFailureNotice(arrival));
       return;
     }
 
     await this.connection.leave();
-    // Both hold window/document listeners, which the scene restart does not touch.
+    // All three hold window/document listeners, which the scene restart does not touch.
     this.chat?.destroy();
     this.movementKeys?.destroy();
+    this.homeButton?.destroy();
+    this.minimap?.destroy();
     this.scene.start(WorldScene.KEY, { connection: next } satisfies WorldSceneData);
   }
 
@@ -209,7 +281,7 @@ export class WorldScene extends Phaser.Scene {
    * within a frame, whose `fadeToBlack()` would clear this attempt's notice — which would then
    * be posted again over a hop that had meanwhile succeeded.
    */
-  private async abandonTransition(): Promise<void> {
+  private async abandonTransition(notice: string): Promise<void> {
     await fadeFromBlack();
     if (this.connection.hasLeft) {
       // Both rooms are gone: the source dropped while the wipe was up and the hop failed too.
@@ -218,7 +290,7 @@ export class WorldScene extends Phaser.Scene {
       showBootError("서버와의 연결이 끊어졌습니다", "네트워크 상태를 확인한 뒤 다시 시도해 주세요.");
       return;
     }
-    showTransitionNotice("문 너머로 이동하지 못했습니다. 잠시 후 다시 지나가 보세요.");
+    showTransitionNotice(notice);
     this.transitioning = false;
   }
 
@@ -261,13 +333,72 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
     this.followTarget(sprite);
-    this.localPlayer = new LocalPlayer(connection.sessionId, snapshot, this.players, (dir) =>
-      connection.sendMove(dir),
+    this.localPlayer = new LocalPlayer(
+      connection.sessionId,
+      snapshot,
+      this.players,
+      (dir) => connection.sendMove(dir),
+      (tileX, tileY) => this.isWalkable(tileX, tileY),
     );
     this.movementKeys = new MovementKeys();
   }
 
-  private buildWorld(): void {
+  /**
+   * The client's own read of the map the server validated against, used to withhold steps that
+   * would only come back rejected.
+   *
+   * The bounds test has to come first: `getTileAt` answers null both for an empty cell and for a
+   * coordinate off the map, so trusting it alone would call the void outside the map walkable
+   * and let the avatar stroll off the edge of the world.
+   */
+  private isWalkable(tileX: number, tileY: number): boolean {
+    if (!this.world) {
+      return false;
+    }
+    const { map, collision } = this.world;
+    if (tileX < 0 || tileY < 0 || tileX >= map.width || tileY >= map.height) {
+      return false;
+    }
+    return collision.getTileAt(tileX, tileY)?.collides !== true;
+  }
+
+  /**
+   * Minimap failures stay inside the minimap: this is a secondary view of data the world already
+   * drew, so it must never raise "맵을 그리지 못했습니다" and pause a scene that is otherwise fine.
+   */
+  private buildMinimap(): void {
+    if (!this.world) {
+      return;
+    }
+    try {
+      const terrain = buildMinimapTerrain(this.world.map, this.world.collision);
+      this.minimap = new Minimap(terrain, this.connection.portalMarkers, this.mapKey);
+    } catch (error) {
+      console.error("minimap unavailable", error);
+    }
+  }
+
+  /**
+   * Reads the avatar's own sprite rather than the server snapshot or the predictor: the sprite
+   * carries the step tween, so the dot moves with what is on screen instead of hopping a tile at
+   * a time or trailing a patch behind. Undoes `playerSprites`' (0.5, 1) origin to get back to
+   * the tile centre.
+   */
+  private observeMinimap(): MinimapView {
+    const sprite = this.players.get(this.connection.sessionId);
+    const camera = this.cameras.main.worldView;
+    return {
+      self: sprite ? { x: sprite.x / TILE_SIZE_PX, y: sprite.y / TILE_SIZE_PX - 0.5 } : null,
+      camera: {
+        x: camera.x / TILE_SIZE_PX,
+        y: camera.y / TILE_SIZE_PX,
+        width: camera.width / TILE_SIZE_PX,
+        height: camera.height / TILE_SIZE_PX,
+      },
+    };
+  }
+
+  private buildWorld(): BuiltWorld {
     const map = this.make.tilemap({ key: this.mapKey });
 
     const tileset = map.addTilesetImage(TILESET_KEY, TILESET_KEY);
@@ -286,6 +417,8 @@ export class WorldScene extends Phaser.Scene {
       INITIAL_CAMERA_TILE.tileX * TILE_SIZE_PX + TILE_SIZE_PX / 2,
       INITIAL_CAMERA_TILE.tileY * TILE_SIZE_PX + TILE_SIZE_PX / 2,
     );
+
+    return { map, collision };
   }
 
   private createTileLayer(

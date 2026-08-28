@@ -52,12 +52,25 @@ const PLAZA = { width: 4, height: 3 };
 /** Tile ids in plaza-tiles.png: 0-7 walkable, 8-15 `collides: true` (assets/README.md). */
 const TILE = {
   stoneFloor: 0,
-  grass: 2,
   dirtPath: 4,
   medallion: 5,
+  sand: 6,
   brickWall: 8,
-  bush: 11,
+  brickCorner: 9,
+  water: 12,
 };
+
+/**
+ * The only blocking tiles that are 100% opaque (assets/README.md): every other one lets the ground
+ * layer show through, and `bush` - which this band used to be filled with - is literally the grass
+ * texture at 67% alpha over grass ground, so the boundary rendered as lawn you could walk into.
+ * A band cell a player can walk right up to therefore has to come from this set. It is a property
+ * of the tileset, not of this layout, so it lists all three even though the band uses two.
+ */
+const OPAQUE_BLOCKERS = new Set([TILE.brickWall, TILE.brickCorner, TILE.water]);
+
+/** Depth, in tiles, of the solid wall around the interior - and how far the check below looks. */
+const BOUNDARY_RING_DEPTH = 2;
 
 /* --------------------------------------------------------------- args ---- */
 
@@ -148,15 +161,24 @@ function isInBorder(x, y, geometry) {
   );
 }
 
+/** How many tiles into the border band (x, y) lies; 0 for an interior cell. */
+function bandDepth(x, y, geometry) {
+  const interiorRight = geometry.width - BORDER.right;
+  const interiorBottom = geometry.height - BORDER.bottom;
+  const outX = x < BORDER.left ? BORDER.left - x : x >= interiorRight ? x - interiorRight + 1 : 0;
+  const outY = y < BORDER.top ? BORDER.top - y : y >= interiorBottom ? y - interiorBottom + 1 : 0;
+  return Math.max(outX, outY);
+}
+
 /** `null` collision means an empty cell (gid 0), i.e. walkable. */
 function cellAt(x, y, geometry) {
   if (isInBorder(x, y, geometry)) {
-    const facesInterior =
-      x === BORDER.left - 1 ||
-      x === geometry.width - BORDER.right ||
-      y === BORDER.top - 1 ||
-      y === geometry.height - BORDER.bottom;
-    return { ground: TILE.grass, collision: facesInterior ? TILE.brickWall : TILE.bush };
+    // A city wall thick enough to read as one, then open water out to the map edge. The band used
+    // to be one course of brick over a lawn of `bush`, which is the grass texture at 67% alpha:
+    // from inside, the world simply looked like it kept going.
+    return bandDepth(x, y, geometry) <= BOUNDARY_RING_DEPTH
+      ? { ground: TILE.stoneFloor, collision: TILE.brickWall }
+      : { ground: TILE.sand, collision: TILE.water };
   }
 
   const localX = x - BORDER.left;
@@ -306,7 +328,41 @@ function selfCheck(layers, geometry, firstgid, blockedTileIds) {
     failures.push(`${walkableInBorder} walkable cells inside the border band; the camera would clamp`);
   }
 
+  // The band is scenery nobody can enter, but its innermost rings are the only thing that tells a
+  // player where the world stops, and a translucent blocker there shows the ground layer through
+  // and reads as more of the floor. Nothing at runtime can catch this: the server blocks the cell
+  // either way, so the map is "correct" while the art invites you to walk into it.
+  let seeThroughBoundary = 0;
+  let firstSeeThrough = "";
+  for (let y = 0; y < geometry.height; y += 1) {
+    for (let x = 0; x < geometry.width; x += 1) {
+      if (!isInBorder(x, y, geometry) || !nearWalkable(walkable, geometry, x, y)) continue;
+      const id = layers.collision[y * geometry.width + x] - firstgid;
+      if (OPAQUE_BLOCKERS.has(id)) continue;
+      seeThroughBoundary += 1;
+      if (firstSeeThrough === "") firstSeeThrough = `(${x}, ${y}) holds tile id ${id}`;
+    }
+  }
+  if (seeThroughBoundary !== 0) {
+    failures.push(
+      `${seeThroughBoundary} band cell(s) within ${BOUNDARY_RING_DEPTH} tiles of walkable ground are not ` +
+        `one of the opaque blockers ${[...OPAQUE_BLOCKERS].join("/")}; first: ${firstSeeThrough}`,
+    );
+  }
+
   return { failures, emptyCells, blockedCells };
+}
+
+/** True if any walkable cell lies within BOUNDARY_RING_DEPTH tiles (Chebyshev) of (x, y). */
+function nearWalkable(walkable, geometry, x, y) {
+  const toY = Math.min(geometry.height - 1, y + BOUNDARY_RING_DEPTH);
+  const toX = Math.min(geometry.width - 1, x + BOUNDARY_RING_DEPTH);
+  for (let ny = Math.max(0, y - BOUNDARY_RING_DEPTH); ny <= toY; ny += 1) {
+    for (let nx = Math.max(0, x - BOUNDARY_RING_DEPTH); nx <= toX; nx += 1) {
+      if (walkable[ny * geometry.width + nx] === 1) return true;
+    }
+  }
+  return false;
 }
 
 function floodFill(walkable, geometry, startIndex) {

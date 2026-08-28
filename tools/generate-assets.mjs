@@ -12,11 +12,11 @@ import { fileURLToPath } from "node:url";
 // The shipped art is reskinned from the Ninja Adventure Pack by tools/import-ninja-assets.mjs,
 // so falling back to the placeholders has to be deliberate rather than a stray `node` invocation.
 // This script is frozen at its Phase1 shape: SKIN_SHIRTS still holds 8 skins, so a forced run
-// emits a 96x1024 avatar sheet while shared AVATAR_SKIN_COUNT (and assets/README.md) says 4 -
-// skins 4-7 would ship as frames the runtime never selects.
+// emits a 96x1024 avatar sheet while shared AVATAR_SKIN_COUNT says 24 - the runtime would hand
+// out skins 8-23, whose rows do not exist, and Phaser would render blank frames.
 if (!process.argv.includes("--force-placeholder")) {
   console.error("this script generates the Phase1 placeholder art and would overwrite the reskinned assets");
-  console.error("it also emits 8 avatar skins; the runtime only uses the first 4 (shared AVATAR_SKIN_COUNT)");
+  console.error("it also emits only 8 avatar skins; the runtime selects 24 (shared AVATAR_SKIN_COUNT)");
   console.error("pass --force-placeholder if that is really what you want");
   process.exit(1);
 }

@@ -1,8 +1,9 @@
 import Phaser from "phaser";
-import { showBootError, showBootLoading } from "../bootStatus";
-import { resolveJoinOptions } from "../net/identity";
+import { hideBootStatus, showBootError, showBootLoading } from "../bootStatus";
+import { resolveJoinOptions, setAvatarSkin } from "../net/identity";
 import { RoomConnection } from "../net/roomConnection";
 import { resolveRoomName } from "../net/roomTarget";
+import { chooseAvatarSkin } from "../ui/avatarPicker";
 import { WorldScene, type WorldSceneData } from "./WorldScene";
 
 /**
@@ -23,11 +24,17 @@ export class BootScene extends Phaser.Scene {
 
   private async boot(): Promise<void> {
     const roomName = resolveRoomName();
+
+    // Character select comes first and the identity is frozen by the join below, so the skin has
+    // to be recorded before anything can call resolveJoinOptions().
+    hideBootStatus();
+    setAvatarSkin(await chooseAvatarSkin());
+
     showBootLoading("서버에 접속하는 중", "잠시만 기다려 주세요.");
 
     let connection: RoomConnection;
     try {
-      // The same identity a portal hop rejoins with, so walking through a door keeps the avatar.
+      // The same identity a room hop rejoins with, so walking through a door keeps the avatar.
       connection = await RoomConnection.connect(roomName, resolveJoinOptions());
     } catch (error) {
       console.error(`failed to join room "${roomName}"`, error);

@@ -6,6 +6,7 @@ import {
   CHAT_RADIUS_TILES,
   ClientMessage,
   Direction,
+  HOME_COOLDOWN_MS,
   MAX_CHAT_LENGTH,
   MAX_CHATS_PER_SECOND,
   MAX_MOVES_PER_SECOND,
@@ -18,6 +19,7 @@ import {
   type Player,
   type PortalEntered,
   type RoomState,
+  type Teleported,
 } from "@zep-test/shared";
 import { createGameServer } from "../server";
 import { ROOM_DEFINITIONS } from "./definitions";
@@ -114,6 +116,7 @@ interface Inbox {
   chats: ChatBroadcast[];
   rejects: MoveRejected[];
   portals: PortalEntered[];
+  teleports: Teleported[];
 }
 
 let testServer: ColyseusTestServer;
@@ -154,7 +157,7 @@ function seenIds(client: ClientRoom): string[] {
 }
 
 function collect(client: ClientRoom): Inbox {
-  const inbox: Inbox = { chats: [], rejects: [], portals: [] };
+  const inbox: Inbox = { chats: [], rejects: [], portals: [], teleports: [] };
   client.onMessage(ServerMessage.Chat, (message: unknown) => {
     inbox.chats.push(message as ChatBroadcast);
   });
@@ -163,6 +166,9 @@ function collect(client: ClientRoom): Inbox {
   });
   client.onMessage(ServerMessage.PortalEntered, (message: unknown) => {
     inbox.portals.push(message as PortalEntered);
+  });
+  client.onMessage(ServerMessage.Teleported, (message: unknown) => {
+    inbox.teleports.push(message as Teleported);
   });
   return inbox;
 }
@@ -1131,5 +1137,82 @@ describe("MetaverseRoom — join options", () => {
       () => seen(bob, alice.sessionId)?.tileX === plaza.spawn.tileX - 1,
       "the surviving clients still sync after a refused join",
     );
+  });
+});
+
+/**
+ * The unit suite drives `handleReturnHome` directly, which cannot see the `onMessage` wiring or
+ * the payload-free message contract. These go over a real socket, so a mistyped registration
+ * — the one failure that would leave the button dead in production — fails here.
+ */
+describe("MetaverseRoom — return home", () => {
+  it("warps a walked-away client back to the spawn tile and tells it so", async () => {
+    const room = await createPlaza();
+    const client = await join(room, "walker");
+    const inbox = collect(client);
+    const observer = await join(room, "observer");
+
+    await walkX(room, client, plaza.spawn.tileX + 9);
+    assert.notEqual(
+      snapshot(room, client.sessionId).tileX,
+      plaza.spawn.tileX,
+      "precondition: the client actually walked off the home tile",
+    );
+
+    client.send(ClientMessage.ReturnHome);
+
+    await expectServerAt(
+      room,
+      client,
+      plaza.spawn.tileX,
+      plaza.spawn.tileY,
+      "the return-home message is wired up and warps the player",
+    );
+    await waitUntil(() => inbox.teleports.length === 1, "the Teleported acknowledgement");
+    assert.deepEqual(inbox.teleports[0], {
+      tileX: plaza.spawn.tileX,
+      tileY: plaza.spawn.tileY,
+      facing: Direction.Down,
+    });
+    assertEmpty(inbox.rejects, "a warp is not a move and must not be rejected");
+    await waitUntil(
+      () => seen(observer, client.sessionId)?.tileX === plaza.spawn.tileX,
+      "the observer to see the warped position",
+    );
+  });
+
+  it("drops a second return-home inside the cooldown without answering it", async () => {
+    const room = await createPlaza();
+    const client = await join(room, "impatient");
+    const inbox = collect(client);
+    assert.ok(
+      SETTLE_MS < HOME_COOLDOWN_MS,
+      "precondition: the wait below stays inside the cooldown window",
+    );
+
+    client.send(ClientMessage.ReturnHome);
+    await waitUntil(() => inbox.teleports.length === 1, "the first acknowledgement");
+    client.send(ClientMessage.ReturnHome);
+    await sleep(SETTLE_MS);
+
+    assert.equal(inbox.teleports.length, 1, "the second request is answered with silence");
+    assertEmpty(inbox.rejects, "and with no rejection either — the client already mirrors the window");
+  });
+
+  it("ignores a return-home carrying an unexpected payload", async () => {
+    const room = await createPlaza();
+    const client = await join(room, "noisy");
+    const inbox = collect(client);
+
+    // The message is declared payload-free, so anything sent alongside it is a client the
+    // server does not control. It must not become a way to name a destination tile.
+    client.send(ClientMessage.ReturnHome, { tileX: 1, tileY: 1 });
+    await waitUntil(() => inbox.teleports.length === 1, "the acknowledgement");
+
+    assert.deepEqual(snapshot(room, client.sessionId), {
+      tileX: plaza.spawn.tileX,
+      tileY: plaza.spawn.tileY,
+      facing: Direction.Down,
+    });
   });
 });

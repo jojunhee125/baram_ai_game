@@ -119,6 +119,13 @@ export interface PlayerSession {
   nickname: string;
   lastMoveAt: number;
   lastChatAt: number;
+  /**
+   * Server clock of the last accepted return-home request. Separate from `lastMoveAt` on
+   * purpose: a warp costs O(room population) where a step costs O(neighbours), so the two
+   * need different budgets and sharing one counter would let a walk buy a warp. See
+   * HOME_COOLDOWN_MS.
+   */
+  lastHomeAt: number;
 }
 
 /**

@@ -1,14 +1,7 @@
 import { MAX_CHAT_LENGTH, type ChatBroadcast } from "@zep-test/shared";
+import { isTextEntry } from "../input/textEntry";
 
 const MAX_LOG_ROWS = 50;
-
-function isTextEntry(node: Element | null): boolean {
-  return (
-    node instanceof HTMLInputElement ||
-    node instanceof HTMLTextAreaElement ||
-    (node instanceof HTMLElement && node.isContentEditable)
-  );
-}
 
 /** Composer and message log. Speech bubbles live in the canvas; see ChatBubbles. */
 export class ChatPanel {
@@ -68,7 +61,9 @@ export class ChatPanel {
     if (event.target === this.input) {
       return;
     }
-    // Leave Enter alone while typing, or while a button such as boot retry has focus.
+    // Leave Enter alone while typing, or while a focused button owns it (boot retry, and a HUD
+    // control a keyboard user tabbed to). Clicking a HUD control does not strand the composer:
+    // those buttons blur themselves on a pointer activation for exactly this reason.
     if (isTextEntry(document.activeElement) || document.activeElement instanceof HTMLButtonElement) {
       return;
     }

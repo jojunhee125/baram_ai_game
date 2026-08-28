@@ -110,14 +110,21 @@ export class PlayerSprites {
       return;
     }
 
-    const moved = snapshot.tileX !== player.tileX || snapshot.tileY !== player.tileY;
+    // The server applies exactly one tile per accepted step, so anything further is not a walk:
+    // it is a warp, or a correction after a throttled burst. Measured here rather than in the
+    // teleport handler because `Teleported` only reaches the player who warped — everyone else
+    // sees the same jump as a plain position change, and distance is what catches both.
+    const distance = Math.max(
+      Math.abs(snapshot.tileX - player.tileX),
+      Math.abs(snapshot.tileY - player.tileY),
+    );
     const turned = snapshot.facing !== player.facing;
     player.tileX = snapshot.tileX;
     player.tileY = snapshot.tileY;
     player.facing = snapshot.facing;
 
-    if (moved) {
-      this.stepTo(player);
+    if (distance > 0) {
+      this.stepTo(player, distance > 1);
       return;
     }
     if (turned) {
@@ -144,11 +151,20 @@ export class PlayerSprites {
     return this.tracked.get(sessionId)?.sprite;
   }
 
-  private stepTo(player: TrackedPlayer): void {
+  private stepTo(player: TrackedPlayer, snap: boolean): void {
     player.tween?.stop();
 
     const targetY = pixelY(player.tileY);
     player.sprite.setDepth(targetY);
+
+    if (snap) {
+      player.tween = null;
+      player.sprite.setPosition(pixelX(player.tileX), targetY);
+      player.sprite.stop();
+      player.sprite.setFrame(idleFrame(player.skin, player.facing));
+      return;
+    }
+
     // `true` keeps an already-running cycle going, so walking straight alternates feet
     // instead of restarting on the same frame every tile.
     player.sprite.play(walkKey(player.skin, player.facing), true);

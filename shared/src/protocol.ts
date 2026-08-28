@@ -13,11 +13,23 @@ export interface JoinOptions {
    * the join — a refusal would strand a client whose portal row changed under it.
    */
   viaPortal?: string;
+  /**
+   * Place the player on this room's home tile — its spawn centre, with the spawn's spread
+   * deliberately dropped — instead of sampling the spawn area. Set by the "return home" control
+   * when home is a different room, so that the cross-room path lands on exactly the tile the
+   * same-room warp would have chosen.
+   *
+   * No coordinates travel: the client names a room it could already join, and the destination
+   * room resolves the tile from its own config. `viaPortal` wins if both are somehow present —
+   * it is the more specific request and the only one of the two the server itself issued.
+   */
+  arriveAtHome?: boolean;
 }
 
 export const ClientMessage = {
   Move: "move",
   Chat: "chat",
+  ReturnHome: "home:return",
 } as const;
 
 export type ClientMessage = (typeof ClientMessage)[keyof typeof ClientMessage];
@@ -34,12 +46,20 @@ export interface ChatRequest {
 export interface ClientMessagePayload {
   [ClientMessage.Move]: MoveRequest;
   [ClientMessage.Chat]: ChatRequest;
+  /**
+   * No payload: the destination is this room's own home tile, so there is nothing for the client
+   * to say and nothing for the server to parse. Rate-limited by HOME_COOLDOWN_MS; a request
+   * inside that window is dropped silently, since the client mirrors the same window and a
+   * player who gets there anyway is already standing on the tile they asked for.
+   */
+  [ClientMessage.ReturnHome]: undefined;
 }
 
 export const ServerMessage = {
   Chat: "chat",
   MoveRejected: "move:rejected",
   PortalEntered: "portal:entered",
+  Teleported: "player:teleported",
 } as const;
 
 export type ServerMessage = (typeof ServerMessage)[keyof typeof ServerMessage];
@@ -80,8 +100,27 @@ export interface PortalEntered {
   toRoom: string;
 }
 
+/**
+ * The server moved the player without them walking there — today only the home warp.
+ *
+ * Needed even though the state patch carries the same position: while steps are in flight
+ * `LocalPlayer.applyServerState` consumes its own patches instead of applying them, and a warp
+ * cancelled out by the steps around it produces no net state change to patch at all, so a warp
+ * that lands during a walk can go unseen and leave the client behind the server. Absolute
+ * position, like {@link MoveRejected}.
+ *
+ * Unicast to the teleporting client. Everyone else sees this as a plain position change, which
+ * is why "do not tween a jump" belongs in the sprite layer and not in this message's handler.
+ */
+export interface Teleported {
+  tileX: number;
+  tileY: number;
+  facing: Direction;
+}
+
 export interface ServerMessagePayload {
   [ServerMessage.Chat]: ChatBroadcast;
   [ServerMessage.MoveRejected]: MoveRejected;
   [ServerMessage.PortalEntered]: PortalEntered;
+  [ServerMessage.Teleported]: Teleported;
 }

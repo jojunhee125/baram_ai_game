@@ -56,12 +56,37 @@ const FRAME_COLS = [0, 1, 2];
  * Index is the skin id; `block` is the (bx,by) character block on the source sheet. Must stay in
  * sync with AVATAR_SKIN_COUNT in shared/src/constants.ts — asserted below, not just documented.
  * Every skin is a separately drawn character: this pipeline does no recolouring.
+ *
+ * The whole 6x4 block grid is baked, so the table covers every (bx,by) exactly once. Ids 0-3 keep
+ * the blocks they had when only four skins shipped rather than being renumbered into sheet order,
+ * so the descriptions already published in assets/README.md still name the same characters; the
+ * remaining twenty follow in sheet order.
  */
 const SKINS = [
   { label: "brown long hair, red top", block: [0, 0] },
   { label: "blond, green tunic", block: [3, 0] },
   { label: "red twintails, blue dress", block: [2, 0] },
   { label: "dark skin afro, pink top", block: [5, 2] },
+  { label: "dark skin, ash blond bob, red shirt", block: [1, 0] },
+  { label: "dark skin, black hair with orange streak, orange shirt", block: [4, 0] },
+  { label: "dark skin, dark afro, pink striped top", block: [5, 0] },
+  { label: "dark skin, magenta bob, floral dress", block: [0, 1] },
+  { label: "ginger bowl cut, green shirt", block: [1, 1] },
+  { label: "dark skin, green hair, purple top", block: [2, 1] },
+  { label: "blond and grey two-tone, olive jacket", block: [3, 1] },
+  { label: "auburn wavy hair, blue tank top", block: [4, 1] },
+  { label: "dark skin, silver hair, yellow-green shirt", block: [5, 1] },
+  { label: "dark skin, cyan spiky hair, yellow tunic", block: [0, 2] },
+  { label: "blond, dark green shirt", block: [1, 2] },
+  { label: "red hair, cyan striped shirt", block: [2, 2] },
+  { label: "brown hair, red top", block: [3, 2] },
+  { label: "pale, cropped hair, white shirt", block: [4, 2] },
+  { label: "blond spiky hair, teal floral top", block: [0, 3] },
+  { label: "dark skin, dark hair, dark green vest", block: [1, 3] },
+  { label: "red hair, purple top", block: [2, 3] },
+  { label: "grey hair, blue goggles, orange coat", block: [3, 3] },
+  { label: "dark skin, brown hair, blue shirt", block: [4, 3] },
+  { label: "brown hair and beard, green shirt", block: [5, 3] },
 ];
 
 /* --------------------------------------------------------------- build ---- */
@@ -138,7 +163,9 @@ function digest(buffer) {
 /**
  * Everything the client assumes about this sheet, re-checked on every run: the layout the
  * spritesheet loader slices by, no blank frames, and — since the whole point of the reskin was
- * dropping the recoloured duplicate — four genuinely different characters.
+ * dropping the recoloured duplicate — genuinely different characters throughout. The pixel
+ * distinctness check doubles as the proof that SKINS covers each source block exactly once:
+ * 24 in-range blocks that are pairwise different cannot repeat one.
  */
 function verifySheet(sheet) {
   const expectedWidth = FRAME_COLS.length * TILE;

@@ -25,7 +25,9 @@ interface StoredPosition {
  * step is one tile, so updates are O(1) with no rebalancing at all.
  *
  * Pick `cellSizeInTiles` to be the largest radius the caller ever queries plus one: that is
- * the smallest cell for which the query square spans only 3x3 cells.
+ * the smallest cell for which the query square spans only 3x3 cells. A caller that sometimes
+ * queries wider — the room's home warp does — still gets exact answers, it just pays the cells
+ * that wider square covers.
  */
 export class UniformGridProximityIndex implements ProximityIndex {
   private readonly cellCountX: number;
