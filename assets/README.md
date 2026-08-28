@@ -98,6 +98,20 @@ grand-plaza를 맵 크기 172×147, 내부 140×130(BORDER {16,16,8,9})로 재�
 
 트리거는 walkable 최남단 행(row 25)이고 도착은 그 북쪽 칸이다. **spawn row 20(x 16–47)과 테두리 밴드(x<16, x>47, y<8, y>25)에는 문을 두지 말 것** — `metaverseRoom.integration.test.ts`가 그 영역을 통째로 걸어 다니므로 포탈과 무관한 테스트가 문을 밟는다. 이 제약은 `server/src/game/portals.test.ts`가 검증한다.
 
+### plaza 고정 오브젝트 타일
+
+좌표·콘텐츠 정본은 `server/src/rooms/interactableDefinitions.ts`(코드 측 테이블, 근거는 `docs/design-fixed-objects.md` §4). 포탈 타일과 같은 이유로 여기 기록은 맵 편집 시 대조용이다. 포탈처럼 **진입 트리거**이고(밟는 이동에서만 발동), 서버가 콘텐츠째로 보내준다 — 맵에는 아무것도 들어가지 않는다.
+
+| 역할 | 타일 | 오브젝트 | kind |
+|---|---|---|---|
+| 링크판 | `{17,23}` | `plaza-link-board` | link |
+| 공지판 | `{44,23}` `{45,23}` | `plaza-notice-board` | notice |
+| 퀴즈대 | `{47,8}` | `plaza-quiz-stand` | quiz |
+
+콘텐츠는 전부 **자리표시(placeholder)** 이고 나중에 실제 내용으로 교체한다. 타일은 통행량이 적은 자리를 골랐다 — 링크판은 남서쪽 상자(`{18,23}`)·수풀(`{17,24}`)에 낀 구석, 공지판은 남동쪽 수풀 행(y=22) 아래 2칸, 퀴즈대는 북동쪽 막다른 모서리다. 오브젝트에 올라서면 패널이 열리면서 **클라이언트 이동이 잠기므로**(`docs/design-fixed-objects.md` §9.5) 길목에 두면 지나가는 사람이 매번 멈춘다.
+
+**포탈과 같은 회피 규칙에 더해, 포탈 트리거·도착 타일 자체도 피할 것**: 트리거와 겹치면 부팅 거부(패널이 뜨는 즉시 방을 떠난다), 도착과 겹치면 부팅 경고(도착은 이동이 아니라 패널이 안 뜬다). 한 타일에 오브젝트는 하나만 — 겹치면 부팅 거부다. `grand-plaza`에는 오브젝트를 두지 않는다: 500 CCU 측정용 맵이라 `tools/loadtest-poc2.mjs`의 봇이 밟으면 측정에 없던 메시지가 섞인다.
+
 ## maps/grand-plaza.json
 
 Go/No-go PoC #2(500 CCU broadcast 측정) 전용 맵. 설계 근거와 수치 유도는 `docs/poc2-design.md` §1.

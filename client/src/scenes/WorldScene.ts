@@ -10,7 +10,9 @@ import { ChatPanel } from "../ui/chatPanel";
 import { HomeButton } from "../ui/homeButton";
 import { Minimap, type MinimapView } from "../ui/minimap";
 import { buildMinimapTerrain } from "../ui/minimapTerrain";
+import { ObjectPanel } from "../ui/objectPanel";
 import { ChatBubbles } from "../world/chatBubbles";
+import { drawInteractableMarkers } from "../world/interactableMarkers";
 import { LocalPlayer } from "../world/localPlayer";
 import { NameTags } from "../world/nameTags";
 import { drawPortalMarkers } from "../world/portalMarkers";
@@ -71,6 +73,7 @@ export class WorldScene extends Phaser.Scene {
   private chat: ChatPanel | null = null;
   private homeButton: HomeButton | null = null;
   private minimap: Minimap | null = null;
+  private objectPanel: ObjectPanel | null = null;
   private localPlayer: LocalPlayer | null = null;
   private movementKeys: MovementKeys | null = null;
   private lastStepAt = Number.NEGATIVE_INFINITY;
@@ -91,6 +94,7 @@ export class WorldScene extends Phaser.Scene {
     this.chat = null;
     this.homeButton = null;
     this.minimap = null;
+    this.objectPanel = null;
     this.localPlayer = null;
     this.movementKeys = null;
     this.lastStepAt = Number.NEGATIVE_INFINITY;
@@ -117,6 +121,7 @@ export class WorldScene extends Phaser.Scene {
     try {
       this.world = this.buildWorld();
       drawPortalMarkers(this, this.connection.portalMarkers);
+      drawInteractableMarkers(this, this.connection.interactableMarkers);
       registerAvatarAnimations(this);
       this.players = new PlayerSprites(this);
       this.bubbles = new ChatBubbles(this);
@@ -146,6 +151,8 @@ export class WorldScene extends Phaser.Scene {
         kind: "portal",
         portalId: event.portalId,
       }),
+      onInteractableEntered: (event) => this.objectPanel?.open(event),
+      onQuizResult: (result) => this.objectPanel?.showQuizResult(result),
       onLeave: () => {
         // Not the leave we asked for; that one never reaches here (RoomConnection.leaving).
         // This is a drop mid-hop, which leave() then early-returns on — the hop still lands, so
@@ -167,6 +174,9 @@ export class WorldScene extends Phaser.Scene {
     const connection = this.connection;
     this.chat = new ChatPanel((text) => connection.sendChat(text));
     this.homeButton = new HomeButton(() => this.returnHome());
+    this.objectPanel = new ObjectPanel((objectId, choiceIndex) =>
+      connection.sendQuizAnswer(objectId, choiceIndex),
+    );
     this.buildMinimap();
     // attach() replays the players already in view, so addPlayer() normally does this first.
     this.initLocalPlayer();
@@ -188,6 +198,12 @@ export class WorldScene extends Phaser.Scene {
 
     // Behind the wipe the old room is still live; a step taken here would be applied there.
     if (this.transitioning) {
+      return;
+    }
+    // Reading an object holds you still. There is no server-side lock behind this: the player
+    // stops moving because this stops sending, which is also why the panel cannot strand anyone —
+    // whatever kills the panel gives movement straight back.
+    if (this.objectPanel?.isOpen === true) {
       return;
     }
 
@@ -225,6 +241,11 @@ export class WorldScene extends Phaser.Scene {
     // The overlay stops the mouse mid-hop but not the keyboard, and a warp into a room we are
     // leaving would be applied to a connection that is about to close.
     if (this.transitioning) {
+      return;
+    }
+    // HomeButton owns its own window shortcut, so H fires whatever update()'s gate is doing —
+    // without this the avatar warps out from under an open panel and the panel stays up.
+    if (this.objectPanel?.isOpen === true) {
       return;
     }
     const home = resolveHomeRoomName();
@@ -265,11 +286,12 @@ export class WorldScene extends Phaser.Scene {
     }
 
     await this.connection.leave();
-    // All three hold window/document listeners, which the scene restart does not touch.
+    // Every one of these holds window/document listeners, which the scene restart does not touch.
     this.chat?.destroy();
     this.movementKeys?.destroy();
     this.homeButton?.destroy();
     this.minimap?.destroy();
+    this.objectPanel?.destroy();
     this.scene.start(WorldScene.KEY, { connection: next } satisfies WorldSceneData);
   }
 

@@ -30,6 +30,7 @@ export const ClientMessage = {
   Move: "move",
   Chat: "chat",
   ReturnHome: "home:return",
+  QuizAnswer: "quiz:answer",
 } as const;
 
 export type ClientMessage = (typeof ClientMessage)[keyof typeof ClientMessage];
@@ -43,9 +44,22 @@ export interface ChatRequest {
   text: string;
 }
 
+/**
+ * One answer to a quiz object. The object is named rather than inferred from the player's tile:
+ * the room keeps no interaction state, and the room-narrowed object index is already the boundary
+ * that stops an id from another room resolving. Nothing is scored or stored anywhere, so a
+ * replayed or fabricated answer wins nothing — which is why there is no position check.
+ */
+export interface QuizAnswerRequest {
+  objectId: string;
+  /** Index into {@link QuizInteraction.choices}. Out of range grades as wrong, not as an error. */
+  choiceIndex: number;
+}
+
 export interface ClientMessagePayload {
   [ClientMessage.Move]: MoveRequest;
   [ClientMessage.Chat]: ChatRequest;
+  [ClientMessage.QuizAnswer]: QuizAnswerRequest;
   /**
    * No payload: the destination is this room's own home tile, so there is nothing for the client
    * to say and nothing for the server to parse. Rate-limited by HOME_COOLDOWN_MS; a request
@@ -60,6 +74,8 @@ export const ServerMessage = {
   MoveRejected: "move:rejected",
   PortalEntered: "portal:entered",
   Teleported: "player:teleported",
+  InteractableEntered: "interactable:entered",
+  QuizResult: "quiz:result",
 } as const;
 
 export type ServerMessage = (typeof ServerMessage)[keyof typeof ServerMessage];
@@ -118,9 +134,98 @@ export interface Teleported {
   facing: Direction;
 }
 
+/**
+ * The fixed interactive object types of roadmap item 3 — the closed set a map author places, as
+ * opposed to a scripting surface. Strings rather than numeric codes because the same value is the
+ * discriminant of the server's authored table, of the wire union below, and of
+ * `InteractableMarker.kind`: one readable value in all three beats a code plus the mapping table
+ * that drifts away from it.
+ *
+ * Portals are not in this set even though the roadmap counts them as the same feature. They fire
+ * the same way but they move you rather than show you something, and they already have their own
+ * table (`PortalDefinition`) that predates this one.
+ */
+export const InteractableKind = {
+  Link: "link",
+  Notice: "notice",
+  Quiz: "quiz",
+} as const;
+
+export type InteractableKind = (typeof InteractableKind)[keyof typeof InteractableKind];
+
+/** What every {@link InteractableEntered} variant carries. */
+interface InteractionBase {
+  /**
+   * The object's stable id. It comes back in {@link QuizAnswerRequest}, and it lets the client
+   * drop a reply belonging to a panel it has already closed.
+   */
+  objectId: string;
+  /** Panel heading, shown as written. */
+  title: string;
+}
+
+export interface LinkInteraction extends InteractionBase {
+  kind: typeof InteractableKind.Link;
+  /**
+   * Absolute http(s) URL, opened in a new tab and never in place. Boot validation is the only
+   * check on it: the table is authored in the repo, so the table *is* the allowlist, and a
+   * second check on the client would only defend against a server that is already ours. That
+   * argument expires the day content becomes runtime-editable — `docs/design-fixed-objects.md` §2.
+   */
+  url: string;
+}
+
+export interface NoticeInteraction extends InteractionBase {
+  kind: typeof InteractableKind.Notice;
+  /** Newlines are significant. Rendered as text, never as markup. */
+  body: string;
+}
+
+export interface QuizInteraction extends InteractionBase {
+  kind: typeof InteractableKind.Quiz;
+  question: string;
+  /**
+   * Two or more, in display order; the index into this array is what the client answers with.
+   * The correct index is deliberately absent — it stays in the server's table, because a quiz
+   * whose answer is in the network tab has given away the only thing it had.
+   */
+  choices: readonly string[];
+}
+
+/**
+ * The player's accepted step landed on a fixed object's tile; the client opens the matching panel.
+ *
+ * Same division of labour as {@link PortalEntered} — the server detects on the authoritative
+ * position, the client performs — except that the *content* travels rather than a destination.
+ * That is what keeps the object table off the client entirely, so a browser holding a bundle
+ * older than the table still renders whatever the server describes.
+ *
+ * Unicast to the walker. Fires only on the move that enters the tile, so standing on it does not
+ * re-fire; stepping off and back on does.
+ */
+export type InteractableEntered = LinkInteraction | NoticeInteraction | QuizInteraction;
+
+/**
+ * The verdict on one {@link QuizAnswerRequest}.
+ *
+ * Echoes what was graded rather than only the verdict: the reply is asynchronous, so a result for
+ * a panel that has since closed — or for a choice the player has since changed — has to be
+ * discardable rather than land on the wrong row. Same reasoning as {@link MoveRejected} carrying
+ * an absolute position instead of a delta.
+ */
+export interface QuizResult {
+  objectId: string;
+  choiceIndex: number;
+  correct: boolean;
+  /** The author's note, shown beside the verdict; absent when the row has none. */
+  explanation?: string;
+}
+
 export interface ServerMessagePayload {
   [ServerMessage.Chat]: ChatBroadcast;
   [ServerMessage.MoveRejected]: MoveRejected;
   [ServerMessage.PortalEntered]: PortalEntered;
   [ServerMessage.Teleported]: Teleported;
+  [ServerMessage.InteractableEntered]: InteractableEntered;
+  [ServerMessage.QuizResult]: QuizResult;
 }

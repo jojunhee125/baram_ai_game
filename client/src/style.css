@@ -418,6 +418,206 @@ body {
   image-rendering: pixelated;
 }
 
+/*
+ * Fixed-object panel. Unlike .picker it sits *over* the world instead of standing in for it — the
+ * player is still in the room, just reading something — so the stage stays visible behind a scrim
+ * and the panel keeps the dark treatment .chat and .hud use over the canvas. The scrim also takes
+ * the pointer, which matches the movement gate WorldScene holds while this is open.
+ */
+.object {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  /* Explicit track, like .picker: an auto row cannot resolve the panel's percentage max-height. */
+  grid-template-rows: minmax(0, 1fr);
+  place-items: center;
+  padding: var(--space-4);
+  background: rgba(20, 19, 26, 0.55);
+}
+
+.object__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(100%, 420px);
+  max-height: 100%;
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(20, 19, 26, 0.94);
+  color: #eceaf4;
+}
+
+.object__kind {
+  margin: 0;
+  color: rgba(236, 234, 244, 0.55);
+  font-size: 11px;
+  font-weight: 600;
+  /* Positive tracking, because this is a small all-caps-weight label rather than running text. */
+  letter-spacing: 0.08em;
+}
+
+.object__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+/* The body scrolls, not the panel: 닫기 has to stay reachable under a long notice. */
+.object__body {
+  min-height: 0;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* pre-wrap because a notice's authored line breaks are the only formatting it gets. */
+.object__text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+/* The destination, shown as text so "새 탭에서 열기" is never a blind jump. */
+.object__url {
+  margin: 0;
+  color: rgba(236, 234, 244, 0.62);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.object__choices {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.object__choice {
+  display: block;
+  width: 100%;
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(236, 234, 244, 0.06);
+  color: #eceaf4;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.object__choice:hover:not(:disabled) {
+  background: rgba(236, 234, 244, 0.12);
+  border-color: rgba(236, 234, 244, 0.32);
+}
+
+.object__choice:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.object__choice[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+
+.object__choice:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/*
+ * Verdict colours never carry the answer alone — the row always says 정답/오답 in words, so the
+ * red/green pair is confirmation rather than the only signal.
+ */
+.object__choice--correct:disabled {
+  border-color: #8ec97f;
+  opacity: 1;
+}
+
+.object__choice--wrong:disabled {
+  border-color: var(--danger);
+  opacity: 1;
+}
+
+.object__result {
+  margin: var(--space-3) 0 0;
+  color: rgba(236, 234, 244, 0.62);
+  font-size: 13px;
+  text-wrap: pretty;
+}
+
+.object__result--correct {
+  color: #8ec97f;
+}
+
+.object__result--wrong {
+  color: var(--danger);
+}
+
+/* The author's note reads as body text beside a coloured verdict, not as part of it. */
+.object__explanation {
+  display: block;
+  margin-top: var(--space-1);
+  color: rgba(236, 234, 244, 0.72);
+  font-size: 12px;
+}
+
+.object__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.object__open,
+.object__close {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-height);
+  padding: 0 var(--space-4);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(236, 234, 244, 0.06);
+  color: #eceaf4;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.object__open {
+  border-color: var(--accent);
+}
+
+.object__open:hover,
+.object__close:hover {
+  background: rgba(236, 234, 244, 0.12);
+  border-color: rgba(236, 234, 244, 0.32);
+}
+
+.object__open:hover {
+  border-color: var(--accent);
+}
+
+.object__open:active,
+.object__close:active {
+  transform: translateY(1px);
+}
+
+.object__open:focus-visible,
+.object__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* Covers the stage the way .boot does: it stands in for the boot overlay, never over the world. */
 .picker {
   position: absolute;
@@ -562,6 +762,9 @@ body {
   .boot__retry,
   .chat__input,
   .hud__button,
+  .object__choice,
+  .object__close,
+  .object__open,
   .picker__cell,
   .picker__start,
   .transition {

@@ -6,12 +6,16 @@ import {
   type ChatBroadcast,
   type ChatRequest,
   type Direction,
+  type InteractableEntered,
+  type InteractableMarker,
   type JoinOptions,
   type MoveRejected,
   type MoveRequest,
   type Player,
   type PortalEntered,
   type PortalMarker,
+  type QuizAnswerRequest,
+  type QuizResult,
   type Teleported,
   type TilePosition,
 } from "@zep-test/shared";
@@ -41,6 +45,16 @@ export interface PlayerSnapshot {
   avatarSkin: number;
 }
 
+/** Plain mirror of one synced `InteractableMarker`, like {@link PlayerSnapshot} for players. */
+export interface InteractableMarkerPosition extends TilePosition {
+  /**
+   * An `InteractableKind` value, deliberately left as the raw wire string instead of narrowed to
+   * the union this bundle knows: the server can be newer than the browser holding it, and the
+   * marker renderer's fallback branch only stays reachable while this type admits that.
+   */
+  kind: string;
+}
+
 export interface RoomEvents {
   onPlayerAdd?(sessionId: string, player: PlayerSnapshot): void;
   onPlayerChange?(sessionId: string, player: PlayerSnapshot): void;
@@ -49,6 +63,10 @@ export interface RoomEvents {
   onMoveRejected?(correction: MoveRejected): void;
   /** The local player stepped onto a portal trigger; the consumer owns the room transition. */
   onPortalEntered?(event: PortalEntered): void;
+  /** The local player stepped onto a fixed object; the payload carries everything to draw it. */
+  onInteractableEntered?(event: InteractableEntered): void;
+  /** Verdict on one {@link RoomConnection.sendQuizAnswer}, possibly after its panel has closed. */
+  onQuizResult?(result: QuizResult): void;
   /** The server warped the local player. Apply as an absolute position, never as a step. */
   onTeleported?(event: Teleported): void;
   /** Connection closed after a successful join — includes kick, server restart, network drop. */
@@ -90,14 +108,20 @@ export class RoomConnection {
      * again, and renderers never hold schema instances.
      */
     readonly portalMarkers: readonly TilePosition[],
+    /**
+     * Where this room's fixed objects are and which kind each one is — position only, never their
+     * content, which arrives with `InteractableEntered` on the step that enters the tile. Copied
+     * once for the same reason as {@link portalMarkers}.
+     */
+    readonly interactableMarkers: readonly InteractableMarkerPosition[],
   ) {
     this.bindLifecycle();
   }
 
   /**
-   * Joins `roomName` and resolves only once the first state has arrived, so `mapKey`,
-   * `portalMarkers` and `players` are populated: `joinOrCreate` alone resolves on the JOIN_ROOM
-   * frame, which precedes ROOM_STATE by an ack round trip.
+   * Joins `roomName` and resolves only once the first state has arrived, so `mapKey`, the marker
+   * arrays and `players` are populated: `joinOrCreate` alone resolves on the JOIN_ROOM frame,
+   * which precedes ROOM_STATE by an ack round trip.
    */
   static async connect(roomName: string, options?: JoinOptions): Promise<RoomConnection> {
     const client = new Client(resolveEndpoint());
@@ -112,6 +136,7 @@ export class RoomConnection {
       roomName,
       room.state.mapKey,
       toMarkers(room.state.portalMarkers),
+      toInteractableMarkers(room.state.interactableMarkers),
     );
   }
 
@@ -152,6 +177,14 @@ export class RoomConnection {
    */
   sendReturnHome(): void {
     this.room.send(ClientMessage.ReturnHome);
+  }
+
+  /**
+   * Answers one quiz object. The object is named rather than inferred from where we are standing,
+   * because the server keeps no interaction state and grades whatever id its own table resolves.
+   */
+  sendQuizAnswer(objectId: string, choiceIndex: number): void {
+    this.room.send(ClientMessage.QuizAnswer, { objectId, choiceIndex } satisfies QuizAnswerRequest);
   }
 
   /**
@@ -214,6 +247,12 @@ export class RoomConnection {
     });
     this.room.onMessage(ServerMessage.Teleported, (event: Teleported) => {
       this.events.onTeleported?.(event);
+    });
+    this.room.onMessage(ServerMessage.InteractableEntered, (event: InteractableEntered) => {
+      this.events.onInteractableEntered?.(event);
+    });
+    this.room.onMessage(ServerMessage.QuizResult, (result: QuizResult) => {
+      this.events.onQuizResult?.(result);
     });
   }
 
@@ -283,6 +322,16 @@ function toMarkers(markers: Iterable<PortalMarker>): TilePosition[] {
   const positions: TilePosition[] = [];
   for (const marker of markers) {
     positions.push({ tileX: marker.tileX, tileY: marker.tileY });
+  }
+  return positions;
+}
+
+function toInteractableMarkers(
+  markers: Iterable<InteractableMarker>,
+): InteractableMarkerPosition[] {
+  const positions: InteractableMarkerPosition[] = [];
+  for (const marker of markers) {
+    positions.push({ tileX: marker.tileX, tileY: marker.tileY, kind: marker.kind });
   }
   return positions;
 }

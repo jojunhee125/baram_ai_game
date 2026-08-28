@@ -1,5 +1,12 @@
 import type { Client } from "colyseus";
-import type { Direction, RoomState, TilePosition } from "@zep-test/shared";
+// `InteractableKind` is imported as a value, not just as a type: the authored table's
+// discriminant and the wire union's have to be the same string, so both read it from one place.
+import {
+  InteractableKind,
+  type Direction,
+  type RoomState,
+  type TilePosition,
+} from "@zep-test/shared";
 
 /**
  * Where a joining client is placed. The tile is the centre of a Chebyshev square with
@@ -112,6 +119,117 @@ export interface PortalIndex {
    * draws the same marker twice on the same tile.
    */
   triggerTiles(): readonly TilePosition[];
+}
+
+/**
+ * A fixed interactive object of roadmap item 3: the author places it on tiles and fills in its
+ * content, and the step that enters one of those tiles opens the matching panel.
+ *
+ * Authored in code beside `PORTAL_DEFINITIONS`, for that table's reasons
+ * (`docs/design-portal-object.md` §1) and one of its own: both maps are machine-generated, so
+ * content embedded in a map file is deleted by the next regeneration without a word. The rejected
+ * alternative — a runtime admin API behind `kad.roles` — is argued in
+ * `docs/design-fixed-objects.md` §2.
+ *
+ * Three fixed shapes rather than one row with a free-form payload: a closed set of object types
+ * instead of a scripting engine is the whole of item 3 (project CLAUDE.md, "Out of Scope").
+ */
+export type InteractableDefinition = LinkInteractable | NoticeInteractable | QuizInteractable;
+
+/** What every object row carries, whatever its kind. */
+interface InteractableBase {
+  /**
+   * Stable key, unique across the whole table. It crosses the wire as
+   * `InteractableEntered.objectId` and returns as `QuizAnswerRequest.objectId`, so — like a
+   * portal id — it must not be a table index, and it needs no sanitising on the way back in:
+   * it is only ever a lookup key, and an unknown one resolves to null.
+   */
+  id: string;
+  at: InteractableSource;
+  /** Panel heading. */
+  title: string;
+}
+
+/** Where an object is triggered. */
+export interface InteractableSource {
+  /** Matchmaking name of the room holding the tiles — a {@link RoomDefinition} `name`. */
+  room: string;
+  /**
+   * Every tile that opens this object, so a wide signboard is one row rather than several kept
+   * in step. Must be non-empty and every tile walkable, and no tile may be shared with another
+   * object or with a portal trigger: two things firing on one step is a panel opening into a room
+   * that is already leaving. Boot refuses all of those.
+   */
+  tiles: readonly TilePosition[];
+}
+
+export interface LinkInteractable extends InteractableBase {
+  kind: typeof InteractableKind.Link;
+  /** Absolute URL; boot refuses any scheme but `http:` / `https:`. Opened in a new tab. */
+  url: string;
+}
+
+export interface NoticeInteractable extends InteractableBase {
+  kind: typeof InteractableKind.Notice;
+  /**
+   * The notice text; newlines are significant. Author-written and static — this is a board, not
+   * a guestbook. Player-written entries need storage that outlives a room instance, and this
+   * project has no database at all; see `docs/design-fixed-objects.md` §3.
+   */
+  body: string;
+}
+
+export interface QuizInteractable extends InteractableBase {
+  kind: typeof InteractableKind.Quiz;
+  question: string;
+  /** Two or more, in display order. */
+  choices: readonly string[];
+  /** Index into {@link QuizInteractable.choices}. Never leaves the server: the client sends a choice and is told. */
+  answerIndex: number;
+  /** Optional note shown with the verdict, right or wrong. */
+  explanation?: string;
+}
+
+/**
+ * One room's view of the object table, narrowed from the whole table at `onCreate` — the
+ * {@link PortalIndex} arrangement, for the same reason: a room only ever needs its own rows, and
+ * a room named in no row gets an index that answers null to everything.
+ *
+ * Kept as its own interface rather than making this and {@link PortalIndex} instances of one
+ * generic tile index. What the two share is a fifteen-line constructor loop; the payloads and the
+ * second lookup are not shared at all, and merging them would mean rewriting the portal trigger
+ * path, which is deployed and covered by tests, for no behaviour. Worth revisiting only if a
+ * third trigger table appears.
+ */
+export interface InteractableIndex {
+  /**
+   * The object opened by a move that just landed on this tile, or null.
+   *
+   * Runs on every accepted move, immediately behind {@link PortalIndex.triggerAt}, so the same
+   * rule applies: no allocation, and in particular no `` `${tileX},${tileY}` `` lookup keys.
+   */
+  at(tileX: number, tileY: number): InteractableDefinition | null;
+
+  /**
+   * The object a client named in `QuizAnswerRequest`, or null when this room holds no such row —
+   * an unknown id, or one belonging to an object in another room.
+   *
+   * Null means "ignore the message": there is no interaction state to correct and nothing the
+   * client could usefully be told.
+   */
+  byId(objectId: string): InteractableDefinition | null;
+
+  /**
+   * Every tile of every object in this room, paired with its kind, for populating
+   * `RoomState.interactableMarkers` at `onCreate`. This is the only way the client learns an
+   * object's position; its content still arrives only on the step that enters the tile.
+   */
+  markerTiles(): readonly InteractableMarkerTile[];
+}
+
+/** One entry of {@link InteractableIndex.markerTiles}. */
+export interface InteractableMarkerTile extends TilePosition {
+  kind: InteractableKind;
 }
 
 /** Data attached to `client.userData`; never synced to clients. */

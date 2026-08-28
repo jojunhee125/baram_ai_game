@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { Encoder } from "@colyseus/schema";
 import { Server, WebSocketTransport } from "colyseus";
+import { validateInteractableDefinitions } from "./game/interactables";
 import { validatePortalDefinitions } from "./game/portals";
 import { TiledMapLoader } from "./game/tiledMap";
 import { markReady, markUnhealthy } from "./http/readiness";
@@ -8,6 +9,7 @@ import { configureHttpRoutes } from "./http/routes";
 import { observeWebSocketUpgrade } from "./http/wsAuthProbe";
 import type { CollisionMap } from "./rooms/contracts";
 import { ROOM_DEFINITIONS } from "./rooms/definitions";
+import { INTERACTABLE_DEFINITIONS } from "./rooms/interactableDefinitions";
 import { MetaverseRoom } from "./rooms/metaverseRoom";
 import { PORTAL_DEFINITIONS } from "./rooms/portalDefinitions";
 
@@ -104,6 +106,20 @@ async function validateRoomMaps(): Promise<void> {
   }
   if (errors.length > 0) {
     refuseBoot(`invalid portal definitions: ${errors.join("; ")}`);
+  }
+
+  // Takes the portal table too: two of its checks are about the two tables together, and a tile
+  // that fires both would open a panel into a room the player is already leaving.
+  const objects = validateInteractableDefinitions(
+    INTERACTABLE_DEFINITIONS,
+    PORTAL_DEFINITIONS,
+    mapsByRoom,
+  );
+  for (const warning of objects.warnings) {
+    console.warn(`[zep-test] ${warning}`);
+  }
+  if (objects.errors.length > 0) {
+    refuseBoot(`invalid interactable definitions: ${objects.errors.join("; ")}`);
   }
 
   markReady();

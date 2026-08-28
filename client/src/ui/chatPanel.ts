@@ -61,10 +61,15 @@ export class ChatPanel {
     if (event.target === this.input) {
       return;
     }
-    // Leave Enter alone while typing, or while a focused button owns it (boot retry, and a HUD
-    // control a keyboard user tabbed to). Clicking a HUD control does not strand the composer:
-    // those buttons blur themselves on a pointer activation for exactly this reason.
-    if (isTextEntry(document.activeElement) || document.activeElement instanceof HTMLButtonElement) {
+    // Leave Enter alone while typing, or while a focused control owns it (boot retry, a HUD
+    // control a keyboard user tabbed to, the object panel's link). Clicking a HUD control does not
+    // strand the composer: those controls release focus on a pointer activation for that reason.
+    const focused = document.activeElement;
+    if (
+      isTextEntry(focused) ||
+      focused instanceof HTMLButtonElement ||
+      focused instanceof HTMLAnchorElement
+    ) {
       return;
     }
     event.preventDefault();

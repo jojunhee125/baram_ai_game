@@ -97,6 +97,38 @@
           </div>
         </div>
 
+        <!--
+          One panel for all three fixed object types; objectPanel.ts fills the body and the footer
+          per kind, since only those two differ and two of them never open at once. Before
+          #transition and #boot-status like the HUD, so the wipe and the boot overlay always draw
+          over it — a dropped connection must not leave a quiz sitting above "연결이 끊어졌습니다".
+        -->
+        <div id="object-panel" class="object" hidden>
+          <div
+            class="object__panel"
+            id="object-panel-dialog"
+            role="dialog"
+            aria-labelledby="object-panel-title"
+            tabindex="-1"
+          >
+            <p class="object__kind" id="object-panel-kind"></p>
+            <h2 class="object__title" id="object-panel-title"></h2>
+            <div class="object__body" id="object-panel-body"></div>
+            <div class="object__footer">
+              <a
+                class="object__open"
+                id="object-panel-link"
+                target="_blank"
+                rel="noopener noreferrer"
+                hidden
+              >
+                새 탭에서 열기
+              </a>
+              <button type="button" class="object__close" id="object-panel-close">닫기</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Before #boot-status so a boot error raised during the new room's load stays visible. -->
         <div id="transition" class="transition" data-state="clear" aria-hidden="true"></div>
         <p id="transition-notice" class="notice" role="status" aria-live="polite" hidden></p>

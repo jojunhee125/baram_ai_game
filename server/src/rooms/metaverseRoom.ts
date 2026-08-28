@@ -6,6 +6,8 @@ import {
   ClientMessage,
   Direction,
   HOME_COOLDOWN_MS,
+  InteractableKind,
+  InteractableMarker,
   MAX_CHAT_LENGTH,
   MAX_CHATS_PER_SECOND,
   MAX_MOVES_PER_SECOND,
@@ -18,13 +20,17 @@ import {
   VIEW_RADIUS_TILES,
   type ChatBroadcast,
   type ChatRequest,
+  type InteractableEntered,
   type JoinOptions,
   type MoveRejected,
   type MoveRequest,
   type PortalEntered,
+  type QuizAnswerRequest,
+  type QuizResult,
   type Teleported,
   type TilePosition,
 } from "@zep-test/shared";
+import { TableInteractableIndex } from "../game/interactables";
 import { isDirection, TileMovementResolver } from "../game/movement";
 import { TablePortalIndex } from "../game/portals";
 import { chebyshevDistance, UniformGridProximityIndex } from "../game/proximity";
@@ -32,12 +38,15 @@ import { TiledMapLoader } from "../game/tiledMap";
 import type {
   AuthResult,
   CollisionMap,
+  InteractableDefinition,
+  InteractableIndex,
   MetaverseRoomOptions,
   PortalIndex,
   ProximityIndex,
   RoomCreateOptions,
   SpawnArea,
 } from "./contracts";
+import { INTERACTABLE_DEFINITIONS } from "./interactableDefinitions";
 import { PORTAL_DEFINITIONS } from "./portalDefinitions";
 import { deriveSsoNickname } from "./ssoIdentity";
 
@@ -89,6 +98,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   private collisionMap!: CollisionMap;
   private proximityIndex!: ProximityIndex;
   private portalIndex!: PortalIndex;
+  private interactableIndex!: InteractableIndex;
   private spawn!: SpawnArea;
   /**
    * Where "return home" lands: the spawn centre with the spawn's spread deliberately dropped.
@@ -112,10 +122,16 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.collisionMap = await this.mapLoader.load(options.mapKey);
     this.proximityIndex = this.createProximityIndex(this.collisionMap);
     this.portalIndex = this.createPortalIndex(this.collisionMap);
+    this.interactableIndex = this.createInteractableIndex(this.collisionMap);
     // Static for the room's lifetime — populated once here, never touched again. This is the
     // only reason the client learns a portal's position at all (never its id or destination).
     for (const tile of this.portalIndex.triggerTiles()) {
       this.state.portalMarkers.push(new PortalMarker(tile));
+    }
+    // Position and kind only. An object's content never enters the state — it would be a static
+    // broadcast to every client that buys nothing, and it would put the quiz answers on the wire.
+    for (const tile of this.interactableIndex.markerTiles()) {
+      this.state.interactableMarkers.push(new InteractableMarker(tile));
     }
 
     this.onMessage(ClientMessage.Move, (client: RoomClient, message: MoveRequest) => {
@@ -126,6 +142,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     });
     this.onMessage(ClientMessage.ReturnHome, (client: RoomClient) => {
       this.handleReturnHome(client);
+    });
+    this.onMessage(ClientMessage.QuizAnswer, (client: RoomClient, message: QuizAnswerRequest) => {
+      this.handleQuizAnswer(client, message);
     });
   }
 
@@ -148,6 +167,15 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
    */
   protected createPortalIndex(map: CollisionMap): PortalIndex {
     return new TablePortalIndex(this.roomName, PORTAL_DEFINITIONS, map);
+  }
+
+  /**
+   * Overridable seam, for the reason {@link createPortalIndex} gives: a room whose name matches no
+   * row — including the runtime-undefined name of a room built without the matchmaker — gets an
+   * index that answers null to everything, which is the normal path for a room with no objects.
+   */
+  protected createInteractableIndex(map: CollisionMap): InteractableIndex {
+    return new TableInteractableIndex(this.roomName, INTERACTABLE_DEFINITIONS, map);
   }
 
   /**
@@ -278,6 +306,13 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         toRoom: portal.to.room,
       } satisfies PortalEntered);
     }
+
+    // Behind the portal check for readability only: boot refuses a table that puts an object on a
+    // portal trigger, so at most one of the two can ever fire on the same step.
+    const object = this.interactableIndex.at(destination.tileX, destination.tileY);
+    if (object !== null) {
+      client.send(ServerMessage.InteractableEntered, toInteraction(object));
+    }
   }
 
   private handleChat(client: RoomClient, message: ChatRequest): void {
@@ -351,6 +386,51 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       tileY: destination.tileY,
       facing: Direction.Down,
     } satisfies Teleported);
+  }
+
+  /**
+   * Grades one quiz answer and remembers nothing: no score, no attempt count, no interaction
+   * state to clean up if the client vanishes mid-question.
+   *
+   * Deliberately does not check that the player is standing on the object's tile. Nothing is
+   * scored, so there is no advantage to deny, and the check would create a failure mode of its
+   * own — an answer sent as the player steps off the tile would vanish in silence. The
+   * room-narrowed index is already the boundary that stops an id from another room resolving.
+   *
+   * Deliberately has no rate limit of its own either. Chat needed one because it fans out O(k),
+   * and the home warp because it queries O(room population); this is one `Map` lookup and one
+   * unicast, the same grade as a MoveRejected, and `maxMessagesPerSecond` already caps it.
+   */
+  private handleQuizAnswer(client: RoomClient, message: QuizAnswerRequest): void {
+    const player = this.state.players.get(client.sessionId);
+    if (!client.userData || !player) {
+      return;
+    }
+
+    const objectId = message?.objectId;
+    if (typeof objectId !== "string") {
+      return;
+    }
+    // Null for an unknown id or one belonging to another room's object; a non-quiz object is a
+    // client asking a signboard for a verdict. Neither has anything useful to be told.
+    const object = this.interactableIndex.byId(objectId);
+    if (object === null || object.kind !== InteractableKind.Quiz) {
+      return;
+    }
+
+    const { choiceIndex } = message;
+    if (typeof choiceIndex !== "number" || !Number.isInteger(choiceIndex)) {
+      return;
+    }
+
+    // An out-of-range index is graded wrong rather than ignored: unlike a malformed payload, it
+    // came from a client that is waiting for a verdict, and silence would strand its panel.
+    client.send(ServerMessage.QuizResult, {
+      objectId: object.id,
+      choiceIndex,
+      correct: choiceIndex === object.answerIndex,
+      explanation: object.explanation,
+    } satisfies QuizResult);
   }
 
   /**
@@ -501,6 +581,29 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       }
       viewed.delete(id);
     }
+  }
+}
+
+/**
+ * The wire form of an object row, built field by field rather than by spreading the row. A spread
+ * would carry `answerIndex` onto the wire, and a quiz whose answer is in the network tab has given
+ * away the only thing it had; it would also ship the authoring coordinates, which the client
+ * already has from the markers.
+ */
+function toInteraction(object: InteractableDefinition): InteractableEntered {
+  switch (object.kind) {
+    case InteractableKind.Link:
+      return { kind: object.kind, objectId: object.id, title: object.title, url: object.url };
+    case InteractableKind.Notice:
+      return { kind: object.kind, objectId: object.id, title: object.title, body: object.body };
+    case InteractableKind.Quiz:
+      return {
+        kind: object.kind,
+        objectId: object.id,
+        title: object.title,
+        question: object.question,
+        choices: object.choices,
+      };
   }
 }
 

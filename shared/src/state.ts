@@ -29,6 +29,24 @@ export const PortalMarker = schema({
 export type PortalMarker = SchemaType<typeof PortalMarker>;
 
 /**
+ * A fixed object's tile, for drawing an in-world marker. Unlike {@link PortalMarker} it carries
+ * `kind`, so the marker can say which of the three object types it is before you step on it —
+ * the maps are machine-generated and have no object art to read that from.
+ *
+ * The object's content never arrives this way, only its position: content comes with
+ * `InteractableEntered`, on the step that enters the tile. Static for the room's lifetime, so
+ * like the portal markers it needs no view tagging.
+ */
+export const InteractableMarker = schema({
+  tileX: "uint16",
+  tileY: "uint16",
+  /** An `InteractableKind` value. A string rather than a code — see that enum for why. */
+  kind: "string",
+});
+
+export type InteractableMarker = SchemaType<typeof InteractableMarker>;
+
+/**
  * Room state. `players` is view-tagged: each client receives only the entries
  * added to its own StateView, which is how proximity filtering is enforced.
  * The map key is the Colyseus sessionId.
@@ -38,6 +56,7 @@ export const RoomState = schema({
   mapKey: "string",
   players: { map: Player, view: true },
   portalMarkers: { array: PortalMarker },
+  interactableMarkers: { array: InteractableMarker },
 });
 
 export type RoomState = SchemaType<typeof RoomState>;
