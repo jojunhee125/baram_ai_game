@@ -5,8 +5,10 @@ import {
   ClientMessage,
   Direction,
   MAX_MOVES_PER_SECOND,
+  MONSTER_TICK_MS,
   PATCH_RATE_MS,
   ServerMessage,
+  VIEW_RADIUS_TILES,
   type MoveRejected,
   type PortalEntered,
   type RoomState,
@@ -14,6 +16,12 @@ import {
 import { TiledMapLoader } from "../game/tiledMap";
 import { createGameServer } from "../server";
 import { ROOM_DEFINITIONS } from "./definitions";
+import { MetaverseRoom } from "./metaverseRoom";
+import {
+  MONSTER_SPAWN_DEFINITIONS,
+  MONSTER_TYPES,
+  MonsterKind,
+} from "./monsterDefinitions";
 import { PORTAL_DEFINITIONS } from "./portalDefinitions";
 
 /**
@@ -55,9 +63,24 @@ const NORTH_ROUTE_ROW = 8;
 
 type AnyRoom = Awaited<ReturnType<ColyseusTestServer["createRoom"]>> & { state: RoomState };
 
+interface DecodedMonster {
+  kind: string;
+  tileX: number;
+  tileY: number;
+}
+
 interface ClientRoom {
   readonly sessionId: string;
-  readonly state: { players?: { get(id: string): unknown; readonly size: number } } | undefined;
+  readonly state:
+    | {
+        players?: { get(id: string): unknown; readonly size: number };
+        monsters?: {
+          get(id: string): DecodedMonster | undefined;
+          keys(): IterableIterator<string>;
+          readonly size: number;
+        };
+      }
+    | undefined;
   send(type: string, payload?: unknown): void;
   onMessage(type: string, callback: (payload: unknown) => void): unknown;
   leave(consented?: boolean): Promise<number>;
@@ -343,5 +366,198 @@ describe("hunting-ground — the round trip through plaza's north door", () => {
     const inbox = collect(arriving);
     await sleep(SETTLE_MS);
     assert.deepEqual(inbox.portals, [], "arriving in the hunting ground must not fire its south door");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Monsters over a real connection.
+//
+// `metaverseRoom.views.test.ts` audits the ledger by driving a room object directly, and
+// `monsterAi.test.ts` audits the FSM with no room at all. Neither of them encodes anything: they
+// would both still pass if `state.monsters` never reached a client, if the spawn table were
+// narrowed to the wrong room name, or if a second view-tagged map on the same schema did not
+// decode. That is what these cover, and it is the only place the real MONSTER_SPAWN_DEFINITIONS
+// and the real simulation loop are exercised together.
+// ---------------------------------------------------------------------------
+
+const HUNTING_SPAWNS = MONSTER_SPAWN_DEFINITIONS.filter((spawn) => spawn.room === HUNTING_GROUND);
+
+/**
+ * The south-east end of the walkable interior. Only 8 of the 20 spawn rows are within a view
+ * radius of it, against all 20 from the room's own spawn tile — which is what makes monster
+ * interest management observable on a map this small.
+ */
+const FAR_CORNER = { tileX: 55, tileY: 31 };
+
+function chebyshev(a: { tileX: number; tileY: number }, b: { tileX: number; tileY: number }): number {
+  return Math.max(Math.abs(a.tileX - b.tileX), Math.abs(a.tileY - b.tileY));
+}
+
+/** Recomputed on every poll: both sides of the comparison move while the loop is running. */
+function serverVisibleMonsters(room: AnyRoom, sessionId: string): string[] {
+  const player = room.state.players.get(sessionId);
+  if (player === undefined) {
+    return [];
+  }
+  const ids: string[] = [];
+  for (const [monsterId, monster] of room.state.monsters.entries()) {
+    if (chebyshev(player, monster) <= VIEW_RADIUS_TILES) {
+      ids.push(monsterId);
+    }
+  }
+  return ids.sort();
+}
+
+function decodedMonsters(client: ClientRoom): string[] {
+  return [...(client.state?.monsters?.keys() ?? [])].sort();
+}
+
+function decodedMonsterOf(client: ClientRoom, monsterId: string): DecodedMonster {
+  const monster = client.state?.monsters?.get(monsterId);
+  assert.ok(monster, `the client has no decoded monster "${monsterId}"`);
+  return monster;
+}
+
+function sameIds(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
+/**
+ * Waits for the decoded map to agree with the server's own radius calculation. A convergence
+ * check rather than a snapshot comparison, because the monsters keep walking: a single sample
+ * could catch the client one patch behind and fail for no reason.
+ */
+async function expectDecodedMonstersToMatch(
+  room: AnyRoom,
+  client: ClientRoom,
+  label: string,
+): Promise<string[]> {
+  try {
+    await waitUntil(() => sameIds(decodedMonsters(client), serverVisibleMonsters(room, client.sessionId)), label);
+  } catch {
+    assert.fail(
+      `${label}: client decoded [${decodedMonsters(client).join(",")}], server says [${serverVisibleMonsters(room, client.sessionId).join(",")}]`,
+    );
+  }
+  return decodedMonsters(client);
+}
+
+describe("hunting-ground — monsters over the wire", () => {
+  it("decodes the monsters the server says are in range, and only those", async () => {
+    const room = await createRoom(HUNTING_GROUND);
+    const hunter = await join(room, "hunter");
+
+    assert.equal(
+      room.state.monsters.size,
+      HUNTING_SPAWNS.length,
+      "the room did not build one monster per spawn row of the real table",
+    );
+    const decoded = await expectDecodedMonstersToMatch(room, hunter, "the arrival view");
+    assert.ok(decoded.length > 0, "a hunter standing on the trailhead sees nothing at all");
+    for (const monsterId of decoded) {
+      assert.ok(
+        HUNTING_SPAWNS.some((spawn) => spawn.id === monsterId),
+        `decoded "${monsterId}", which is in no spawn row`,
+      );
+      const monster = decodedMonsterOf(hunter, monsterId);
+      assert.ok(
+        monster.kind === MonsterKind.Slime || monster.kind === MonsterKind.Bat,
+        `decoded kind "${monster.kind}", which the client has no sprite for`,
+      );
+    }
+  });
+
+  it("drops the monsters that fall out of range as the hunter walks to the far corner", async () => {
+    const room = await createRoom(HUNTING_GROUND);
+    const hunter = await join(room, "hunter");
+    const atSpawn = await expectDecodedMonstersToMatch(room, hunter, "the arrival view");
+
+    // Down to the bottom row before turning east, and a snapshot of the start rather than the
+    // live Player. The spawn spreads by 2, so the walker can begin on row 27 — which carries a
+    // pillar at x41 — while row 31 is clear from x16 to x55 for every column it can start in.
+    const start = serverPlayer(room, hunter.sessionId);
+    const from = { tileX: start.tileX, tileY: start.tileY };
+    await stepMany(hunter, Direction.Down, FAR_CORNER.tileY - from.tileY);
+    await expectServerAt(room, hunter, from.tileX, FAR_CORNER.tileY, "the bottom row");
+    await stepMany(hunter, Direction.Right, FAR_CORNER.tileX - from.tileX);
+    await expectServerAt(room, hunter, FAR_CORNER.tileX, FAR_CORNER.tileY, "the far corner");
+
+    const atCorner = await expectDecodedMonstersToMatch(room, hunter, "the far-corner view");
+    // Which ids were dropped, not how many are left: the counts on both sides move as the field
+    // wanders, and "at least one western monster is no longer on the wire" is the property.
+    const dropped = atSpawn.filter((monsterId) => !atCorner.includes(monsterId));
+    assert.ok(
+      dropped.length > 0,
+      `interest management filtered nothing: [${atSpawn.join(",")}] at the spawn, [${atCorner.join(",")}] in the corner`,
+    );
+    assert.ok(atCorner.length > 0, "the corner is inside the field; it should still see some");
+  });
+
+  it("runs the simulation loop: the field is not frozen on its spawn tiles", async () => {
+    const room = await createRoom(HUNTING_GROUND);
+    await join(room, "hunter");
+    const spawnTileOf = new Map(HUNTING_SPAWNS.map((spawn) => [spawn.id, spawn.at]));
+
+    await waitUntil(
+      () =>
+        [...room.state.monsters.entries()].some(([monsterId, monster]) => {
+          const at = spawnTileOf.get(monsterId);
+          return at !== undefined && (monster.tileX !== at.tileX || monster.tileY !== at.tileY);
+        }),
+      "at least one monster to take a wander step",
+      MONSTER_TICK_MS * 20,
+    );
+  });
+
+  it("keeps a monster's whole life cycle intact on the wire: death, then respawn under the same key", async () => {
+    // The one case the encoder can get wrong that the ledger audit cannot see. A respawn is a
+    // *new* Monster instance filed under the key a delete just removed, and a client that
+    // decoded the delete has to accept the re-add without the stale entry lingering.
+    //
+    // Combat is Pass E's, so the room's own kill path is called directly — there is no other
+    // way to stage a death today, and staging it is the entire point.
+    const room = await createRoom(HUNTING_GROUND);
+    const hunter = await join(room, "hunter");
+    const victim = "hg-slime-10";
+    const slime = MONSTER_TYPES.get(MonsterKind.Slime);
+    assert.ok(slime, "MONSTER_TYPES has no slime row");
+    assert.ok(
+      HUNTING_SPAWNS.some((spawn) => spawn.id === victim && spawn.kind === MonsterKind.Slime),
+      `${victim} is no longer a slime spawn row; pick another victim`,
+    );
+
+    await waitUntil(
+      () => decodedMonsters(hunter).includes(victim),
+      `${victim} to reach the hunter's view`,
+    );
+
+    (room as unknown as MetaverseRoom)["killMonster"](victim, Date.now());
+
+    await waitUntil(() => !decodedMonsters(hunter).includes(victim), `${victim} to leave the wire`);
+    assert.equal(hunter.state?.monsters?.get(victim), undefined, "a stale entry survived the delete");
+
+    await waitUntil(
+      () => decodedMonsters(hunter).includes(victim),
+      `${victim} to respawn on the wire`,
+      slime.respawnDelayMs + 5000,
+    );
+    const revived = decodedMonsterOf(hunter, victim);
+    const spawnRow = HUNTING_SPAWNS.find((spawn) => spawn.id === victim);
+    assert.ok(spawnRow);
+    assert.ok(
+      chebyshev(revived, spawnRow.at) <= spawnRow.wanderRadiusTiles,
+      `respawned at (${revived.tileX},${revived.tileY}), outside its own wander box`,
+    );
+    await expectDecodedMonstersToMatch(room, hunter, "the view after the respawn");
+  });
+
+  it("puts no monsters in plaza or grand-plaza, which is what keeps PoC #2's baseline valid", async () => {
+    for (const name of [PLAZA, "grand-plaza"]) {
+      const room = await createRoom(name);
+      const visitor = await join(room, "visitor");
+      await sleep(MONSTER_TICK_MS * 3);
+      assert.equal(room.state.monsters.size, 0, `${name} built monsters`);
+      assert.equal(visitor.state?.monsters?.size ?? 0, 0, `${name} sent monsters to a client`);
+    }
   });
 });

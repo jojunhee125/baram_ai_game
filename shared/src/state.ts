@@ -47,6 +47,29 @@ export const InteractableMarker = schema({
 export type InteractableMarker = SchemaType<typeof InteractableMarker>;
 
 /**
+ * One living monster. It goes into the same view-tagged map machinery as {@link Player} but
+ * carries **no HP**.
+ *
+ * HP in the state would patch every view within the view radius on every single hit. This
+ * project has already made the same call twice — quiz content and chat are messages, not state
+ * — so damage travels as a `MonsterHit` message and the client renders the bar locally.
+ *
+ * `kind` is a string for {@link InteractableMarker.kind}'s reason: the same value is the
+ * discriminant of the server's type table, of the wire, and of the client's sprite selector.
+ * There are tens of monsters and the field is written once at spawn, so the per-entry string
+ * costs nothing worth optimising — revisit that the day monsters appear in grand-plaza.
+ */
+export const Monster = schema({
+  kind: "string",
+  tileX: "uint16",
+  tileY: "uint16",
+  /** Direction enum value, same convention as {@link Player.facing}. */
+  facing: "uint8",
+});
+
+export type Monster = SchemaType<typeof Monster>;
+
+/**
  * Room state. `players` is view-tagged: each client receives only the entries
  * added to its own StateView, which is how proximity filtering is enforced.
  * The map key is the Colyseus sessionId.
@@ -55,6 +78,13 @@ export const RoomState = schema({
   roomType: "string",
   mapKey: "string",
   players: { map: Player, view: true },
+  /**
+   * Living monsters only, keyed by spawn point id. A death deletes the entry and a respawn puts
+   * it back under the same key, so monsters travel the *same* view bookkeeping path as a player
+   * join/leave rather than inventing a second set of rules. The death animation is driven by the
+   * `MonsterHit` that reports `hpRemaining: 0`, not by this deletion.
+   */
+  monsters: { map: Monster, view: true },
   portalMarkers: { array: PortalMarker },
   interactableMarkers: { array: InteractableMarker },
 });

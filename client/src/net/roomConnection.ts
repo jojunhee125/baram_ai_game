@@ -9,6 +9,7 @@ import {
   type InteractableEntered,
   type InteractableMarker,
   type JoinOptions,
+  type Monster,
   type MoveRejected,
   type MoveRequest,
   type Player,
@@ -45,6 +46,21 @@ export interface PlayerSnapshot {
   avatarSkin: number;
 }
 
+/**
+ * Plain mirror of the synced `Monster` schema. No HP: it is not in the state at all, because a
+ * hit would then patch every view in range — it rides on `MonsterHit` instead (design §5.2).
+ *
+ * `kind` stays the raw wire string rather than a union, like {@link InteractableMarkerPosition}:
+ * the server can be newer than the browser holding this bundle, and `monsterSprites` only keeps
+ * its fallback row reachable while this type admits that.
+ */
+export interface MonsterSnapshot {
+  kind: string;
+  tileX: number;
+  tileY: number;
+  facing: Direction;
+}
+
 /** Plain mirror of one synced `InteractableMarker`, like {@link PlayerSnapshot} for players. */
 export interface InteractableMarkerPosition extends TilePosition {
   /**
@@ -59,6 +75,14 @@ export interface RoomEvents {
   onPlayerAdd?(sessionId: string, player: PlayerSnapshot): void;
   onPlayerChange?(sessionId: string, player: PlayerSnapshot): void;
   onPlayerRemove?(sessionId: string): void;
+  /** A monster entered this client's view radius, or respawned into an id it already knew. */
+  onMonsterAdd?(monsterId: string, monster: MonsterSnapshot): void;
+  onMonsterChange?(monsterId: string, monster: MonsterSnapshot): void;
+  /**
+   * The entry left `state.monsters` — death and leaving the view radius both arrive this way,
+   * because the state makes them the same event (design §5.2). Whichever it was, the sprite goes.
+   */
+  onMonsterRemove?(monsterId: string): void;
   onChat?(message: ChatBroadcast): void;
   onMoveRejected?(correction: MoveRejected): void;
   /** The local player stepped onto a portal trigger; the consumer owns the room transition. */
@@ -86,6 +110,9 @@ type PendingLifecycle =
 export class RoomConnection {
   private readonly snapshots = new Map<string, PlayerSnapshot>();
   private readonly detachers = new Map<string, () => void>();
+  private readonly monsterSnapshots = new Map<string, MonsterSnapshot>();
+  /** Kept apart from `detachers`: a monster id and a session id share no namespace. */
+  private readonly monsterDetachers = new Map<string, () => void>();
   private events: RoomEvents = {};
   private attached = false;
   private leaving = false;
@@ -145,6 +172,7 @@ export class RoomConnection {
     this.events = events;
     this.attached = true;
     this.bindPlayers();
+    this.bindMonsters();
     this.bindMessages();
     this.replayPendingLifecycle();
   }
@@ -161,6 +189,11 @@ export class RoomConnection {
   /** Every player currently inside this client's view radius, including itself. */
   get players(): ReadonlyMap<string, PlayerSnapshot> {
     return this.snapshots;
+  }
+
+  /** Every live monster inside this client's view radius. Empty in a room that has none. */
+  get monsters(): ReadonlyMap<string, MonsterSnapshot> {
+    return this.monsterSnapshots;
   }
 
   sendMove(dir: Direction): void {
@@ -232,6 +265,36 @@ export class RoomConnection {
       this.detachers.delete(sessionId);
       this.snapshots.delete(sessionId);
       this.events.onPlayerRemove?.(sessionId);
+    });
+  }
+
+  /**
+   * The same shape as {@link bindPlayers}, against the second view-tagged map. Rooms without
+   * monsters simply never fire: an empty map has nothing to replay, so plaza pays nothing for
+   * this being wired unconditionally.
+   */
+  private bindMonsters(): void {
+    const $ = getStateCallbacks(this.room);
+
+    $(this.room.state).monsters.onAdd((monster: Monster, monsterId: string) => {
+      this.monsterSnapshots.set(monsterId, toMonsterSnapshot(monster));
+      this.events.onMonsterAdd?.(monsterId, toMonsterSnapshot(monster));
+
+      this.monsterDetachers.set(
+        monsterId,
+        $(monster).onChange(() => {
+          const snapshot = toMonsterSnapshot(monster);
+          this.monsterSnapshots.set(monsterId, snapshot);
+          this.events.onMonsterChange?.(monsterId, snapshot);
+        }),
+      );
+    });
+
+    $(this.room.state).monsters.onRemove((_monster: Monster, monsterId: string) => {
+      this.monsterDetachers.get(monsterId)?.();
+      this.monsterDetachers.delete(monsterId);
+      this.monsterSnapshots.delete(monsterId);
+      this.events.onMonsterRemove?.(monsterId);
     });
   }
 
@@ -334,6 +397,16 @@ function toInteractableMarkers(
     positions.push({ tileX: marker.tileX, tileY: marker.tileY, kind: marker.kind });
   }
   return positions;
+}
+
+function toMonsterSnapshot(monster: Monster): MonsterSnapshot {
+  return {
+    kind: monster.kind,
+    tileX: monster.tileX,
+    tileY: monster.tileY,
+    // `facing` crosses the wire as uint8; the server only ever writes Direction values.
+    facing: monster.facing as Direction,
+  };
 }
 
 function toSnapshot(player: Player): PlayerSnapshot {

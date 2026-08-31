@@ -59,6 +59,22 @@ export const MAX_CHATS_PER_SECOND = 2;
 export const HOME_COOLDOWN_MS = 2000;
 
 /**
+ * Monster decision interval — the first server-side simulation loop in this codebase. Every room
+ * before this one was purely message-driven, and a room with no monster rows still is: it never
+ * starts the loop at all (`docs/design-hunting-inventory.md` §5.4). That one condition is what
+ * keeps grand-plaza's measured PoC #2 cost unchanged.
+ *
+ * An integer multiple of PATCH_RATE_MS. If the decision and send cadences were coprime, the wait
+ * between deciding and sending would drift between 0 and one tick and the movement would not read
+ * evenly. 100ms buys nothing (the patch rate is the smallest unit anything is visible in) and
+ * 500ms makes chases visibly sluggish and rounds the attack cooldown up to the tick.
+ *
+ * The tick is a scan, not the cost: each monster holds its own deadlines and only the ones whose
+ * deadline has passed do any work. The lever on the real cost is the per-kind step interval.
+ */
+export const MONSTER_TICK_MS = 200;
+
+/**
  * Number of selectable avatar variants. Must equal the skin block count baked into
  * `assets/sprites/avatar.png` — the sheet is `row = skin * 4 + direction`, so its height
  * is `AVATAR_SKIN_COUNT * 4 * TILE_SIZE_PX`. Raising this without regenerating the sheet

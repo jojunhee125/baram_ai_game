@@ -338,6 +338,13 @@ body {
   align-items: flex-end;
   gap: var(--space-2);
   width: 23.4375%;
+  /*
+   * Bounded by the stage, because the column can hold the controls, the minimap and the bag at
+   * once — on a short window that stack is taller than the stage, and the bag would hang off the
+   * bottom edge. The bag's list is the part that gives (see .bag__list), so what shrinks is the
+   * scrollable region rather than the header a player needs to close it with.
+   */
+  max-height: calc(100% - var(--space-6));
   pointer-events: none;
 }
 
@@ -416,6 +423,202 @@ body {
   width: 100%;
   height: auto;
   image-rendering: pixelated;
+}
+
+/*
+ * The bag. Sits in the HUD column under the minimap, sharing its dark-over-canvas treatment,
+ * because unlike .object it is not a modal: it never takes the screen and never locks movement
+ * (docs/design-hunting-inventory.md §3.4). Both can be open at once; the column stacks them.
+ */
+.bag {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  /* Lets .hud's cap reach the list below instead of stopping at this box's content height. */
+  min-height: 0;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(20, 19, 26, 0.82);
+  color: #eceaf4;
+}
+
+.bag__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.bag__title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  /* Positive tracking: this is a small label, not running text. */
+  letter-spacing: 0.06em;
+}
+
+.bag__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: rgba(236, 234, 244, 0.62);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.bag__close:hover {
+  background: rgba(236, 234, 244, 0.1);
+  border-color: rgba(236, 234, 244, 0.24);
+  color: #eceaf4;
+}
+
+.bag__close:active {
+  background: rgba(236, 234, 244, 0.04);
+}
+
+.bag__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.bag__close-icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* The list scrolls, not the panel: the header and its 닫기 have to stay reachable with a full bag. */
+.bag__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bag__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-1) 0;
+  border-radius: 6px;
+}
+
+/*
+ * One frame of assets/sprites/items.png; inventoryPanel.ts sets the column. Fixed 32px because
+ * the HUD's controls are fixed px too, so an icon here never has to match the canvas scale.
+ */
+.bag__icon {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  background-image: url("/sprites/items.png");
+  background-repeat: no-repeat;
+  background-size: 160px 32px;
+  image-rendering: pixelated;
+}
+
+/* An icon key this bundle has no column for: a visibly empty slot, never another item's picture. */
+.bag__icon--unknown {
+  background-image: none;
+  border: 1px dashed rgba(236, 234, 244, 0.24);
+  border-radius: 6px;
+}
+
+.bag__name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+/* Tabular figures so a column of amounts lines up instead of jittering with the digits. */
+.bag__count {
+  flex: none;
+  color: rgba(236, 234, 244, 0.72);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Loading, empty and failure share this block; exactly one of them is ever on screen. */
+.bag__status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+  text-align: center;
+}
+
+.bag__status-icon {
+  width: 24px;
+  height: 24px;
+  margin-bottom: var(--space-1);
+  color: rgba(236, 234, 244, 0.38);
+}
+
+.bag__status-text {
+  margin: 0;
+  font-size: 12px;
+  text-wrap: balance;
+}
+
+.bag__status-hint {
+  margin: 0;
+  color: rgba(236, 234, 244, 0.55);
+  font-size: 11px;
+  text-wrap: pretty;
+}
+
+.bag__status-hint:empty {
+  display: none;
+}
+
+.bag__retry {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  margin-top: var(--space-1);
+  padding: 0 var(--space-3);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(236, 234, 244, 0.06);
+  color: #eceaf4;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.bag__retry:hover {
+  background: rgba(236, 234, 244, 0.12);
+  border-color: rgba(236, 234, 244, 0.32);
+}
+
+.bag__retry:active {
+  transform: translateY(1px);
+}
+
+.bag__retry:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /*
@@ -759,6 +962,8 @@ body {
     border-top-color: var(--border-strong);
   }
 
+  .bag__close,
+  .bag__retry,
   .boot__retry,
   .chat__input,
   .hud__button,

@@ -232,6 +232,36 @@ export interface InteractableMarkerTile extends TilePosition {
   kind: InteractableKind;
 }
 
+/**
+ * One thing a player can be carrying: the item catalogue of roadmap item 7
+ * (`docs/design-hunting-inventory.md` §3.2). Authored in code beside `PORTAL_DEFINITIONS` and
+ * `INTERACTABLE_DEFINITIONS`, and for the same reason — the deploy is the edit permission.
+ *
+ * The database stores only {@link ItemDefinition.key} and an amount, so the display strings below
+ * are not duplicated there: a name in two places is a name that will disagree with itself, and
+ * renaming an item has to stay a deploy rather than a migration.
+ */
+export interface ItemDefinition {
+  /**
+   * Stable key, unique across the table. It is written into `inventory_item.item_key` and read
+   * back on every bag open, so — like a portal id — it must never be a table index: reordering
+   * the rows would rename everything already in every player's bag.
+   */
+  key: string;
+  name: string;
+  /**
+   * Client-side icon key, sent with the item rather than looked up in the bundle, so a client
+   * older than the server still draws the row it was handed. It selects a frame of `items.png`
+   * by its position in `ITEM_ICON_ORDER` (design appendix D-3).
+   *
+   * Its own field rather than a reuse of {@link ItemDefinition.key}, even while every row sets
+   * the two to the same string: art is allowed to be shared between items and a `key` is not
+   * allowed to move, so the day one icon serves two items must not become a question about the
+   * database.
+   */
+  icon: string;
+}
+
 /** Data attached to `client.userData`; never synced to clients. */
 export interface PlayerSession {
   nickname: string;

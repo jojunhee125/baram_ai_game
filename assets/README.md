@@ -31,6 +31,20 @@ Tiny Characters Set(Fleurman, CC0) 소스로부터 24스킨×4방향×3프레임
 
 > `SKINS` 행 수와 shared `AVATAR_SKIN_COUNT`가 다르면 임포터가 그 자리에서 실패한다(`assertSkinCountMatchesShared`). **둘은 반드시 한 번에 같이 바꿀 것** — 상수만 올리면 서버가 존재하지 않는 행의 스킨을 나눠주고 Phaser가 빈 프레임을 그린다.
 
+### 몬스터 + 아이템 아이콘 (절차적 생성)
+
+```
+node tools/generate-monster-art.mjs                                 # cwd = code/
+```
+
+`sprites/monster.png`과 `sprites/items.png`를 한 번에 굽는다. 다른 두 시트와 달리 **소스 팩이 없다** — 리포의 CC0 아트는 남는 게 없고(아바타 24블록 전량 소진, 타일셋 잔여 2종은 프레임·방향 개념 없음) 사내망에서 itch.io·opengameart가 차단이라 신규 다운로드를 전제할 수 없다. 그래서 `generate-assets.mjs`가 아바타 placeholder를 굽는 것과 **같은 기법**(ASCII 행 배열 → 16px 네이티브 셀 → 2배 확대)으로 절차 생성한다. 근거는 `docs/design-hunting-inventory.md` 부록 D-1.
+
+난수·타임스탬프가 없어 같은 소스면 같은 바이트가 나온다. **디스크에 쓰기 전 메모리에서 검증을 전부 통과해야 첫 바이트를 쓴다**(다른 생성기와 같은 규율): 두 시트 치수 / 전 프레임 비어 있지 않음 / 종별 3개 보행 열이 서로 다름 / 종별 4방향 행이 서로 다름 / 아이템 5종이 서로 다름 / 클라이언트 `MONSTER_SPRITE_ORDER`·`ITEM_ICON_ORDER`와 생성기 테이블 일치.
+
+> 마지막 항목은 `import-avatar.mjs`의 `assertSkinCountMatchesShared`와 같은 이유다. 클라이언트 배열이 정본이고(그게 Phaser가 시트를 인덱싱하는 값이다) 생성기가 거기에 맞춘다 — 어긋나면 슬라임이 박쥐 프레임을 그리는데 런타임은 아무 오류도 내지 않는다.
+
+**아트 품질은 자리표시 수준이다**(설계 부록 D-5). 사내망이 풀리거나 CC0 몬스터 팩을 확보하면 아래 프레임 배치 규약만 지켜 통째로 교체하면 되고, 서버·프로토콜은 영향을 받지 않는다.
+
 ### plaza 맵 (비파괴, 손 배치 + 절차적 테두리)
 
 ```
@@ -255,6 +269,46 @@ const base = (skin * 4 + direction) * 3;
 
 - 32x32 프레임을 거의 꽉 채운다(최악 케이스 기준 y 0–31 불투명). 이 때문에 말풍선 오프셋(`code/client/src/world/chatBubbles.ts` 의 `BUBBLE_OFFSET_Y`)이 30 → 36 으로 조정됐다(사유는 해당 코드 주석 참고 — 여기 중복 기술하지 않는다). origin을 `(0.5, 1)` 로 두고 타일의 아래 변에 맞추면 그리드에 정렬된다.
 - `Right(2)`는 `Left(1)`의 좌우 반전이 아니라 소스에서 각각 독립 프레임으로 구워 넣었다. 목표 규약의 direction → row 매핑을 분기 없이 유지하기 위함.
+
+## sprites/monster.png
+
+- **96 x 256 px**, frame **32 x 32**, `margin 0` / `spacing 0` → 3 columns x 8 rows = 24 frames
+- 행 배치: **`row = kindIndex * 4 + direction`** — `avatar.png`와 **글자 그대로 같은 규약**이다. 그래서 `client/src/world/monsterSprites.ts`가 `playerSprites.ts`의 프레임 계산식을 `skin` → `kindIndex` 치환만으로 그대로 쓴다.
+  - `direction`: shared `Direction` enum 값 그대로 — `Down 0, Left 1, Right 2, Up 3`
+- 열 배치: **`0` = stepA, `1` = idle, `2` = stepB** (아바타와 동일)
+- origin `(0.5, 1)`. 아바타와 같은 규약이라 `setDepth(sprite.y)` 정렬에 사람과 몬스터가 같이 섞인다
+
+| kindIndex | kind | 행 | idle 프레임(Down/Left/Right/Up) | 아트 |
+|---|---|---|---|---|
+| 0 | `slime` | 0–3 | 1 / 4 / 7 / 10 | 초록 젤리 덩어리. 보행 = 스쿼시/스트레치, 방향은 눈 위치(Up은 눈 없음) |
+| 1 | `bat` | 4–7 | 13 / 16 / 19 / 22 | 회보라 박쥐. 보행 = 날개 위/펼침/아래, 방향은 눈 위치(Up은 눈 없음) |
+
+```ts
+const base = (kindIndex * 4 + direction) * 3;
+// idle  = base + 1
+// walk  = [base, base + 1, base + 2, base + 1]  (loop)
+```
+
+**`kindIndex`는 선언 순서에 의존하지 않는다.** 정본은 `client/src/world/monsterSprites.ts`의 `MONSTER_SPRITE_ORDER`이고 생성기가 그 배열을 읽어 대조한다(위 "몬스터 + 아이템 아이콘" 항목). **재정렬 금지** — 순서를 바꾸면 슬라임이 박쥐 프레임을 그린다.
+
+- 프레임을 꽉 채우지 않는다: 슬라임은 아래 2px, 박쥐는 아래 6px가 비어 있다(박쥐가 타일 위에 떠 보이게 하는 간격). 아바타(y 0–31 전부 불투명)와 달라서 **말풍선·이름표 오프셋과 무관하다** — 몬스터에는 둘 다 붙지 않는다.
+- 사람과 혼동되지 않는 실루엣이 이 두 종을 고른 이유다(설계 부록 D-1). 공격 대상을 서버가 자동 선정하므로 "저게 때릴 수 있는 것인가"가 한눈에 보여야 한다.
+
+## sprites/items.png
+
+- **160 x 32 px**, frame **32 x 32**, `margin 0` / `spacing 0` → 5 columns x 1 row = 5 frames
+- 열 배치: `frameIndex = ITEM_ICON_ORDER.indexOf(definition.icon)`
+- 스프라이트시트가 아니라 **DOM 배경 이미지**로 쓰인다(`client/src/style.css`의 `.bag__icon`, `background-position`으로 열 선택). 가방 창이 DOM이라 Phaser 로더를 타지 않는다
+
+| frame | icon | 아트 |
+|---|---|---|
+| 0 | `slime-jelly` | 초록 젤리 덩어리 |
+| 1 | `bat-wing` | 보라 날개 |
+| 2 | `copper-coin` | 구리 동전 |
+| 3 | `herb` | 약초 |
+| 4 | `old-dagger` | 낡은 단검 |
+
+정본은 `client/src/ui/inventoryPanel.ts`의 `ITEM_ICON_ORDER`이고 생성기가 대조한다. `ItemDefinition.icon`이 이 목록에 없는 값이면 가방 창은 **빈 슬롯(점선 테두리)** 을 그린다 — 서버 카탈로그가 번들보다 새로울 수 있으므로 다른 아이템 그림을 대신 쓰지 않는다.
 
 ## 뷰포트 / 카메라 설정값
 

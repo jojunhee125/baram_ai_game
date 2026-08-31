@@ -1,8 +1,10 @@
 import { createServer } from "node:http";
 import { Encoder } from "@colyseus/schema";
 import { Server, WebSocketTransport } from "colyseus";
+import type { InventoryStore } from "./db/inventoryStore";
 import type { ProfileStore } from "./db/profileStore";
 import { validateInteractableDefinitions } from "./game/interactables";
+import { validateItemDefinitions } from "./game/items";
 import { validatePortalDefinitions } from "./game/portals";
 import { TiledMapLoader } from "./game/tiledMap";
 import { markReady, markUnhealthy } from "./http/readiness";
@@ -11,17 +13,26 @@ import { observeWebSocketUpgrade } from "./http/wsAuthProbe";
 import type { CollisionMap } from "./rooms/contracts";
 import { ROOM_DEFINITIONS } from "./rooms/definitions";
 import { INTERACTABLE_DEFINITIONS } from "./rooms/interactableDefinitions";
+import { ITEM_DEFINITIONS, MAX_DISTINCT_ITEMS } from "./rooms/itemDefinitions";
 import { MetaverseRoom } from "./rooms/metaverseRoom";
+import {
+  MONSTER_SPAWN_DEFINITIONS,
+  MONSTER_TYPES,
+  validateMonsterSpawnDefinitions,
+} from "./rooms/monsterDefinitions";
 import { PORTAL_DEFINITIONS } from "./rooms/portalDefinitions";
 
 export const DEFAULT_PORT = 2567;
 
 /**
- * `profileStore` is resolved at boot by `index.ts` — Postgres when `DATABASE_URL` is set and
- * process memory when it is not. Omitting it takes the same in-memory path, which is what a
+ * Both stores are resolved at boot by `index.ts` — Postgres when `DATABASE_URL` is set and
+ * process memory when it is not. Omitting them takes the same in-memory path, which is what a
  * test or a local `npm run dev` runs on.
  */
-export function createGameServer(profileStore?: ProfileStore): Server {
+export function createGameServer(
+  profileStore?: ProfileStore,
+  inventoryStore?: InventoryStore,
+): Server {
   // Has to be set explicitly: the 8 KB default is nowhere near one patch of a 500-view room.
   // Every client's view is appended to one shared buffer, so a patch needs the sum of all 500
   // views at once — PoC #2 measured ~6.5 MB, and the 2026-08-27 viewport widening
@@ -41,6 +52,18 @@ export function createGameServer(profileStore?: ProfileStore): Server {
   // port would sit outside SSO entirely.
   const httpServer = createServer();
 
+  // Colyseus `Server.listen()` neither rejects nor settles when the bind fails, and an
+  // http server with no `error` listener just sits there — so a taken port produces a
+  // process that hangs forever with no output. That has cost this project twice: the
+  // 2573 port collision between two test files, and a 290s silent stall measured on
+  // 2026-08-31 when a crashed run still held the port. Throwing here turns the hang into
+  // an uncaught exception that names the port, which is the whole point: a loud failure
+  // is cheap to diagnose and a silent one is not.
+  httpServer.on("error", (cause: NodeJS.ErrnoException & { port?: number }) => {
+    const where = cause.code === "EADDRINUSE" ? ` — port ${cause.port} is already in use` : "";
+    throw new Error(`HTTP server failed to bind${where}`, { cause });
+  });
+
   // Read-only. `ws` owns this event too and completes the handshake from its own
   // listener; touching the socket here would break it.
   httpServer.on("upgrade", (request) => {
@@ -49,7 +72,7 @@ export function createGameServer(profileStore?: ProfileStore): Server {
 
   const gameServer = new Server({
     transport: new WebSocketTransport({ server: httpServer }),
-    express: (app) => configureHttpRoutes(app, profileStore),
+    express: (app) => configureHttpRoutes(app, profileStore, inventoryStore),
     beforeListen: validateRoomMaps,
   });
 
@@ -126,6 +149,34 @@ async function validateRoomMaps(): Promise<void> {
   }
   if (objects.errors.length > 0) {
     refuseBoot(`invalid interactable definitions: ${objects.errors.join("; ")}`);
+  }
+
+  // No map argument: an item is not placed anywhere. It is checked here anyway because this is
+  // where a bad authored table is caught, and a duplicate or mistyped item key is the one such
+  // fault a redeploy cannot undo — by the time it shows, that key is in somebody's bag.
+  const items = validateItemDefinitions(ITEM_DEFINITIONS, MAX_DISTINCT_ITEMS);
+  for (const warning of items.warnings) {
+    console.warn(`[zep-test] ${warning}`);
+  }
+  if (items.errors.length > 0) {
+    refuseBoot(`invalid item definitions: ${items.errors.join("; ")}`);
+  }
+
+  // Last of the four, because it is the only one that reads another table: a drop line naming an
+  // item that is not in the catalogue can only be found out about on a kill.
+  const monsters = validateMonsterSpawnDefinitions(
+    MONSTER_SPAWN_DEFINITIONS,
+    MONSTER_TYPES,
+    ITEM_DEFINITIONS,
+    mapsByRoom,
+    PORTAL_DEFINITIONS,
+    INTERACTABLE_DEFINITIONS,
+  );
+  for (const warning of monsters.warnings) {
+    console.warn(`[zep-test] ${warning}`);
+  }
+  if (monsters.errors.length > 0) {
+    refuseBoot(`invalid monster spawn definitions: ${monsters.errors.join("; ")}`);
   }
 
   markReady();

@@ -1,13 +1,18 @@
 import { Direction, type TilePosition } from "@zep-test/shared";
 import type { CollisionMap, MovementResolver } from "../rooms/contracts";
 
-interface TileDelta {
+export interface TileDelta {
   dx: number;
   dy: number;
 }
 
-/** Tile rows grow downward, matching Tiled's layer data order. */
-const STEP_BY_DIRECTION: Readonly<Record<Direction, TileDelta>> = {
+/**
+ * Tile rows grow downward, matching Tiled's layer data order.
+ *
+ * Exported so the monster AI can ask where a direction would land without duplicating the sign
+ * convention — a second copy of "Down increases tileY" is the kind of duplication that rots.
+ */
+export const STEP_BY_DIRECTION: Readonly<Record<Direction, TileDelta>> = {
   [Direction.Down]: { dx: 0, dy: 1 },
   [Direction.Left]: { dx: -1, dy: 0 },
   [Direction.Right]: { dx: 1, dy: 0 },

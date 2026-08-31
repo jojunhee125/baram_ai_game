@@ -8,12 +8,18 @@ import { resolveHomeRoomName } from "../net/roomTarget";
 import { fadeFromBlack, fadeToBlack, showTransitionNotice } from "../transitionOverlay";
 import { ChatPanel } from "../ui/chatPanel";
 import { HomeButton } from "../ui/homeButton";
+import { InventoryPanel } from "../ui/inventoryPanel";
 import { Minimap, type MinimapView } from "../ui/minimap";
 import { buildMinimapTerrain } from "../ui/minimapTerrain";
 import { ObjectPanel } from "../ui/objectPanel";
 import { ChatBubbles } from "../world/chatBubbles";
 import { drawInteractableMarkers } from "../world/interactableMarkers";
 import { LocalPlayer } from "../world/localPlayer";
+import {
+  MONSTER_TEXTURE,
+  MonsterSprites,
+  registerMonsterAnimations,
+} from "../world/monsterSprites";
 import { NameTags } from "../world/nameTags";
 import { drawPortalMarkers } from "../world/portalMarkers";
 import {
@@ -65,6 +71,7 @@ export class WorldScene extends Phaser.Scene {
   static readonly KEY = "world";
 
   private players!: PlayerSprites;
+  private monsters!: MonsterSprites;
   private bubbles!: ChatBubbles;
   private nameTags!: NameTags;
   private connection!: RoomConnection;
@@ -74,6 +81,7 @@ export class WorldScene extends Phaser.Scene {
   private homeButton: HomeButton | null = null;
   private minimap: Minimap | null = null;
   private objectPanel: ObjectPanel | null = null;
+  private inventoryPanel: InventoryPanel | null = null;
   private localPlayer: LocalPlayer | null = null;
   private movementKeys: MovementKeys | null = null;
   private lastStepAt = Number.NEGATIVE_INFINITY;
@@ -95,6 +103,7 @@ export class WorldScene extends Phaser.Scene {
     this.homeButton = null;
     this.minimap = null;
     this.objectPanel = null;
+    this.inventoryPanel = null;
     this.localPlayer = null;
     this.movementKeys = null;
     this.lastStepAt = Number.NEGATIVE_INFINITY;
@@ -115,6 +124,13 @@ export class WorldScene extends Phaser.Scene {
       frameWidth: TILE_SIZE_PX,
       frameHeight: TILE_SIZE_PX,
     });
+    // Loaded in every room, not just the ones with spawners: the sheet is a few kilobytes, and
+    // making it conditional would mean the loader has to know which rooms have monsters — a
+    // second copy of a fact the server owns, and one that would fail as a blank sprite.
+    this.load.spritesheet(MONSTER_TEXTURE, "/sprites/monster.png", {
+      frameWidth: TILE_SIZE_PX,
+      frameHeight: TILE_SIZE_PX,
+    });
   }
 
   create(): void {
@@ -123,7 +139,9 @@ export class WorldScene extends Phaser.Scene {
       drawPortalMarkers(this, this.connection.portalMarkers);
       drawInteractableMarkers(this, this.connection.interactableMarkers);
       registerAvatarAnimations(this);
+      registerMonsterAnimations(this);
       this.players = new PlayerSprites(this);
+      this.monsters = new MonsterSprites(this);
       this.bubbles = new ChatBubbles(this);
       this.nameTags = new NameTags(this);
     } catch (error) {
@@ -144,6 +162,9 @@ export class WorldScene extends Phaser.Scene {
         this.nameTags.remove(sessionId);
         this.players.remove(sessionId);
       },
+      onMonsterAdd: (monsterId, snapshot) => this.monsters.add(monsterId, snapshot),
+      onMonsterChange: (monsterId, snapshot) => this.monsters.update(monsterId, snapshot),
+      onMonsterRemove: (monsterId) => this.monsters.remove(monsterId),
       onMoveRejected: (correction) => this.localPlayer?.applyRejection(correction),
       onTeleported: (destination) => this.localPlayer?.applyTeleport(destination),
       onChat: (message) => this.showChat(message),
@@ -177,6 +198,7 @@ export class WorldScene extends Phaser.Scene {
     this.objectPanel = new ObjectPanel((objectId, choiceIndex) =>
       connection.sendQuizAnswer(objectId, choiceIndex),
     );
+    this.inventoryPanel = new InventoryPanel();
     this.buildMinimap();
     // attach() replays the players already in view, so addPlayer() normally does this first.
     this.initLocalPlayer();
@@ -203,6 +225,11 @@ export class WorldScene extends Phaser.Scene {
     // Reading an object holds you still. There is no server-side lock behind this: the player
     // stops moving because this stops sending, which is also why the panel cannot strand anyone —
     // whatever kills the panel gives movement straight back.
+    //
+    // The bag is deliberately *not* gated here. It is the one panel that opens over a live fight,
+    // and locking movement behind it would mean checking your bag is what gets you killed
+    // (docs/design-hunting-inventory.md §3.4). Pass E's Attack input is the one thing it does
+    // swallow, and reads `inventoryPanel.isOpen` from wherever that input lands.
     if (this.objectPanel?.isOpen === true) {
       return;
     }
@@ -292,6 +319,7 @@ export class WorldScene extends Phaser.Scene {
     this.homeButton?.destroy();
     this.minimap?.destroy();
     this.objectPanel?.destroy();
+    this.inventoryPanel?.destroy();
     this.scene.start(WorldScene.KEY, { connection: next } satisfies WorldSceneData);
   }
 

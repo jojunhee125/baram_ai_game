@@ -9,9 +9,15 @@ import express, {
   type RequestHandler,
   type Response,
 } from "express";
+import {
+  InMemoryInventoryStore,
+  type InventoryRow,
+  type InventoryStore,
+} from "../db/inventoryStore";
 import { InMemoryProfileStore, type ProfileStore } from "../db/profileStore";
 import { getDatabaseStatus } from "../db/status";
 import { ROOM_DEFINITIONS } from "../rooms/definitions";
+import { ITEM_DEFINITIONS } from "../rooms/itemDefinitions";
 import { deriveSsoUserId } from "../rooms/ssoIdentity";
 import { inspectForwardAuth } from "./forwardAuth";
 import { getUnhealthyReason } from "./readiness";
@@ -31,6 +37,9 @@ const DIAGNOSTIC_PATH = "/api/diag/ws-auth";
  */
 const PROFILE_PATH = "/api/profile";
 
+/** Read-only and behind SSO for the same reason as {@link PROFILE_PATH}: no identity, no bag. */
+const INVENTORY_PATH = "/api/inventory";
+
 /** One integer field. Anything larger than this is not the body this route accepts. */
 const PROFILE_BODY_LIMIT = "1kb";
 
@@ -40,12 +49,13 @@ const PROFILE_BODY_LIMIT = "1kb";
  * there is deliberately no SPA fallback, only `express.static`, which calls `next()` for
  * paths it cannot resolve.
  *
- * The store defaults to the in-memory one, which is the mode a server booted without
- * `DATABASE_URL` runs in — `index.ts` always passes the store it resolved at boot.
+ * Both stores default to their in-memory implementation, which is the mode a server booted
+ * without `DATABASE_URL` runs in — `index.ts` always passes the stores it resolved at boot.
  */
 export function configureHttpRoutes(
   app: Application,
   profileStore: ProfileStore = new InMemoryProfileStore(),
+  inventoryStore: InventoryStore = new InMemoryInventoryStore(),
 ): void {
   // Both diagnostics are registered ahead of the observer below on purpose: the container
   // health probe and the diagnostic call itself are not user traffic, and would otherwise
@@ -92,6 +102,9 @@ export function configureHttpRoutes(
   });
   app.post(PROFILE_PATH, parseJsonBody, (request, response) => {
     void handleWriteProfile(profileStore, request, response);
+  });
+  app.get(INVENTORY_PATH, (request, response) => {
+    void handleReadInventory(inventoryStore, request, response);
   });
 
   if (!existsSync(CLIENT_DIST_DIRECTORY)) {
@@ -179,6 +192,70 @@ async function handleWriteProfile(
     console.warn(`[zep-test] POST ${PROFILE_PATH} could not persist the skin`);
     response.status(503).json({ error: "profile store unavailable" });
   }
+}
+
+/**
+ * Read when the bag window opens, and only then: the inventory belongs to the account rather
+ * than to a room, so putting it on HTTP keeps every database query off the room message path
+ * (design §3.4) — the same argument that put the profile here.
+ *
+ * No identity answers `{ items: [] }` rather than 401, for the reason `handleReadProfile`
+ * explains. A failing store does *not* take that path: an empty bag would tell the player their
+ * loot is gone, so this answers 503 the way the profile *write* does. The asymmetry with the
+ * profile read is deliberate — there, null means "the picker shows its default", which is true
+ * whether or not the read worked.
+ */
+async function handleReadInventory(
+  store: InventoryStore,
+  request: Request,
+  response: Response,
+): Promise<void> {
+  const ownerKey = deriveSsoUserId(readAccessToken(request.headers));
+  if (ownerKey === null) {
+    response.status(200).json({ items: [] });
+    return;
+  }
+  try {
+    response.status(200).json({ items: presentInventory(await store.list(ownerKey)) });
+  } catch {
+    // The store logged the cause and flagged the health field; `db: "degraded"` never flips
+    // `ok`, so this failure does not put the deployment at risk of a rollback.
+    console.warn(`[zep-test] GET ${INVENTORY_PATH} could not read the bag`);
+    response.status(503).json({ error: "inventory store unavailable" });
+  }
+}
+
+/**
+ * Joins the stored amounts to their display strings, which the client never looks up itself: a
+ * bundle older than the server then still draws what it was handed (design §3.4), the discipline
+ * the fixed objects already follow by sending their content with the panel.
+ *
+ * Driven by `ITEM_DEFINITIONS` rather than by the rows, which does two things at once: the result
+ * comes out in the table's order — the bag's display order — and a row whose key has left the
+ * table is dropped instead of rendering as a nameless entry. That is the right way round, because
+ * the code table is the definition of what an item is and the database only stores amounts.
+ */
+function presentInventory(rows: readonly InventoryRow[]): readonly {
+  itemKey: string;
+  name: string;
+  icon: string;
+  quantity: number;
+}[] {
+  const quantities = new Map(rows.map((row) => [row.itemKey, row.quantity]));
+  const items = [];
+  for (const definition of ITEM_DEFINITIONS) {
+    const quantity = quantities.get(definition.key);
+    if (quantity === undefined) {
+      continue;
+    }
+    items.push({
+      itemKey: definition.key,
+      name: definition.name,
+      icon: definition.icon,
+      quantity,
+    });
+  }
+  return items;
 }
 
 /**
