@@ -28,10 +28,14 @@ const startButton = document.querySelector<HTMLButtonElement>("#avatar-picker-st
 /**
  * Runs character select and resolves with the chosen skin.
  *
+ * `initialSkin` is the cell to open on — the account's stored choice, or 0 when there is none.
+ * The caller owns that range check: a value with no cell would leave the grid with nothing
+ * selected and nothing focused.
+ *
  * Resolves once and then tears itself down, so unlike the chat panel or the minimap there is no
  * `destroy()` for a caller to forget: this is a boot step that ends before the world exists.
  */
-export function chooseAvatarSkin(): Promise<number> {
+export function chooseAvatarSkin(initialSkin: number): Promise<number> {
   return new Promise((resolve) => {
     const cells = buildCells();
     const columns = Math.min(COLUMNS, cells.length);
@@ -91,7 +95,7 @@ export function chooseAvatarSkin(): Promise<number> {
     panel.hidden = false;
     // Selecting after unhiding, because focus() on a hidden element does nothing and arrows
     // have to work without a Tab first.
-    select(0);
+    select(initialSkin);
   });
 }
 

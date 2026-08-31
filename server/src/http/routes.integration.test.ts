@@ -9,7 +9,10 @@ import { resetWsAuthProbe, type WsAuthProbeSnapshot } from "./wsAuthProbe";
 
 /**
  * node:test runs each file in its own process, and the two room suites already own 2568
- * and 2571. A third fixed port keeps this file independent of both.
+ * and 2571. A third fixed port keeps this file independent of both. Exactly one file may own a
+ * given port: metaverseRoom.interactables.test.ts also claimed 2573 for a while, which killed
+ * one suite with EADDRINUSE and left the other's listener open so the run never exited. Grep
+ * the other *.test.ts files for the ports they bind before changing this.
  */
 const PORT = 2573;
 

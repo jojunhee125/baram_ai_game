@@ -14,10 +14,12 @@
     "@zep-test/shared": "*",
     "colyseus": "^0.17.10",
     "express": "^5.2.1",
+    "pg": "^8.23.0",
     "tsx": "^4.20.0"
   },
   "devDependencies": {
     "@colyseus/testing": "^0.17.11",
-    "@types/express": "^5.0.6"
+    "@types/express": "^5.0.6",
+    "@types/pg": "^8.23.1"
   }
 }

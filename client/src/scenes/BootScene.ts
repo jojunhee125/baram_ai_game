@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { hideBootStatus, showBootError, showBootLoading } from "../bootStatus";
 import { resolveJoinOptions, setAvatarSkin } from "../net/identity";
+import { loadAvatarSkin, saveAvatarSkin } from "../net/profile";
 import { RoomConnection } from "../net/roomConnection";
 import { resolveRoomName } from "../net/roomTarget";
 import { chooseAvatarSkin } from "../ui/avatarPicker";
@@ -25,10 +26,17 @@ export class BootScene extends Phaser.Scene {
   private async boot(): Promise<void> {
     const roomName = resolveRoomName();
 
+    // Read while the overlay is still up, so the wait sits under "화면을 준비하는 중" rather than
+    // on a blank screen. A plain HTTP request, unrelated to the room: skins are account data and
+    // must not add anything to the join path.
+    const storedSkin = await loadAvatarSkin();
+
     // Character select comes first and the identity is frozen by the join below, so the skin has
     // to be recorded before anything can call resolveJoinOptions().
     hideBootStatus();
-    setAvatarSkin(await chooseAvatarSkin());
+    const skin = await chooseAvatarSkin(storedSkin ?? 0);
+    setAvatarSkin(skin);
+    saveAvatarSkin(skin);
 
     showBootLoading("서버에 접속하는 중", "잠시만 기다려 주세요.");
 

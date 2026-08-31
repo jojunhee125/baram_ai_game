@@ -1,11 +1,11 @@
 # KAD deployment descriptor (Coolify + Traefik + Keycloak SSO ForwardAuth).
 #
-# Two deliberate omissions:
-#   - No `environment:` block. KAD merges its injected variables in as a map, and a list
-#     left here survives the merge as integer keys, failing the build outright with
-#     "non-string key in services.app.environment".
-#   - No database service. This app persists nothing; declaring one would have KAD
-#     provision a PostgreSQL instance that never gets used.
+# One deliberate omission, and it applies to every service below: no `environment:` block.
+# KAD merges its injected variables in as a map, and a list left here survives the merge as
+# integer keys, failing the build outright with "non-string key in services.app.environment".
+# That is also why `db` declares an image and nothing else — KAD provisions the instance and
+# injects DATABASE_URL along with the credentials, so writing POSTGRES_PASSWORD (or any other
+# value) here would both hardcode a secret and break the merge.
 #
 # The filename must stay `docker-compose.yml`. When the buildpack is switched to Compose,
 # Coolify defaults "Docker Compose Location" to `.yaml` — correct it to `.yml`.
@@ -18,6 +18,12 @@ services:
     expose:
       - "8080"
     restart: unless-stopped
+    # The server runs its migrations at container start, before listen(). Without this gate
+    # the first boot races initdb, the migration throws, and the app crash-loops while the
+    # database is merely still starting up.
+    depends_on:
+      db:
+        condition: service_healthy
     labels:
       kad.app_name: "ksc-metaverse"
       # Key names are fixed; only the values are editable. `owner` must not be listed.
@@ -41,3 +47,23 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    volumes:
+      - zep-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # No `-U`: KAD picks the role name, so naming one here would be a guess. libpq answers
+      # PQPING_OK as soon as the server accepts connections, whatever role is asked for, which
+      # is exactly the question this probe needs answered. start_period covers initdb on the
+      # first boot, when the volume is still empty.
+      test: ["CMD-SHELL", "pg_isready -q"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  # Named, so a redeploy replaces the container without taking the inventory with it.
+  zep-pgdata:

@@ -13,6 +13,7 @@
     "dev:client": "npm run dev --workspace=@zep-test/client",
     "build": "npm run build --workspace=@zep-test/client",
     "start": "npm run start --workspace=@zep-test/server",
+    "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {

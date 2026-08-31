@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { Encoder } from "@colyseus/schema";
 import { Server, WebSocketTransport } from "colyseus";
+import type { ProfileStore } from "./db/profileStore";
 import { validateInteractableDefinitions } from "./game/interactables";
 import { validatePortalDefinitions } from "./game/portals";
 import { TiledMapLoader } from "./game/tiledMap";
@@ -15,7 +16,12 @@ import { PORTAL_DEFINITIONS } from "./rooms/portalDefinitions";
 
 export const DEFAULT_PORT = 2567;
 
-export function createGameServer(): Server {
+/**
+ * `profileStore` is resolved at boot by `index.ts` — Postgres when `DATABASE_URL` is set and
+ * process memory when it is not. Omitting it takes the same in-memory path, which is what a
+ * test or a local `npm run dev` runs on.
+ */
+export function createGameServer(profileStore?: ProfileStore): Server {
   // Has to be set explicitly: the 8 KB default is nowhere near one patch of a 500-view room.
   // Every client's view is appended to one shared buffer, so a patch needs the sum of all 500
   // views at once — PoC #2 measured ~6.5 MB, and the 2026-08-27 viewport widening
@@ -43,7 +49,7 @@ export function createGameServer(): Server {
 
   const gameServer = new Server({
     transport: new WebSocketTransport({ server: httpServer }),
-    express: configureHttpRoutes,
+    express: (app) => configureHttpRoutes(app, profileStore),
     beforeListen: validateRoomMaps,
   });
 

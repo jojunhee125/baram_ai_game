@@ -90,5 +90,7 @@ EXPOSE 8080
 # There is no build output to run: `@zep-test/shared` exports TypeScript sources directly,
 # so tsx is a runtime dependency and executes the entrypoint as-is. Equivalent to
 # `npm start`, invoked directly so the process receives SIGTERM as PID 1.
-# No migration step — this service owns no database.
+# Migrations run from this entrypoint, not from a build stage: the database only exists at
+# deploy time, and a build that reached it would have to be given credentials. The SQL files
+# ride along in `COPY server ./server` above.
 CMD ["node_modules/.bin/tsx", "server/src/index.ts"]

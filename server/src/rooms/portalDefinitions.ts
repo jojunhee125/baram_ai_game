@@ -36,4 +36,26 @@ export const PORTAL_DEFINITIONS: readonly PortalDefinition[] = [
     },
     to: { room: "plaza", arrival: { tileX: 31, tileY: 24, spreadRadiusInTiles: 0 } },
   },
+  {
+    id: "plaza-north-door",
+    from: {
+      room: "plaza",
+      tiles: [
+        { tileX: 31, tileY: 8 },
+        { tileX: 32, tileY: 8 },
+      ],
+    },
+    to: { room: "hunting-ground", arrival: { tileX: 35, tileY: 30, spreadRadiusInTiles: 0 } },
+  },
+  {
+    id: "hunting-ground-south-door",
+    from: {
+      room: "hunting-ground",
+      tiles: [
+        { tileX: 35, tileY: 31 },
+        { tileX: 36, tileY: 31 },
+      ],
+    },
+    to: { room: "plaza", arrival: { tileX: 31, tileY: 9, spreadRadiusInTiles: 0 } },
+  },
 ];

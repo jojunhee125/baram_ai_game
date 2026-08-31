@@ -27,9 +27,12 @@ import { PORTAL_DEFINITIONS } from "./portalDefinitions";
 /**
  * Its own port, for the reason `metaverseRoom.integration.test.ts` records: node:test runs test
  * files in parallel processes and `boot()` always binds 2568, so every file that listens has to
- * pick a private port.
+ * pick a private port. Exactly one file may own a given port: this file and
+ * routes.integration.test.ts both claimed 2573, which killed one suite with EADDRINUSE and left
+ * the other's listener open so the run never exited. Grep the other *.test.ts files for the
+ * ports they bind before changing this.
  */
-const INTERACTABLE_PORT = 2573;
+const INTERACTABLE_PORT = 2581;
 
 const MOVE_COOLDOWN_MS = 1000 / MAX_MOVES_PER_SECOND + 15;
 
