@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { Direction, TILE_SIZE_PX } from "@zep-test/shared";
+import { ITEM_TEXTURE } from "./weaponVisual";
 
 /** Long enough to register at 60fps, short enough not to hide the sprite it is describing. */
 const HIT_FLASH_MS = 90;
@@ -59,6 +60,21 @@ const DAMAGE_COLORS: Readonly<Record<DamageTone, string>> = {
 };
 
 /**
+ * How many sparks radiate per landed hit. Cheap primitives (a Phaser Arc, not a Text object like
+ * the damage labels), so unlike MAX_DAMAGE_LABELS this needs no cap — even a crowded fight
+ * landing several hits in one tick destroys every particle within IMPACT_PARTICLE_MS regardless.
+ */
+const IMPACT_PARTICLE_COUNT = 10;
+const IMPACT_PARTICLE_RADIUS_PX = 18;
+const IMPACT_PARTICLE_MS = 120;
+const IMPACT_SHAKE_MS = 80;
+/**
+ * Phaser Camera.shake()'s own unit (fraction of the viewport). Small on purpose: legible once is
+ * fine, legible on every ATTACK_COOLDOWN_MS (600ms) through a real fight is nauseating.
+ */
+const IMPACT_SHAKE_INTENSITY = 0.006;
+
+/**
  * Transient combat visuals: the swing, the flash on a hit, the number that floats off it, and the
  * puff a monster leaves behind.
  *
@@ -79,8 +95,13 @@ export class CombatEffects {
   /**
    * The local player's own swing, drawn whether or not anything was in range: an empty swing gets
    * no reply from the server (design §6.1), so this is the only feedback that the key registered.
+   *
+   * `weaponFrame` is optional: undefined draws the arc alone, exactly as before this pass. Passed
+   * when the local player has ever held `old-dagger` (`WeaponVisualState.hasOldDagger`), it also
+   * overlays that item's `items.png` frame at the hand position — a cosmetic-only signal, no
+   * damage or equip semantics attached.
    */
-  swing(sprite: Phaser.GameObjects.Sprite, facing: Direction): void {
+  swing(sprite: Phaser.GameObjects.Sprite, facing: Direction, weaponFrame?: number): void {
     const centre = SWING_ANGLES[facing];
     const arc = this.scene.add.graphics();
     arc.lineStyle(3, SWING_COLOR, 0.9);
@@ -104,6 +125,68 @@ export class CombatEffects {
       ease: "Quad.easeIn",
       onComplete: () => arc.destroy(),
     });
+
+    if (weaponFrame === undefined) {
+      return;
+    }
+    const centreX = sprite.x;
+    const centreY = sprite.y - TILE_SIZE_PX / 2;
+    const angle = SWING_ANGLES[facing];
+    const handRadius = SWING_RADIUS_PX * 0.5;
+    const weapon = this.scene.add.sprite(
+      centreX + Math.cos(angle) * handRadius,
+      centreY + Math.sin(angle) * handRadius,
+      ITEM_TEXTURE,
+      weaponFrame,
+    );
+    weapon.setDepth(sprite.depth + 1);
+    weapon.setScale(0.6);
+    this.scene.tweens.add({
+      targets: weapon,
+      scale: 0.85,
+      alpha: 0,
+      duration: SWING_MS,
+      ease: "Quad.easeIn",
+      onComplete: () => weapon.destroy(),
+    });
+  }
+
+  /**
+   * A landed hit: sparks off the target, plus a screen shake for a hit the local player is party to.
+   * Called from the same site `flash()`/`damage()` already are — the swing arc (`swing()`, above) is
+   * a different signal (registered the keypress) and is untouched by this.
+   *
+   * Colour reuses `DAMAGE_COLORS[tone]` rather than a parallel table: three hues already carry the
+   * "whose hit" meaning, so a fourth constant per tone would be the same three values written twice.
+   *
+   * Shake is skipped for `"dealt-by-other"`: the camera follows the local player, and a fight with
+   * several attackers on one monster would otherwise shake the screen for hits that are neither
+   * yours nor aimed at you — the same muting `DAMAGE_COLORS["dealt-by-other"]` already applies to
+   * the number.
+   */
+  impact(sprite: Phaser.GameObjects.Sprite, tone: DamageTone): void {
+    const centreX = sprite.x;
+    const centreY = sprite.y - TILE_SIZE_PX / 2;
+    const color = Number.parseInt(DAMAGE_COLORS[tone].slice(1), 16);
+
+    for (let i = 0; i < IMPACT_PARTICLE_COUNT; i += 1) {
+      const angle = (i / IMPACT_PARTICLE_COUNT) * Math.PI * 2;
+      const particle = this.scene.add.circle(centreX, centreY, 2, color);
+      particle.setDepth(sprite.depth + 1);
+      this.scene.tweens.add({
+        targets: particle,
+        x: centreX + Math.cos(angle) * IMPACT_PARTICLE_RADIUS_PX,
+        y: centreY + Math.sin(angle) * IMPACT_PARTICLE_RADIUS_PX,
+        alpha: 0,
+        duration: IMPACT_PARTICLE_MS,
+        ease: "Quad.easeOut",
+        onComplete: () => particle.destroy(),
+      });
+    }
+
+    if (tone !== "dealt-by-other") {
+      this.scene.cameras.main.shake(IMPACT_SHAKE_MS, IMPACT_SHAKE_INTENSITY);
+    }
   }
 
   /** Whitens a sprite for a moment. Which sprite took the hit is the whole message. */

@@ -812,6 +812,201 @@ body {
 }
 
 /*
+ * The drop-table window. Sits in the HUD column beside .bag, sharing the same non-modal,
+ * dark-over-canvas treatment (docs/design-hunting-inventory.md §G-2-b) — checking odds must not
+ * lock movement any more than checking the bag does.
+ */
+.loot-table {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 0;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(20, 19, 26, 0.82);
+  color: #eceaf4;
+}
+
+.loot-table__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.loot-table__title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.loot-table__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: rgba(236, 234, 244, 0.62);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.loot-table__close:hover {
+  background: rgba(236, 234, 244, 0.1);
+  border-color: rgba(236, 234, 244, 0.24);
+  color: #eceaf4;
+}
+
+.loot-table__close:active {
+  background: rgba(236, 234, 244, 0.04);
+}
+
+.loot-table__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.loot-table__close-icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* The list scrolls, not the panel — same reasoning as .bag__list. */
+.loot-table__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.loot-table__monster + .loot-table__monster {
+  padding-top: var(--space-2);
+  border-top: 1px solid rgba(236, 234, 244, 0.1);
+}
+
+.loot-table__monster-name {
+  margin: 0 0 var(--space-1);
+  color: rgba(236, 234, 244, 0.85);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.loot-table__drops {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.loot-table__drop {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-1) 0;
+  border-radius: 6px;
+}
+
+.loot-table__drop-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+/* Tabular figures so a column of percentages lines up instead of jittering with the digits. */
+.loot-table__drop-chance {
+  flex: none;
+  color: rgba(236, 234, 244, 0.72);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Loading, empty and failure share this block; exactly one of them is ever on screen. */
+.loot-table__status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+  text-align: center;
+}
+
+.loot-table__status-icon {
+  width: 24px;
+  height: 24px;
+  margin-bottom: var(--space-1);
+  color: rgba(236, 234, 244, 0.38);
+}
+
+.loot-table__status-text {
+  margin: 0;
+  font-size: 12px;
+  text-wrap: balance;
+}
+
+.loot-table__status-hint {
+  margin: 0;
+  color: rgba(236, 234, 244, 0.55);
+  font-size: 11px;
+  text-wrap: pretty;
+}
+
+.loot-table__status-hint:empty {
+  display: none;
+}
+
+.loot-table__retry {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  margin-top: var(--space-1);
+  padding: 0 var(--space-3);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(236, 234, 244, 0.06);
+  color: #eceaf4;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.loot-table__retry:hover {
+  background: rgba(236, 234, 244, 0.12);
+  border-color: rgba(236, 234, 244, 0.32);
+}
+
+.loot-table__retry:active {
+  transform: translateY(1px);
+}
+
+.loot-table__retry:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/*
  * Fixed-object panel. Unlike .picker it sits *over* the world instead of standing in for it — the
  * player is still in the room, just reading something — so the stage stays visible behind a scrim
  * and the panel keeps the dark treatment .chat and .hud use over the canvas. The scrim also takes
@@ -1157,6 +1352,8 @@ body {
   .boot__retry,
   .chat__input,
   .hud__button,
+  .loot-table__close,
+  .loot-table__retry,
   .object__choice,
   .object__close,
   .object__open,

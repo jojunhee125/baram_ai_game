@@ -18,6 +18,7 @@ import { InMemoryProfileStore, type ProfileStore } from "../db/profileStore";
 import { getDatabaseStatus } from "../db/status";
 import { ROOM_DEFINITIONS } from "../rooms/definitions";
 import { ITEM_DEFINITIONS } from "../rooms/itemDefinitions";
+import { buildLootTableView } from "../rooms/lootTableView";
 import { deriveSsoUserId } from "../rooms/ssoIdentity";
 import { inspectForwardAuth } from "./forwardAuth";
 import { getUnhealthyReason } from "./readiness";
@@ -39,6 +40,13 @@ const PROFILE_PATH = "/api/profile";
 
 /** Read-only and behind SSO for the same reason as {@link PROFILE_PATH}: no identity, no bag. */
 const INVENTORY_PATH = "/api/inventory";
+
+/**
+ * Static per-room content, not account data and not room *state* — no SSO identity read at all,
+ * unlike PROFILE_PATH/INVENTORY_PATH. Always 200: an unrecognised or monster-less room name is
+ * `{ monsters: [] }`, the same "no 4xx for a legitimate empty result" rule those two routes follow.
+ */
+const LOOT_TABLE_PATH = "/api/loot-table/:roomName";
 
 /** One integer field. Anything larger than this is not the body this route accepts. */
 const PROFILE_BODY_LIMIT = "1kb";
@@ -105,6 +113,9 @@ export function configureHttpRoutes(
   });
   app.get(INVENTORY_PATH, (request, response) => {
     void handleReadInventory(inventoryStore, request, response);
+  });
+  app.get(LOOT_TABLE_PATH, (request, response) => {
+    response.status(200).json({ monsters: buildLootTableView(request.params.roomName) });
   });
 
   if (!existsSync(CLIENT_DIST_DIRECTORY)) {

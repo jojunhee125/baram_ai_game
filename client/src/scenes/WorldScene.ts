@@ -17,12 +17,13 @@ import { ChatPanel } from "../ui/chatPanel";
 import { HomeButton } from "../ui/homeButton";
 import { InventoryPanel } from "../ui/inventoryPanel";
 import { ItemToasts } from "../ui/itemToasts";
+import { LootTablePanel } from "../ui/lootTablePanel";
 import { Minimap, type MinimapView } from "../ui/minimap";
 import { buildMinimapTerrain } from "../ui/minimapTerrain";
 import { ObjectPanel } from "../ui/objectPanel";
 import { PlayerVitals } from "../ui/playerVitals";
 import { ChatBubbles } from "../world/chatBubbles";
-import { CombatEffects } from "../world/combatEffects";
+import { CombatEffects, type DamageTone } from "../world/combatEffects";
 import { drawInteractableMarkers } from "../world/interactableMarkers";
 import { LocalPlayer } from "../world/localPlayer";
 import { MonsterHealthBars } from "../world/monsterHealthBars";
@@ -39,6 +40,7 @@ import {
   registerAvatarAnimations,
   STEP_TWEEN_MS,
 } from "../world/playerSprites";
+import { ITEM_TEXTURE, OLD_DAGGER_ITEM_KEY, WeaponVisualState, itemFrame } from "../world/weaponVisual";
 
 /** Doubles as the loader key for the image and the tileset name embedded in every map. */
 const TILESET_KEY = "plaza-tiles";
@@ -95,11 +97,13 @@ export class WorldScene extends Phaser.Scene {
   private minimap: Minimap | null = null;
   private objectPanel: ObjectPanel | null = null;
   private inventoryPanel: InventoryPanel | null = null;
+  private lootTablePanel: LootTablePanel | null = null;
   private vitals: PlayerVitals | null = null;
   private toasts: ItemToasts | null = null;
   private localPlayer: LocalPlayer | null = null;
   private movementKeys: MovementKeys | null = null;
   private attackKey: AttackKey | null = null;
+  private weapon: WeaponVisualState | null = null;
   private lastStepAt = Number.NEGATIVE_INFINITY;
   private transitioning = false;
 
@@ -120,11 +124,13 @@ export class WorldScene extends Phaser.Scene {
     this.minimap = null;
     this.objectPanel = null;
     this.inventoryPanel = null;
+    this.lootTablePanel = null;
     this.vitals = null;
     this.toasts = null;
     this.localPlayer = null;
     this.movementKeys = null;
     this.attackKey = null;
+    this.weapon = null;
     this.lastStepAt = Number.NEGATIVE_INFINITY;
     this.transitioning = false;
   }
@@ -150,6 +156,12 @@ export class WorldScene extends Phaser.Scene {
       frameWidth: TILE_SIZE_PX,
       frameHeight: TILE_SIZE_PX,
     });
+    // Same file the bag window already draws as a CSS background — this is a second, independent
+    // loader onto a Phaser texture so the swing overlay can stamp a frame of it onto the canvas.
+    this.load.spritesheet(ITEM_TEXTURE, "/sprites/items.png", {
+      frameWidth: TILE_SIZE_PX,
+      frameHeight: TILE_SIZE_PX,
+    });
   }
 
   create(): void {
@@ -165,6 +177,7 @@ export class WorldScene extends Phaser.Scene {
       this.effects = new CombatEffects(this);
       this.bubbles = new ChatBubbles(this);
       this.nameTags = new NameTags(this);
+      this.weapon = new WeaponVisualState();
     } catch (error) {
       console.error(error);
       showBootError("맵을 그리지 못했습니다", "맵 데이터가 올바르지 않습니다. 새로고침해 주세요.");
@@ -205,6 +218,7 @@ export class WorldScene extends Phaser.Scene {
         // The bag is the one window that stays open in a fight, so a pickup lands in it live
         // rather than waiting for the next read.
         this.inventoryPanel?.applyGrant(event);
+        this.weapon?.applyGrant(event);
       },
       onMoveRejected: (correction) => this.localPlayer?.applyRejection(correction),
       onTeleported: (destination) => this.localPlayer?.applyTeleport(destination),
@@ -240,6 +254,7 @@ export class WorldScene extends Phaser.Scene {
       connection.sendQuizAnswer(objectId, choiceIndex),
     );
     this.inventoryPanel = new InventoryPanel();
+    this.lootTablePanel = new LootTablePanel(this.connection.roomName);
     this.toasts = new ItemToasts();
     this.attackKey = new AttackKey(() => this.swing());
     this.buildMinimap();
@@ -309,16 +324,21 @@ export class WorldScene extends Phaser.Scene {
    * One swing, if the world is in a state to take one. Returns whether it was taken, which is
    * what starts the input's cooldown mirror.
    *
-   * Gated on the same two things {@link returnHome} is, plus the bag. The bag deliberately never
-   * blocks movement — being pinned in place while something chews on you is exactly what that
-   * decision avoids (`docs/design-hunting-inventory.md` §3.4) — but it does swallow this, because
-   * a keystroke aimed at a bag row must not also hit whatever is standing next to you.
+   * Gated on the same two things {@link returnHome} is, plus the bag and the drop-table window.
+   * Neither ever blocks movement — being pinned in place while something chews on you is exactly
+   * what that decision avoids (`docs/design-hunting-inventory.md` §3.4) — but both swallow this,
+   * because a keystroke aimed at a row in either panel must not also hit whatever is standing
+   * next to you.
    */
   private swing(): boolean {
     if (this.transitioning || !this.localPlayer) {
       return false;
     }
-    if (this.objectPanel?.isOpen === true || this.inventoryPanel?.isOpen === true) {
+    if (
+      this.objectPanel?.isOpen === true ||
+      this.inventoryPanel?.isOpen === true ||
+      this.lootTablePanel?.isOpen === true
+    ) {
       return false;
     }
     this.connection.sendAttack();
@@ -327,7 +347,10 @@ export class WorldScene extends Phaser.Scene {
     // the key registered. Drawn on the predicted facing, which is what the server will read too.
     const sprite = this.players.get(this.connection.sessionId);
     if (sprite) {
-      this.effects.swing(sprite, this.localPlayer.facing);
+      const weaponFrame = this.weapon?.hasOldDagger
+        ? itemFrame(OLD_DAGGER_ITEM_KEY)
+        : undefined;
+      this.effects.swing(sprite, this.localPlayer.facing, weaponFrame);
     }
     return true;
   }
@@ -343,12 +366,11 @@ export class WorldScene extends Phaser.Scene {
       // The state deletion beat the message through. Nothing left on screen to draw this on.
       return;
     }
+    const tone: DamageTone =
+      event.bySessionId === this.connection.sessionId ? "dealt" : "dealt-by-other";
     this.effects.flash(sprite);
-    this.effects.damage(
-      sprite,
-      event.damage,
-      event.bySessionId === this.connection.sessionId ? "dealt" : "dealt-by-other",
-    );
+    this.effects.damage(sprite, event.damage, tone);
+    this.effects.impact(sprite, tone);
     if (event.hpRemaining > 0) {
       this.monsterHealth.applyHit(event.monsterId, sprite, event.hpRemaining, event.hpMax);
       return;
@@ -372,8 +394,10 @@ export class WorldScene extends Phaser.Scene {
     if (!sprite) {
       return;
     }
+    const tone: DamageTone = "taken";
     this.effects.flash(sprite);
-    this.effects.damage(sprite, event.damage, "taken");
+    this.effects.damage(sprite, event.damage, tone);
+    this.effects.impact(sprite, tone);
     if (event.hpRemaining <= 0) {
       this.effects.death(sprite);
     }
@@ -441,6 +465,7 @@ export class WorldScene extends Phaser.Scene {
     this.minimap?.destroy();
     this.objectPanel?.destroy();
     this.inventoryPanel?.destroy();
+    this.lootTablePanel?.destroy();
     this.vitals?.destroy();
     this.toasts?.destroy();
     this.scene.start(WorldScene.KEY, { connection: next } satisfies WorldSceneData);
