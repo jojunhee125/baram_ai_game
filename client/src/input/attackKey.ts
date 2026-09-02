@@ -17,25 +17,37 @@ export type SwingAttempt = () => boolean;
  * KeyI"). A physical `event.code` is still the right binding (it survives the layout and the IME);
  * what it costs is that the guards have to be written out every time.
  *
+ * Holding Space is a hold, not one keydown: repeated swings come from a timer paced to the
+ * server's own cooldown (`ATTACK_COOLDOWN_MS`), not from the browser's key-repeat rate, which
+ * differs per OS and would drift out of step with what the server actually accepts.
+ *
  * Holds no reference to the room: it reports a swing and the scene decides whether the world is
  * in a state to take one, the same division `HomeButton` uses.
  */
 export class AttackKey {
-  private lastSwingAt = Number.NEGATIVE_INFINITY;
+  /** True from a qualifying keydown to the keyup (or blur, or a guard failing mid-hold) that ends it. */
+  private holding = false;
+  /** The repeat timer for the current hold; undefined whenever `holding` is false. */
+  private timer: number | undefined;
 
   constructor(private readonly onSwing: SwingAttempt) {
-    window.addEventListener("keydown", this.handleKey);
+    window.addEventListener("keydown", this.handleKeyDown);
+    window.addEventListener("keyup", this.handleKeyUp);
+    // Alt-tabbing away never fires keyup for the key that was down when focus left, which would
+    // otherwise leave the interval swinging into a tab nobody is playing.
+    window.addEventListener("blur", this.stop);
   }
 
   /** Mandatory before constructing a successor, which a room hop does: the listener is global. */
   destroy(): void {
-    window.removeEventListener("keydown", this.handleKey);
+    window.removeEventListener("keydown", this.handleKeyDown);
+    window.removeEventListener("keyup", this.handleKeyUp);
+    window.removeEventListener("blur", this.stop);
+    this.stop();
   }
 
-  private readonly handleKey = (event: KeyboardEvent): void => {
-    // `repeat` so that holding Space is one swing rather than the keyboard's auto-repeat rate
-    // turned into a stream of attacks.
-    if (event.code !== "Space" || event.repeat) {
+  private readonly handleKeyDown = (event: KeyboardEvent): void => {
+    if (event.code !== "Space") {
       return;
     }
     // Ctrl/Cmd/Alt + Space belongs to the browser or the OS input switcher, never to us.
@@ -47,17 +59,40 @@ export class AttackKey {
     if (isTextEntry(document.activeElement) || answersSpace(document.activeElement)) {
       return;
     }
-    // Space scrolls the page and re-clicks the focused control. Called before the cooldown gate,
-    // because the key is ours for the whole window whether or not this press produces a swing.
+    // Every one of the browser's own repeat keydowns needs its own preventDefault, or the page
+    // scrolls the moment key-repeat kicks in — the repeat rate itself is no longer ours to use
+    // (below), but suppressing its default action still is.
     event.preventDefault();
 
-    const now = performance.now();
-    if (now - this.lastSwingAt < ATTACK_COOLDOWN_MS) {
+    if (this.holding) {
       return;
     }
-    if (this.onSwing()) {
-      this.lastSwingAt = now;
+    this.holding = true;
+    this.attempt();
+    // The server's cooldown, not the keyboard's repeat rate: that rate is the OS's, differs
+    // per machine, and would drift out of step with what the server actually accepts.
+    this.timer = window.setInterval(this.attempt, ATTACK_COOLDOWN_MS);
+  };
+
+  private readonly handleKeyUp = (event: KeyboardEvent): void => {
+    if (event.code === "Space") {
+      this.stop();
     }
+  };
+
+  /** One tick of a hold: re-checked against the same guards a fresh press would face. */
+  private readonly attempt = (): void => {
+    if (isTextEntry(document.activeElement) || answersSpace(document.activeElement)) {
+      this.stop();
+      return;
+    }
+    this.onSwing();
+  };
+
+  private readonly stop = (): void => {
+    this.holding = false;
+    window.clearInterval(this.timer);
+    this.timer = undefined;
   };
 }
 

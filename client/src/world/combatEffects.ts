@@ -10,10 +10,18 @@ const HIT_FLASH_MS = 90;
 const FLASH_COLOR = 0xfdf7ea;
 
 /** Radius of the swing arc, in pixels: just outside the avatar's own tile. */
-const SWING_RADIUS_PX = 20;
+const SWING_RADIUS_PX = 28;
 /** Half-width of the arc, radians. ~40 degrees each way, so it reads as a cone, not a ring. */
 const SWING_SPREAD = 0.7;
-const SWING_MS = 200;
+const SWING_MS = 350;
+/**
+ * The swing arc's own colour — never FLASH_COLOR. Stone floor (`#c9c2b4`) and grass (`#7fae5a`)
+ * are both close in value to the off-white FLASH_COLOR, which is why the arc read as invisible;
+ * this is a saturated gold, the same family as the existing `petalWarm` decal
+ * (`tools/generate-assets.mjs`), and far enough from both terrain hues and from the red HP/damage
+ * accent to not be mistaken for either.
+ */
+const SWING_COLOR = 0xffcc33;
 
 const DEATH_MS = 320;
 
@@ -75,7 +83,7 @@ export class CombatEffects {
   swing(sprite: Phaser.GameObjects.Sprite, facing: Direction): void {
     const centre = SWING_ANGLES[facing];
     const arc = this.scene.add.graphics();
-    arc.lineStyle(3, FLASH_COLOR, 0.9);
+    arc.lineStyle(3, SWING_COLOR, 0.9);
     arc.beginPath();
     arc.arc(0, 0, SWING_RADIUS_PX, centre - SWING_SPREAD, centre + SWING_SPREAD);
     arc.strokePath();
@@ -89,7 +97,11 @@ export class CombatEffects {
       scaleX: 1.1,
       scaleY: 1.1,
       duration: SWING_MS,
-      ease: "Quad.easeOut",
+      // easeIn, not easeOut: applied to an alpha fading 1->0, easeOut front-loads the drop (arc
+      // reads as gone by ~40% of SWING_MS regardless of how long SWING_MS is) — easeIn holds it
+      // near-opaque through most of the duration instead, so lengthening SWING_MS actually reads
+      // as more visible (Pass F reviewer finding, 2026-09-02).
+      ease: "Quad.easeIn",
       onComplete: () => arc.destroy(),
     });
   }

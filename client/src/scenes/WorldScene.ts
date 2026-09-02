@@ -175,10 +175,10 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
 
-    // Built before attach(), unlike the other panels: attach() replays the monsters already in
-    // view, and that replay is what reveals this panel. Built after it, a player who joins within
-    // sight of a monster would have no health bar until the next one wandered in.
+    // Revealed unconditionally (Pass F, 2026-09-02): a room with no monster in it must still show
+    // an HP panel, not just one that's been attach()'d into sight of a monster.
     this.vitals = new PlayerVitals();
+    this.vitals.reveal();
 
     this.connection.attach({
       onPlayerAdd: (sessionId, snapshot) => this.addPlayer(sessionId, snapshot),
@@ -192,8 +192,6 @@ export class WorldScene extends Phaser.Scene {
         this.monsters.add(monsterId, snapshot);
         // A respawn reuses the id, and whatever stands there now has not been hit yet.
         this.monsterHealth.remove(monsterId);
-        // A room that shows monsters is a room where health means something.
-        this.vitals?.reveal();
       },
       onMonsterChange: (monsterId, snapshot) => this.monsters.update(monsterId, snapshot),
       onMonsterRemove: (monsterId) => {

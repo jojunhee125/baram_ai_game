@@ -85,7 +85,7 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       wanderStepIntervalMs: 1600,
       /** 1.67 tiles/s, a fifth of a walking player: you can always stroll away from a slime. */
       chaseStepIntervalMs: 600,
-      aggroRadiusTiles: 4,
+      aggroRadiusTiles: 2,
       leashRadiusTiles: 8,
       respawnDelayMs: 8000,
       loot: [
@@ -106,7 +106,7 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       wanderStepIntervalMs: 1200,
       /** 2.5 tiles/s. Still a third of a player's pace, so fleeing always works. */
       chaseStepIntervalMs: 400,
-      aggroRadiusTiles: 6,
+      aggroRadiusTiles: 2,
       leashRadiusTiles: 10,
       respawnDelayMs: 12000,
       loot: [
