@@ -18,13 +18,19 @@
 //      per-view encoder with no socket or client-side decode in the sample.
 //   3. websocket tier       - achieved rate, move->patch latency as a bot observes it, RSS.
 //      Server and 500 bots share one process, so its latency is an upper bound, not the server's.
+//
+// Also an importable module. `tools/loadtest-poc3.mjs` runs scenario A through the functions
+// below instead of copying them, so that "with a hunting ground in the process" and "without one"
+// differ in exactly one thing (design-hunting-inventory §9.2). Everything below the
+// `isEntryPoint()` guard at the bottom is this file's own command line and runs only when it is
+// the script being executed; importing it measures nothing by itself.
 import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const CODE_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
+export const CODE_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 const {
   ClientMessage,
@@ -55,15 +61,15 @@ const { SchemaSerializer } = await import(
 const { Encoder } = await import("@colyseus/schema");
 
 /** Encoder default. At 500 views one patch needs ~6.5 MB, and it grows in steps of this size. */
-const DEFAULT_ENCODER_BUFFER_BYTES = Encoder.BUFFER_SIZE;
+export const DEFAULT_ENCODER_BUFFER_BYTES = Encoder.BUFFER_SIZE;
 
 /** Bar from design §6.3: one core has to absorb 500 clients x MAX_MOVES_PER_SECOND. */
-const ACCEPTANCE_BAR_MS_PER_MOVE = 0.1;
-const DIRECTIONS = [Direction.Up, Direction.Down, Direction.Left, Direction.Right];
+export const ACCEPTANCE_BAR_MS_PER_MOVE = 0.1;
+export const DIRECTIONS = [Direction.Up, Direction.Down, Direction.Left, Direction.Right];
 
 /* ------------------------------------------------------------------ util ---- */
 
-function seededRandom(seed) {
+export function seededRandom(seed) {
   let state = seed >>> 0;
   return () => {
     state = (state + 0x6d2b79f5) >>> 0;
@@ -74,13 +80,13 @@ function seededRandom(seed) {
   };
 }
 
-function percentile(sortedMs, fraction) {
+export function percentile(sortedMs, fraction) {
   if (sortedMs.length === 0) return Number.NaN;
   const index = Math.min(sortedMs.length - 1, Math.floor(sortedMs.length * fraction));
   return sortedMs[index];
 }
 
-function summarize(samplesMs) {
+export function summarize(samplesMs) {
   const sorted = [...samplesMs].sort((a, b) => a - b);
   const total = sorted.reduce((sum, value) => sum + value, 0);
   return {
@@ -93,8 +99,8 @@ function summarize(samplesMs) {
   };
 }
 
-const ms = (value) => (Number.isFinite(value) ? value.toFixed(4) : "n/a");
-const rssMb = () => (process.memoryUsage().rss / 1024 / 1024).toFixed(0);
+export const ms = (value) => (Number.isFinite(value) ? value.toFixed(4) : "n/a");
+export const rssMb = () => (process.memoryUsage().rss / 1024 / 1024).toFixed(0);
 
 /* ------------------------------------------------------------------ maps ---- */
 
@@ -110,23 +116,23 @@ const rssMb = () => (process.memoryUsage().rss / 1024 / 1024).toFixed(0);
  * harness has already published comparable across that change - the walkable count, and therefore
  * the density k each row was built to hold, is unchanged.
  */
-const SWEEP = [
+export const SWEEP = [
   { bots: 125, interiorWidth: 110, interiorHeight: 40 },
   { bots: 250, interiorWidth: 100, interiorHeight: 90 },
   { bots: 500, interiorWidth: 140, interiorHeight: 130 },
 ];
 
 /** Same source the generator derives its border from; never restate the numbers here. */
-const BORDER = cameraBorderTiles(VIEWPORT_WIDTH_TILES, VIEWPORT_HEIGHT_TILES);
+export const BORDER = cameraBorderTiles(VIEWPORT_WIDTH_TILES, VIEWPORT_HEIGHT_TILES);
 
-function sweepMapSize({ interiorWidth, interiorHeight }) {
+export function sweepMapSize({ interiorWidth, interiorHeight }) {
   return {
     width: interiorWidth + BORDER.left + BORDER.right,
     height: interiorHeight + BORDER.top + BORDER.bottom,
   };
 }
 
-function generateMaps() {
+export function generateMaps() {
   const directory = mkdtempSync(join(tmpdir(), "poc2-maps-"));
   const maps = [];
   for (const entry of SWEEP) {
@@ -145,7 +151,7 @@ function generateMaps() {
 }
 
 /** The generator's own geometry rules (tools/generate-load-map.mjs), needed to find the plaza. */
-function plazaRect(width, height) {
+export function plazaRect(width, height) {
   const superCountX = (width - BORDER.left - BORDER.right) / 10;
   const superCountY = (height - BORDER.top - BORDER.bottom) / 10;
   const i0 = Math.floor((superCountX - 4) / 2);
@@ -169,7 +175,7 @@ function plazaRect(width, height) {
  * degenerates into the `"plaza"` case. Callers that sweep half-extents must report that clamp
  * (see `clusterPlan`) instead of presenting the result as a tighter cluster than it is.
  */
-function placementRect(map, cluster) {
+export function placementRect(map, cluster) {
   if (cluster === undefined) return undefined;
   const plaza = plazaRect(map.width, map.height);
   if (cluster === "plaza") return plaza;
@@ -183,13 +189,13 @@ function placementRect(map, cluster) {
   };
 }
 
-function rectSpan(rect) {
+export function rectSpan(rect) {
   if (rect === undefined) return null;
   return { width: rect.maxX - rect.minX + 1, height: rect.maxY - rect.minY + 1 };
 }
 
 /** Table cell for a placement: its tile span, or `whole` for the unconfined map-wide case. */
-function rectLabel(rect) {
+export function rectLabel(rect) {
   const span = rectSpan(rect);
   return span === null ? "whole" : `${span.width}x${span.height}`;
 }
@@ -213,10 +219,10 @@ function rectLabel(rect) {
  * adds and removes nothing and only the mover's own view is rebuilt. The cost peaks just before
  * that, where views are nearly full *and* still churn at the boundary on every step.
  */
-const CLUSTER_HALF_EXTENTS = [6, 8, 10, 13, 16, 19];
+export const CLUSTER_HALF_EXTENTS = [6, 8, 10, 13, 16, 19];
 
 /** One sweep point, resolved against a map so the clamp is known before the run starts. */
-function clusterPlan(map, half) {
+export function clusterPlan(map, half) {
   const rect = placementRect(map, half);
   const span = rectSpan(rect);
   const requested = half * 2 + 1;
@@ -253,7 +259,7 @@ function installLegacyRefresh(room) {
   };
 }
 
-function fakeClient(sessionId) {
+export function fakeClient(sessionId) {
   return {
     sessionId,
     auth: { ssoNickname: null },
@@ -263,7 +269,7 @@ function fakeClient(sessionId) {
   };
 }
 
-async function buildRoom({ legacy, mapKey, mapsDirectory, spawn }) {
+export async function buildRoom({ legacy, mapKey, mapsDirectory, spawn }) {
   const room = legacy ? new LegacyRoom() : new MetaverseRoom();
   if (mapsDirectory !== undefined) {
     room.mapLoader = new TiledMapLoader(mapsDirectory);
@@ -282,7 +288,7 @@ async function buildRoom({ legacy, mapKey, mapsDirectory, spawn }) {
  * implementations start from a byte-identical configuration for the same seed. Join cost is not
  * part of the measurement, which is why the spawn spread is left at 0.
  */
-function populate(room, count, layout) {
+export function populate(room, count, layout) {
   const clients = [];
   for (let index = 0; index < count; index++) {
     const client = fakeClient(`bot${index}`);
@@ -303,7 +309,7 @@ function populate(room, count, layout) {
 }
 
 /** Uniform over the walkable tiles of a rectangle; unbounded rejection, so it is map-size agnostic. */
-function uniformWalkable(room, random, rect) {
+export function uniformWalkable(room, random, rect) {
   const map = room.collisionMap;
   const bounds = rect ?? { minX: 0, maxX: map.widthInTiles - 1, minY: 0, maxY: map.heightInTiles - 1 };
   const spanX = bounds.maxX - bounds.minX + 1;
@@ -317,7 +323,7 @@ function uniformWalkable(room, random, rect) {
   };
 }
 
-function meanViewSize(room) {
+export function meanViewSize(room) {
   let total = 0;
   for (const viewed of room.viewedBySession.values()) total += viewed.size;
   return total / room.viewedBySession.size;
@@ -325,7 +331,15 @@ function meanViewSize(room) {
 
 /* ------------------------------------------------------- tier 1: per move ---- */
 
-function measureMoveCost(room, clients, random, { samples, warmup }) {
+/**
+ * `between` is called once per iteration, strictly outside the timed span, and defaults to
+ * nothing. It exists for `loadtest-poc3.mjs`, which runs a hunting ground's simulation from it so
+ * that the two co-tenants interleave the way they do in the one production process — a monster
+ * tick can land between two moves and never inside one, because Node has a single thread.
+ * Keeping it outside the `hrtime` pair is what stops the tick's own cost being charged to a move
+ * sample; the tick is measured on its own tier.
+ */
+export function measureMoveCost(room, clients, random, { samples, warmup, between }) {
   const timings = [];
   let accepted = 0;
   let rejected = 0;
@@ -336,6 +350,7 @@ function measureMoveCost(room, clients, random, { samples, warmup }) {
   const meanViewSizePlaced = meanViewSize(room);
 
   for (let index = 0; index < samples + warmup; index++) {
+    if (between !== undefined) between(index);
     const client = clients[Math.floor(random() * clients.length)];
     const dir = DIRECTIONS[Math.floor(random() * DIRECTIONS.length)];
     const player = room.state.players.get(client.sessionId);
@@ -361,7 +376,7 @@ function measureMoveCost(room, clients, random, { samples, warmup }) {
   return { ...summarize(timings), accepted, rejected, meanViewSizePlaced, meanViewSizeEnd: meanViewSize(room) };
 }
 
-async function runMoveScenario({ label, legacy, map, bots, cluster, samples, warmup, seed }) {
+export async function runMoveScenario({ label, legacy, map, bots, cluster, samples, warmup, seed, between }) {
   const spawnRect = placementRect(map, cluster);
   const spawn = {
     tileX: Math.floor(map.width / 2),
@@ -375,7 +390,7 @@ async function runMoveScenario({ label, legacy, map, bots, cluster, samples, war
   const moveRandom = seededRandom(seed ^ 0x9e37_79b9);
   try {
     const clients = populate(room, bots, uniformWalkable(room, layoutRandom, spawnRect));
-    const result = measureMoveCost(room, clients, moveRandom, { samples, warmup });
+    const result = measureMoveCost(room, clients, moveRandom, { samples, warmup, between });
     return { label, legacy, bots, map, cluster, rect: spawnRect, ...result };
   } finally {
     room.setPatchRate(null);
@@ -383,7 +398,7 @@ async function runMoveScenario({ label, legacy, map, bots, cluster, samples, war
 }
 
 /** Median of per-run medians: one run's median moves by up to 2x on a machine with turbo. */
-function aggregateTimings(runs) {
+export function aggregateTimings(runs) {
   const medians = runs.map((run) => run.medianMs).sort((a, b) => a - b);
   const p95s = runs.map((run) => run.p95Ms).sort((a, b) => a - b);
   const middle = Math.floor(runs.length / 2);
@@ -414,7 +429,7 @@ function aggregateTimings(runs) {
  * This is also why the spread columns are printed rather than the median alone: if a peak is not
  * separated by more than the fastest-to-slowest band, it has not been resolved.
  */
-async function measureInterleaved(runOnce, configs, rounds, progressLabel) {
+export async function measureInterleaved(runOnce, configs, rounds, progressLabel) {
   const runs = configs.map(() => []);
   for (let round = 0; round < rounds; round++) {
     for (const [index, config] of configs.entries()) {
@@ -437,7 +452,7 @@ async function measureInterleaved(runOnce, configs, rounds, progressLabel) {
  * StateView, so this is the one cost the two PoC tickets do not touch at all; if the bottleneck
  * has moved here, that is the finding, not something to fix in this pass.
  */
-async function runPatchScenario({ label, map, bots, cluster, patches, movesPerPatch, seed, encoderBufferBytes }) {
+export async function runPatchScenario({ label, map, bots, cluster, patches, movesPerPatch, seed, encoderBufferBytes, between }) {
   const spawnRect = placementRect(map, cluster);
   Encoder.BUFFER_SIZE = encoderBufferBytes;
   // Each grow-and-re-encode logs one line; at the 8 KB default that is hundreds of lines per
@@ -479,6 +494,8 @@ async function runPatchScenario({ label, map, bots, cluster, patches, movesPerPa
     const timings = [];
     const byteCounts = [];
     for (let patch = 0; patch < patches; patch++) {
+      // Same contract as the move tier's `between`, at the patch cadence instead of the move one.
+      if (between !== undefined) between(patch);
       for (let move = 0; move < movesPerPatch; move++) {
         const client = clients[Math.floor(moveRandom() * clients.length)];
         client.userData.lastMoveAt = 0;
@@ -517,71 +534,100 @@ async function runPatchScenario({ label, map, bots, cluster, patches, movesPerPa
 
 /* -------------------------------------------------------- tier 3: sockets ---- */
 
-async function runSocketScenario({ bots, movesPerSecondPerBot, durationMs }) {
-  const { createGameServer } = await import(pathToFileURL(join(CODE_DIR, "server/src/server.ts")).href);
+/**
+ * The three pieces below are split out of `runSocketScenario` rather than inlined into it because
+ * `loadtest-poc3.mjs` drives two room populations at once against a server in a *different*
+ * process. Composing the same bot, the same join batching and the same deficit-paced sender is
+ * what makes its grand-plaza column comparable with this file's (design-hunting-inventory §9.2).
+ */
+export async function loadClientSdk() {
   const { Client } = await import(pathToFileURL(join(CODE_DIR, "node_modules/@colyseus/sdk/build/index.mjs")).href);
+  return Client;
+}
 
-  const port = 2599;
-  const gameServer = createGameServer();
-  await gameServer.listen(port);
-
-  const endpoint = `ws://127.0.0.1:${port}`;
-  const bot = async (index, roomId) => {
-    const client = new Client(endpoint);
-    const options = { nickname: `bot${index}`, avatarSkin: 0 };
-    const room =
-      roomId === null
-        ? await client.create("grand-plaza", options)
-        : await client.joinById(roomId, options);
-    const state = { room, sentAt: 0, tile: null, latencies: [], sent: 0, refused: 0 };
-    // A step into a wall never moves the player, so leaving `sentAt` set would charge its wait
-    // to whatever move lands next and invent latency that never happened.
-    room.onMessage(ServerMessage.MoveRejected, () => {
-      state.refused++;
+/**
+ * One bot, and the observer that turns its state patches into a move->patch latency sample.
+ * `roomId` null creates the room, anything else joins that one by id.
+ */
+export async function connectBot(Client, endpoint, index, roomName, roomId) {
+  const client = new Client(endpoint);
+  const options = { nickname: `bot${index}`, avatarSkin: 0 };
+  const room =
+    roomId === null
+      ? await client.create(roomName, options)
+      : await client.joinById(roomId, options);
+  const state = { room, sentAt: 0, tile: null, latencies: [], sent: 0, refused: 0 };
+  // A step into a wall never moves the player, so leaving `sentAt` set would charge its wait
+  // to whatever move lands next and invent latency that never happened.
+  room.onMessage(ServerMessage.MoveRejected, () => {
+    state.refused++;
+    state.sentAt = 0;
+  });
+  room.onStateChange(() => {
+    const player = room.state.players.get(room.sessionId);
+    if (!player) return;
+    const tile = `${player.tileX},${player.tileY}`;
+    if (state.tile !== null && tile !== state.tile && state.sentAt !== 0) {
+      state.latencies.push(performance.now() - state.sentAt);
       state.sentAt = 0;
-    });
-    room.onStateChange(() => {
-      const player = room.state.players.get(room.sessionId);
-      if (!player) return;
-      const tile = `${player.tileX},${player.tileY}`;
-      if (state.tile !== null && tile !== state.tile && state.sentAt !== 0) {
-        state.latencies.push(performance.now() - state.sentAt);
-        state.sentAt = 0;
-      }
-      state.tile = tile;
-    });
-    return state;
-  };
-
-  const first = await bot(0, null);
-  const roomId = first.room.roomId;
-  const bots_ = [first];
-  // Batched rather than all at once: 500 concurrent seat reservations spill into a second room,
-  // and `joinById` on a room that has just locked itself rejects.
-  const batchSize = 25;
-  for (let index = 1; index < bots; index += batchSize) {
-    const batch = [];
-    for (let offset = 0; offset < batchSize && index + offset < bots; offset++) {
-      batch.push(bot(index + offset, roomId));
     }
-    bots_.push(...(await Promise.all(batch)));
-    process.stdout.write(`\r  joined ${bots_.length}/${bots}   `);
-  }
-  process.stdout.write("\n");
+    state.tile = tile;
+  });
+  return state;
+}
 
+/**
+ * Fills one room with `count` bots. Batched rather than all at once: 500 concurrent seat
+ * reservations spill into a second room, and `joinById` on a room that has just locked itself
+ * rejects.
+ */
+export async function joinBots({ Client, endpoint, roomName, roomId, count, startIndex = 0, batchSize = 25, label = "joined" }) {
+  const bots = [];
+  let firstRoomId = roomId;
+  if (firstRoomId === null || firstRoomId === undefined) {
+    const first = await connectBot(Client, endpoint, startIndex, roomName, null);
+    bots.push(first);
+    firstRoomId = first.room.roomId;
+  }
+  for (let index = startIndex + bots.length; index < startIndex + count; index += batchSize) {
+    const batch = [];
+    for (let offset = 0; offset < batchSize && index + offset < startIndex + count; offset++) {
+      batch.push(connectBot(Client, endpoint, index + offset, roomName, firstRoomId));
+    }
+    bots.push(...(await Promise.all(batch)));
+    if (process.stdout.isTTY) process.stdout.write(`\r  ${label} ${bots.length}/${count}   `);
+  }
+  if (process.stdout.isTTY) process.stdout.write("\n");
+  return { bots, roomId: firstRoomId };
+}
+
+/**
+ * Sends moves for `durationMs`, paced off the deficit rather than a fixed count per tick: Windows
+ * timers fire at ~15 ms whatever the interval asks for, so a per-tick quota silently caps the
+ * achieved rate.
+ *
+ * `directionFor(cursor)` defaults to the round robin this file has always used. Note what that
+ * default does when the bot count is a multiple of four, which 500 is: `cursor` advances by
+ * `bots.length` between one bot's turns, so every bot sends *the same direction for the whole
+ * run* and walks in a straight line until the map stops it. That is where this tier's 48-67%
+ * "refused by a wall" figure comes from. It is fine for a single 8 s run and fatal for a harness
+ * that reuses one set of bots across many runs, since after the first run they are all parked
+ * against a wall and stop generating load. `loadtest-poc3.mjs` passes a seeded random chooser for
+ * exactly that reason - the same one poc2's own in-process tiers use.
+ */
+export async function paceMoves(bots, movesPerSecondPerBot, durationMs, directionFor) {
+  const direction = directionFor ?? ((cursor) => DIRECTIONS[cursor % DIRECTIONS.length]);
   let cursor = 0;
   let sent = 0;
   const startedAt = performance.now();
-  // Paced off the deficit rather than a fixed count per tick: Windows timers fire at ~15 ms
-  // whatever the interval asks for, so a per-tick quota silently caps the achieved rate.
   await new Promise((done) => {
     const timer = setInterval(() => {
       const elapsed = performance.now() - startedAt;
-      const due = Math.floor((elapsed / 1000) * bots_.length * movesPerSecondPerBot);
+      const due = Math.floor((elapsed / 1000) * bots.length * movesPerSecondPerBot);
       while (sent < due) {
-        const state = bots_[cursor++ % bots_.length];
+        const state = bots[cursor++ % bots.length];
         if (state.sentAt === 0) state.sentAt = performance.now();
-        state.room.send(ClientMessage.Move, { dir: DIRECTIONS[cursor % DIRECTIONS.length] });
+        state.room.send(ClientMessage.Move, { dir: direction(cursor) });
         state.sent++;
         sent++;
       }
@@ -591,20 +637,44 @@ async function runSocketScenario({ bots, movesPerSecondPerBot, durationMs }) {
       }
     }, 4);
   });
-  const elapsedMs = performance.now() - startedAt;
+  return { sent, elapsedMs: performance.now() - startedAt };
+}
+
+/** Drains and summarises what the bots observed. Clears the samples so a group can be reused. */
+export function collectBotLatency(bots, sent, elapsedMs, movesPerSecondPerBot) {
+  const latencies = bots.flatMap((state) => state.latencies);
+  const report = {
+    bots: bots.length,
+    targetRate: bots.length * movesPerSecondPerBot,
+    achievedRate: (sent / elapsedMs) * 1000,
+    sent,
+    refused: bots.reduce((total, state) => total + state.refused, 0),
+    latency: summarize(latencies),
+  };
+  for (const state of bots) {
+    state.latencies.length = 0;
+    state.refused = 0;
+    state.sent = 0;
+    state.sentAt = 0;
+  }
+  return report;
+}
+
+export async function runSocketScenario({ bots, movesPerSecondPerBot, durationMs }) {
+  const { createGameServer } = await import(pathToFileURL(join(CODE_DIR, "server/src/server.ts")).href);
+  const Client = await loadClientSdk();
+
+  const port = 2599;
+  const gameServer = createGameServer();
+  await gameServer.listen(port);
+
+  const endpoint = `ws://127.0.0.1:${port}`;
+  const { bots: bots_ } = await joinBots({ Client, endpoint, roomName: "grand-plaza", roomId: null, count: bots });
+  const { sent, elapsedMs } = await paceMoves(bots_, movesPerSecondPerBot, durationMs);
   // One patch interval of settling, so in-flight moves land before the latency sample is read.
   await new Promise((done) => setTimeout(done, PATCH_RATE_MS * 3));
 
-  const latencies = bots_.flatMap((state) => state.latencies);
-  const report = {
-    bots: bots_.length,
-    targetRate: bots_.length * movesPerSecondPerBot,
-    achievedRate: (sent / elapsedMs) * 1000,
-    sent,
-    refused: bots_.reduce((total, state) => total + state.refused, 0),
-    latency: summarize(latencies),
-    rssMb: rssMb(),
-  };
+  const report = { ...collectBotLatency(bots_, sent, elapsedMs, movesPerSecondPerBot), rssMb: rssMb() };
   await Promise.all(bots_.map((state) => state.room.leave().catch(() => {})));
   await gameServer.gracefullyShutdown(false);
   return report;
@@ -614,7 +684,7 @@ async function runSocketScenario({ bots, movesPerSecondPerBot, durationMs }) {
 
 // `k placed` is the density the scenario was built to hold, `k end` what the random walk had
 // diffused it to by the last sample; the move cost belongs to the range between them.
-function printMoveTable(title, rows) {
+export function printMoveTable(title, rows) {
   console.log(`\n${title}`);
   console.log("  impl     n     map        rect     k placed  k end    median ms   p95 ms    med spread        moves/s (1 core)");
   for (const row of rows) {
@@ -630,188 +700,200 @@ function printMoveTable(title, rows) {
   }
 }
 
-const socketsOnly = process.argv.includes("--socket-only");
-const wantSockets = socketsOnly || process.argv.includes("--socket");
-const repeatIndex = process.argv.indexOf("--repeat");
-const repeat = repeatIndex === -1 ? 3 : Number.parseInt(process.argv[repeatIndex + 1] ?? "3", 10);
-const botsIndex = process.argv.indexOf("--socket-bots");
-const socketBots = botsIndex === -1 ? 500 : Number.parseInt(process.argv[botsIndex + 1] ?? "500", 10);
-const halvesIndex = process.argv.indexOf("--cluster-halves");
-const clusterHalfExtents =
-  halvesIndex === -1
-    ? CLUSTER_HALF_EXTENTS
-    : (process.argv[halvesIndex + 1] ?? "").split(",").map((value) => Number.parseInt(value, 10));
-if (clusterHalfExtents.length === 0 || clusterHalfExtents.some((half) => !Number.isInteger(half) || half < 1)) {
-  console.error(
-    `--cluster-halves: expected a comma-separated list of positive integers, got ${JSON.stringify(process.argv[halvesIndex + 1])}`,
-  );
-  process.exit(1);
+/**
+ * True only when this file is the script node was told to run. `loadtest-poc3.mjs` imports the
+ * functions above, and without this everything below would fire on that import and run PoC #2's
+ * own multi-minute sweep before PoC #3 measured anything.
+ */
+export function isEntryPoint(moduleUrl) {
+  const entry = process.argv[1];
+  return entry !== undefined && pathToFileURL(resolve(entry)).href === moduleUrl;
 }
 
-async function runSocketTier() {
-  for (const movesPerSecondPerBot of [8.33, MAX_MOVES_PER_SECOND]) {
-    try {
-      const report = await runSocketScenario({ bots: socketBots, movesPerSecondPerBot, durationMs: 8000 });
-      console.log(
-        `\nWebsocket tier - ${report.bots} bots, target ${Math.round(report.targetRate)} moves/s` +
-          `\n  achieved      : ${report.achievedRate.toFixed(0)} moves/s (${report.sent} sent, ${report.refused} refused by a wall)` +
-          `\n  move -> patch : median ${ms(report.latency.medianMs)} ms, p95 ${ms(report.latency.p95Ms)} ms, ` +
-          `max ${ms(report.latency.maxMs)} ms (n=${report.latency.count})` +
-          `\n  RSS           : ${report.rssMb} MB  [server + all bots in one process, so an upper bound]`,
-      );
-    } catch (error) {
-      console.log(`\nWebsocket tier at ${movesPerSecondPerBot}/s/bot failed: ${error.stack}`);
+if (isEntryPoint(import.meta.url)) {
+  const socketsOnly = process.argv.includes("--socket-only");
+  const wantSockets = socketsOnly || process.argv.includes("--socket");
+  const repeatIndex = process.argv.indexOf("--repeat");
+  const repeat = repeatIndex === -1 ? 3 : Number.parseInt(process.argv[repeatIndex + 1] ?? "3", 10);
+  const botsIndex = process.argv.indexOf("--socket-bots");
+  const socketBots = botsIndex === -1 ? 500 : Number.parseInt(process.argv[botsIndex + 1] ?? "500", 10);
+  const halvesIndex = process.argv.indexOf("--cluster-halves");
+  const clusterHalfExtents =
+    halvesIndex === -1
+      ? CLUSTER_HALF_EXTENTS
+      : (process.argv[halvesIndex + 1] ?? "").split(",").map((value) => Number.parseInt(value, 10));
+  if (clusterHalfExtents.length === 0 || clusterHalfExtents.some((half) => !Number.isInteger(half) || half < 1)) {
+    console.error(
+      `--cluster-halves: expected a comma-separated list of positive integers, got ${JSON.stringify(process.argv[halvesIndex + 1])}`,
+    );
+    process.exit(1);
+  }
+
+  async function runSocketTier() {
+    for (const movesPerSecondPerBot of [8.33, MAX_MOVES_PER_SECOND]) {
+      try {
+        const report = await runSocketScenario({ bots: socketBots, movesPerSecondPerBot, durationMs: 8000 });
+        console.log(
+          `\nWebsocket tier - ${report.bots} bots, target ${Math.round(report.targetRate)} moves/s` +
+            `\n  achieved      : ${report.achievedRate.toFixed(0)} moves/s (${report.sent} sent, ${report.refused} refused by a wall)` +
+            `\n  move -> patch : median ${ms(report.latency.medianMs)} ms, p95 ${ms(report.latency.p95Ms)} ms, ` +
+            `max ${ms(report.latency.maxMs)} ms (n=${report.latency.count})` +
+            `\n  RSS           : ${report.rssMb} MB  [server + all bots in one process, so an upper bound]`,
+        );
+      } catch (error) {
+        console.log(`\nWebsocket tier at ${movesPerSecondPerBot}/s/bot failed: ${error.stack}`);
+      }
     }
   }
-}
 
-if (socketsOnly) {
-  await runSocketTier();
-  process.exit(0);
-}
+  if (socketsOnly) {
+    await runSocketTier();
+    process.exit(0);
+  }
 
-console.log("PoC #2 load test - docs/poc2-design.md §6.3-6.4");
-console.log(`  node ${process.version}, VIEW_RADIUS_TILES=${VIEW_RADIUS_TILES}, PATCH_RATE_MS=${PATCH_RATE_MS}`);
-console.log(`  acceptance bar: <= ${ACCEPTANCE_BAR_MS_PER_MOVE} ms/move at n=500 (${500 * MAX_MOVES_PER_SECOND} moves/s worst case)`);
+  console.log("PoC #2 load test - docs/poc2-design.md §6.3-6.4");
+  console.log(`  node ${process.version}, VIEW_RADIUS_TILES=${VIEW_RADIUS_TILES}, PATCH_RATE_MS=${PATCH_RATE_MS}`);
+  console.log(`  acceptance bar: <= ${ACCEPTANCE_BAR_MS_PER_MOVE} ms/move at n=500 (${500 * MAX_MOVES_PER_SECOND} moves/s worst case)`);
 
-const { directory, maps } = generateMaps();
-console.log(`\ngenerated sweep maps in ${directory}`);
-for (const map of maps) {
-  console.log(`  ${map.mapKey}: ${map.width}x${map.height}, ${map.walkable} walkable`);
-}
-const grandPlaza = maps[maps.length - 1];
+  const { directory, maps } = generateMaps();
+  console.log(`\ngenerated sweep maps in ${directory}`);
+  for (const map of maps) {
+    console.log(`  ${map.mapKey}: ${map.width}x${map.height}, ${map.walkable} walkable`);
+  }
+  const grandPlaza = maps[maps.length - 1];
 
-const plazaPlacement = rectLabel(placementRect(grandPlaza, "plaza"));
+  const plazaPlacement = rectLabel(placementRect(grandPlaza, "plaza"));
 
-const dispersedConfigs = maps.map((map) => ({
-  label: "A dispersed", legacy: false, map, bots: map.bots, cluster: undefined, samples: 20000, warmup: 5000, seed: 0xa11ce,
-}));
-for (const map of maps) {
-  // Fewer samples: the legacy path is ~2 orders of magnitude slower and the spread is tiny.
-  dispersedConfigs.push({ label: "A dispersed", legacy: true, map, bots: map.bots, cluster: undefined, samples: 1500, warmup: 300, seed: 0xa11ce });
-}
+  const dispersedConfigs = maps.map((map) => ({
+    label: "A dispersed", legacy: false, map, bots: map.bots, cluster: undefined, samples: 20000, warmup: 5000, seed: 0xa11ce,
+  }));
+  for (const map of maps) {
+    // Fewer samples: the legacy path is ~2 orders of magnitude slower and the spread is tiny.
+    dispersedConfigs.push({ label: "A dispersed", legacy: true, map, bots: map.bots, cluster: undefined, samples: 1500, warmup: 300, seed: 0xa11ce });
+  }
 
-const clusterConfigs = [
-  { label: "B plaza", legacy: false, map: grandPlaza, bots: 500, cluster: "plaza", samples: 20000, warmup: 5000, seed: 0xb0b },
-  { label: "B plaza", legacy: true, map: grandPlaza, bots: 500, cluster: "plaza", samples: 600, warmup: 100, seed: 0xb0b },
-];
-console.log(`\nclustered sweep: half-extents ${clusterHalfExtents.join(", ")} at the ${plazaPlacement} plaza centre`);
-const measuredRects = new Set();
-for (const half of clusterHalfExtents) {
-  const plan = clusterPlan(grandPlaza, half);
-  if (plan.clamped) {
+  const clusterConfigs = [
+    { label: "B plaza", legacy: false, map: grandPlaza, bots: 500, cluster: "plaza", samples: 20000, warmup: 5000, seed: 0xb0b },
+    { label: "B plaza", legacy: true, map: grandPlaza, bots: 500, cluster: "plaza", samples: 600, warmup: 100, seed: 0xb0b },
+  ];
+  console.log(`\nclustered sweep: half-extents ${clusterHalfExtents.join(", ")} at the ${plazaPlacement} plaza centre`);
+  const measuredRects = new Set();
+  for (const half of clusterHalfExtents) {
+    const plan = clusterPlan(grandPlaza, half);
+    if (plan.clamped) {
+      console.log(
+        `  half-extent ${half}: asked for ${plan.requested}x${plan.requested}, the ${plazaPlacement} plaza allows only ` +
+          `${plan.span.width}x${plan.span.height} - CLAMPED, so this row is looser than requested`,
+      );
+    }
+    // Two half-extents that clamp to the same rect would be the same measurement run twice.
+    if (measuredRects.has(plan.key)) {
+      console.log(`  half-extent ${half}: skipped, clamps onto the ${rectLabel(plan.rect)} rect already measured`);
+      continue;
+    }
+    measuredRects.add(plan.key);
+    clusterConfigs.push({ label: "B tight", legacy: false, map: grandPlaza, bots: 500, cluster: half, samples: 20000, warmup: 5000, seed: 0xb0b });
+  }
+
+  // Both scenarios in one interleaved pass, so that A and B are comparable to each other and not
+  // just within themselves - the cross-table claim ("dispersed has N times the headroom of a
+  // crowd") is read off exactly that comparison.
+  console.log(`\nmove tier: ${repeat} interleaved rounds over ${dispersedConfigs.length + clusterConfigs.length} configurations, median of each`);
+  const moveRows = await measureInterleaved(runMoveScenario, [...dispersedConfigs, ...clusterConfigs], repeat, "move tier");
+  const dispersed = moveRows.slice(0, dispersedConfigs.length);
+  const clustered = moveRows.slice(dispersedConfigs.length);
+
+  printMoveTable("Scenario A - dispersed, density held constant (k fixed, n varies)", dispersed);
+
+  // The whole plaza is in the running, not just the swept squares: the peak is a churn effect, not
+  // a pure density one, so the loosest clustered placement can beat every tighter one and picking
+  // the worst from the sweep alone would under-report again, in a new way.
+  const worstCluster = clustered
+    .filter((row) => !row.legacy)
+    .reduce((worst, row) => (row.medianMs > worst.medianMs ? row : worst));
+  // The head-to-head only has to be paid on the row that decides the verdict: the legacy path costs
+  // ~200x per sample, so sweeping it too would dominate runtime. If the plaza won, it already has one.
+  if (typeof worstCluster.cluster === "number") {
+    const [legacyWorst] = await measureInterleaved(
+      runMoveScenario,
+      [{ label: "B tight", legacy: true, map: grandPlaza, bots: 500, cluster: worstCluster.cluster, samples: 400, warmup: 100, seed: 0xb0b }],
+      repeat,
+      "legacy head-to-head",
+    );
+    clustered.push(legacyWorst);
+  }
+
+  printMoveTable(
+    `Scenario B - clustered, n=500 (plaza = the whole ${plazaPlacement} plaza; tight = a Chebyshev square at its centre)`,
+    clustered,
+  );
+  const clusterName = (row) =>
+    typeof row.cluster === "number" ? `half-extent ${row.cluster}` : "the whole plaza";
+  console.log(
+    `  worst clustered placement: ${rectLabel(worstCluster.rect)} (${clusterName(worstCluster)}), ` +
+      `median ${ms(worstCluster.medianMs)} ms/move = ${((worstCluster.medianMs / ACCEPTANCE_BAR_MS_PER_MOVE) * 100).toFixed(1)}% of the ` +
+      `${ACCEPTANCE_BAR_MS_PER_MOVE} ms bar`,
+  );
+  const densestCluster = clustered
+    .filter((row) => !row.legacy)
+    .reduce((densest, row) => (row.meanViewSizePlaced > densest.meanViewSizePlaced ? row : densest));
+  console.log(
+    `  densest clustered placement: ${rectLabel(densestCluster.rect)} (${clusterName(densestCluster)}), ` +
+      `k ${densestCluster.meanViewSizePlaced.toFixed(1)} as placed`,
+  );
+
+  // Both buffer sizes on purpose: the 8 KB default grows 8 KB at a time and re-encodes the whole
+  // patch on every step, so measuring only the default would report the growth, not the encoder.
+  const PRESIZED_ENCODER_BUFFER_BYTES = 8 * 1024 * 1024;
+  // The move tier's worst placement and its densest one need not be the same square - move cost
+  // peaks on view *churn*, encode cost tracks k and therefore bytes - so both get an encode row,
+  // deduplicated when they coincide. Carrying the move tier's own worst placement over is what lets
+  // the two tiers' worst-case rows be added into one core budget.
+  const patchScenarios = [
+    { label: "A dispersed", cluster: undefined, seed: 0xa11ce },
+    { label: "B plaza", cluster: "plaza", seed: 0xb0b },
+  ];
+  for (const row of [worstCluster, densestCluster]) {
+    if (patchScenarios.some((scenario) => scenario.cluster === row.cluster)) continue;
+    patchScenarios.push({ label: "B tight", cluster: row.cluster, seed: 0xb0b });
+  }
+  const patchConfigs = [];
+  for (const encoderBufferBytes of [DEFAULT_ENCODER_BUFFER_BYTES, PRESIZED_ENCODER_BUFFER_BYTES]) {
+    for (const scenario of patchScenarios) {
+      patchConfigs.push({ ...scenario, map: grandPlaza, bots: 500, patches: 25, movesPerPatch: 1000, encoderBufferBytes });
+    }
+  }
+  // Interleaved for the same reason the move tier is, and it matters more here: these rows land
+  // near 100% of the patch budget, so an ordering artefact is the difference between "fits in a
+  // core" and "does not". The seed is fixed per scenario, so byte counts and k repeat exactly
+  // across rounds and only the timings move.
+  console.log(`\npatch tier: ${repeat} interleaved rounds over ${patchConfigs.length} configurations, median of each`);
+  const patchRows = await measureInterleaved(runPatchScenario, patchConfigs, repeat, "patch tier");
+  console.log("\nPer-patch encode cost (design §6.5) - 500 views, 1000 moves per patch");
+  console.log("  scenario      rect     buf     k placed  k end    median ms   p95 ms    med spread        kB/patch   %of 100ms   overflow warns");
+  for (const row of patchRows) {
+    const budget = ((row.medianMs / PATCH_RATE_MS) * 100).toFixed(1);
     console.log(
-      `  half-extent ${half}: asked for ${plan.requested}x${plan.requested}, the ${plazaPlacement} plaza allows only ` +
-        `${plan.span.width}x${plan.span.height} - CLAMPED, so this row is looser than requested`,
+      `  ${row.label.padEnd(13)} ${rectLabel(row.rect).padEnd(8)} ${`${row.encoderBufferBytes / 1024}k`.padEnd(7)} ` +
+        `${row.meanViewSizePlaced.toFixed(1).padEnd(9)} ${row.meanViewSizeEnd.toFixed(1).padEnd(8)} ` +
+        `${ms(row.medianMs).padEnd(11)} ${ms(row.p95Ms).padEnd(9)} ` +
+        `${`${ms(row.fastestMedianMs)}-${ms(row.slowestMedianMs)}`.padEnd(17)} ` +
+        `${(row.meanBytesPerPatch / 1024).toFixed(1).padEnd(10)} ` +
+        `${`${budget}%`.padEnd(11)} ${row.overflowWarnings} (grew to ${(row.finalBufferBytes / 1024 / 1024).toFixed(1)} MB)`,
     );
   }
-  // Two half-extents that clamp to the same rect would be the same measurement run twice.
-  if (measuredRects.has(plan.key)) {
-    console.log(`  half-extent ${half}: skipped, clamps onto the ${rectLabel(plan.rect)} rect already measured`);
-    continue;
+
+  console.log(`\nRSS after the in-process tiers: ${rssMb()} MB`);
+
+  if (wantSockets) {
+    await runSocketTier();
   }
-  measuredRects.add(plan.key);
-  clusterConfigs.push({ label: "B tight", legacy: false, map: grandPlaza, bots: 500, cluster: half, samples: 20000, warmup: 5000, seed: 0xb0b });
-}
 
-// Both scenarios in one interleaved pass, so that A and B are comparable to each other and not
-// just within themselves - the cross-table claim ("dispersed has N times the headroom of a
-// crowd") is read off exactly that comparison.
-console.log(`\nmove tier: ${repeat} interleaved rounds over ${dispersedConfigs.length + clusterConfigs.length} configurations, median of each`);
-const moveRows = await measureInterleaved(runMoveScenario, [...dispersedConfigs, ...clusterConfigs], repeat, "move tier");
-const dispersed = moveRows.slice(0, dispersedConfigs.length);
-const clustered = moveRows.slice(dispersedConfigs.length);
-
-printMoveTable("Scenario A - dispersed, density held constant (k fixed, n varies)", dispersed);
-
-// The whole plaza is in the running, not just the swept squares: the peak is a churn effect, not
-// a pure density one, so the loosest clustered placement can beat every tighter one and picking
-// the worst from the sweep alone would under-report again, in a new way.
-const worstCluster = clustered
-  .filter((row) => !row.legacy)
-  .reduce((worst, row) => (row.medianMs > worst.medianMs ? row : worst));
-// The head-to-head only has to be paid on the row that decides the verdict: the legacy path costs
-// ~200x per sample, so sweeping it too would dominate runtime. If the plaza won, it already has one.
-if (typeof worstCluster.cluster === "number") {
-  const [legacyWorst] = await measureInterleaved(
-    runMoveScenario,
-    [{ label: "B tight", legacy: true, map: grandPlaza, bots: 500, cluster: worstCluster.cluster, samples: 400, warmup: 100, seed: 0xb0b }],
-    repeat,
-    "legacy head-to-head",
+  const worst = Math.max(
+    ...[...dispersed, ...clustered].filter((row) => !row.legacy && row.bots === 500).map((row) => row.medianMs),
   );
-  clustered.push(legacyWorst);
-}
-
-printMoveTable(
-  `Scenario B - clustered, n=500 (plaza = the whole ${plazaPlacement} plaza; tight = a Chebyshev square at its centre)`,
-  clustered,
-);
-const clusterName = (row) =>
-  typeof row.cluster === "number" ? `half-extent ${row.cluster}` : "the whole plaza";
-console.log(
-  `  worst clustered placement: ${rectLabel(worstCluster.rect)} (${clusterName(worstCluster)}), ` +
-    `median ${ms(worstCluster.medianMs)} ms/move = ${((worstCluster.medianMs / ACCEPTANCE_BAR_MS_PER_MOVE) * 100).toFixed(1)}% of the ` +
-    `${ACCEPTANCE_BAR_MS_PER_MOVE} ms bar`,
-);
-const densestCluster = clustered
-  .filter((row) => !row.legacy)
-  .reduce((densest, row) => (row.meanViewSizePlaced > densest.meanViewSizePlaced ? row : densest));
-console.log(
-  `  densest clustered placement: ${rectLabel(densestCluster.rect)} (${clusterName(densestCluster)}), ` +
-    `k ${densestCluster.meanViewSizePlaced.toFixed(1)} as placed`,
-);
-
-// Both buffer sizes on purpose: the 8 KB default grows 8 KB at a time and re-encodes the whole
-// patch on every step, so measuring only the default would report the growth, not the encoder.
-const PRESIZED_ENCODER_BUFFER_BYTES = 8 * 1024 * 1024;
-// The move tier's worst placement and its densest one need not be the same square - move cost
-// peaks on view *churn*, encode cost tracks k and therefore bytes - so both get an encode row,
-// deduplicated when they coincide. Carrying the move tier's own worst placement over is what lets
-// the two tiers' worst-case rows be added into one core budget.
-const patchScenarios = [
-  { label: "A dispersed", cluster: undefined, seed: 0xa11ce },
-  { label: "B plaza", cluster: "plaza", seed: 0xb0b },
-];
-for (const row of [worstCluster, densestCluster]) {
-  if (patchScenarios.some((scenario) => scenario.cluster === row.cluster)) continue;
-  patchScenarios.push({ label: "B tight", cluster: row.cluster, seed: 0xb0b });
-}
-const patchConfigs = [];
-for (const encoderBufferBytes of [DEFAULT_ENCODER_BUFFER_BYTES, PRESIZED_ENCODER_BUFFER_BYTES]) {
-  for (const scenario of patchScenarios) {
-    patchConfigs.push({ ...scenario, map: grandPlaza, bots: 500, patches: 25, movesPerPatch: 1000, encoderBufferBytes });
-  }
-}
-// Interleaved for the same reason the move tier is, and it matters more here: these rows land
-// near 100% of the patch budget, so an ordering artefact is the difference between "fits in a
-// core" and "does not". The seed is fixed per scenario, so byte counts and k repeat exactly
-// across rounds and only the timings move.
-console.log(`\npatch tier: ${repeat} interleaved rounds over ${patchConfigs.length} configurations, median of each`);
-const patchRows = await measureInterleaved(runPatchScenario, patchConfigs, repeat, "patch tier");
-console.log("\nPer-patch encode cost (design §6.5) - 500 views, 1000 moves per patch");
-console.log("  scenario      rect     buf     k placed  k end    median ms   p95 ms    med spread        kB/patch   %of 100ms   overflow warns");
-for (const row of patchRows) {
-  const budget = ((row.medianMs / PATCH_RATE_MS) * 100).toFixed(1);
   console.log(
-    `  ${row.label.padEnd(13)} ${rectLabel(row.rect).padEnd(8)} ${`${row.encoderBufferBytes / 1024}k`.padEnd(7)} ` +
-      `${row.meanViewSizePlaced.toFixed(1).padEnd(9)} ${row.meanViewSizeEnd.toFixed(1).padEnd(8)} ` +
-      `${ms(row.medianMs).padEnd(11)} ${ms(row.p95Ms).padEnd(9)} ` +
-      `${`${ms(row.fastestMedianMs)}-${ms(row.slowestMedianMs)}`.padEnd(17)} ` +
-      `${(row.meanBytesPerPatch / 1024).toFixed(1).padEnd(10)} ` +
-      `${`${budget}%`.padEnd(11)} ${row.overflowWarnings} (grew to ${(row.finalBufferBytes / 1024 / 1024).toFixed(1)} MB)`,
+    `\nVerdict: worst-case median ${ms(worst)} ms/move at n=500 vs bar ${ACCEPTANCE_BAR_MS_PER_MOVE} ms -> ` +
+      `${worst <= ACCEPTANCE_BAR_MS_PER_MOVE ? "PASS" : "FAIL"}`,
   );
 }
-
-console.log(`\nRSS after the in-process tiers: ${rssMb()} MB`);
-
-if (wantSockets) {
-  await runSocketTier();
-}
-
-const worst = Math.max(
-  ...[...dispersed, ...clustered].filter((row) => !row.legacy && row.bots === 500).map((row) => row.medianMs),
-);
-console.log(
-  `\nVerdict: worst-case median ${ms(worst)} ms/move at n=500 vs bar ${ACCEPTANCE_BAR_MS_PER_MOVE} ms -> ` +
-    `${worst <= ACCEPTANCE_BAR_MS_PER_MOVE ? "PASS" : "FAIL"}`,
-);
