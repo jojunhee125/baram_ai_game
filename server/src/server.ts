@@ -77,7 +77,11 @@ export function createGameServer(
   });
 
   for (const definition of ROOM_DEFINITIONS) {
-    gameServer.define(definition.name, MetaverseRoom, definition);
+    // The store is injected here rather than authored into `ROOM_DEFINITIONS`, which stays a data
+    // table: this is the one thing a room needs that is a live object. Rooms and
+    // `GET /api/inventory` therefore share one instance, so a drop is visible in the bag the
+    // moment it is credited.
+    gameServer.define(definition.name, MetaverseRoom, { ...definition, inventoryStore });
   }
   return gameServer;
 }

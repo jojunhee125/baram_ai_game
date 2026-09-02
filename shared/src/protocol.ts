@@ -31,6 +31,13 @@ export const ClientMessage = {
   Chat: "chat",
   ReturnHome: "home:return",
   QuizAnswer: "quiz:answer",
+  /**
+   * One swing. No payload, for {@link ClientMessage.ReturnHome}'s reason — the client has nothing
+   * to say. The server picks what the swing lands on from the attacker's own position and facing,
+   * so there is no way to name a monster that is not there and no visibility check to invent.
+   * Rate-limited by ATTACK_COOLDOWN_MS.
+   */
+  Attack: "combat:attack",
 } as const;
 
 export type ClientMessage = (typeof ClientMessage)[keyof typeof ClientMessage];
@@ -67,6 +74,12 @@ export interface ClientMessagePayload {
    * player who gets there anyway is already standing on the tile they asked for.
    */
   [ClientMessage.ReturnHome]: undefined;
+  /**
+   * No payload, and no reply either when the swing hits nothing: an empty swing is the client's
+   * own animation, and unlike a rejected move there is no prediction to correct. A request inside
+   * ATTACK_COOLDOWN_MS is dropped in silence for the same reason.
+   */
+  [ClientMessage.Attack]: undefined;
 }
 
 export const ServerMessage = {
@@ -76,6 +89,9 @@ export const ServerMessage = {
   Teleported: "player:teleported",
   InteractableEntered: "interactable:entered",
   QuizResult: "quiz:result",
+  MonsterHit: "combat:monster-hit",
+  PlayerHit: "combat:player-hit",
+  ItemGranted: "inventory:granted",
 } as const;
 
 export type ServerMessage = (typeof ServerMessage)[keyof typeof ServerMessage];
@@ -221,6 +237,74 @@ export interface QuizResult {
   explanation?: string;
 }
 
+/**
+ * A monster took a hit.
+ *
+ * Unicast to every player within `VIEW_RADIUS_TILES` of the monster — the chat audience loop's
+ * shape and its O(k) cost. The view radius rather than `CHAT_RADIUS_TILES` because a monster you
+ * can see is a monster whose bar you have to be able to watch, and an event about a monster
+ * outside your view is an event about an entity your client has never heard of.
+ *
+ * `Monster` carries no HP, so this is the only path health takes to the client.
+ *
+ * `hpRemaining === 0` is the death notice. There is no separate "defeated" message because it
+ * would always leave in the same tick, to the same audience, as this one — two messages that
+ * always travel together are one message. The client plays the death animation on it and lets the
+ * `state.monsters` deletion clear the sprite.
+ */
+export interface MonsterHit {
+  monsterId: string;
+  /** Who swung, so a client can tell "I killed that" from "somebody killed that". */
+  bySessionId: string;
+  damage: number;
+  hpRemaining: number;
+  /** For scaling the bar. Sent every time, so the client never holds a monster stat table. */
+  hpMax: number;
+}
+
+/**
+ * You were hit. Unicast to the victim and to nobody else: no one sees anybody else's health, the
+ * same judgement that kept monster HP out of the state. Onlookers get the hit animation from the
+ * monster's own attack and no number.
+ *
+ * `hpRemaining === 0` is death. The move back to the room's home tile arrives as the existing
+ * {@link Teleported}, which is already the message for "the server moved you without you
+ * walking", and death costs nothing else — no items, no experience, no waiting.
+ */
+export interface PlayerHit {
+  monsterId: string;
+  damage: number;
+  hpRemaining: number;
+  /** PLAYER_MAX_HP today, and sent anyway for {@link MonsterHit.hpMax}'s reason. */
+  hpMax: number;
+}
+
+/**
+ * A drop was credited to your account.
+ *
+ * Sent only once the store has committed it. A wire that speaks before the store does produces
+ * "I picked it up and it was gone next login", which is the worse of the two failures; the
+ * opposite — stored but never announced — resolves itself the next time the bag is opened, which
+ * is why a failed grant sends nothing at all.
+ *
+ * Skipped entirely when the killer has already left the room. The grant still happens: a bag
+ * belongs to an account rather than to a room.
+ */
+export interface ItemGranted {
+  itemKey: string;
+  /**
+   * Display name, sent rather than looked up, so a client older than the item table still draws
+   * the row it was handed — `GET /api/inventory` hands its rows over on the same terms.
+   */
+  name: string;
+  /** Icon key, travelling with the row for {@link ItemGranted.name}'s reason. */
+  icon: string;
+  /** How many arrived this time. */
+  quantity: number;
+  /** Total held afterwards, so an open bag window updates without a re-read. */
+  total: number;
+}
+
 export interface ServerMessagePayload {
   [ServerMessage.Chat]: ChatBroadcast;
   [ServerMessage.MoveRejected]: MoveRejected;
@@ -228,4 +312,7 @@ export interface ServerMessagePayload {
   [ServerMessage.Teleported]: Teleported;
   [ServerMessage.InteractableEntered]: InteractableEntered;
   [ServerMessage.QuizResult]: QuizResult;
+  [ServerMessage.MonsterHit]: MonsterHit;
+  [ServerMessage.PlayerHit]: PlayerHit;
+  [ServerMessage.ItemGranted]: ItemGranted;
 }

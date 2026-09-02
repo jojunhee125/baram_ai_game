@@ -71,6 +71,14 @@ export class LocalPlayer {
     this.confirmed = tileOf(spawn);
   }
 
+  /**
+   * Where the avatar is pointing right now, prediction included. Read by the swing animation,
+   * which has to point the same way the server's own target selection will.
+   */
+  get facing(): Direction {
+    return this.predicted.facing;
+  }
+
   /** Steps and warps sent or received but not yet reflected in a state patch. */
   private get inFlight(): number {
     return this.pendingPath.length;

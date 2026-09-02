@@ -288,6 +288,23 @@ describe("PostgresInventoryStore — the statements it sends", () => {
     assert.deepEqual(queries, [], "a 23514 would be indistinguishable from a dropped connection");
     assert.equal(getDatabaseStatus(), "disabled", "and would wrongly mark the database degraded");
   });
+
+  it("sends nothing at all for an owner key that is not a uuid, on a grant", async () => {
+    // The shape a killer with no SSO identity produces: `awardLoot` falls back to the session id,
+    // which is never a uuid. A `22P02` here would be exactly as indistinguishable from a dropped
+    // connection as the quantity CHECK's `23514` above.
+    const { pool, queries } = stubPool(() => ({ rows: [{ quantity: 1 }] }));
+    await assert.rejects(() => new PostgresInventoryStore(pool).add("attacker-session-id", "slime-jelly", 1));
+    assert.deepEqual(queries, []);
+    assert.equal(getDatabaseStatus(), "disabled", "and would wrongly mark the database degraded");
+  });
+
+  it("sends nothing at all for an owner key that is not a uuid, on a read", async () => {
+    const { pool, queries } = stubPool(() => ({ rows: [] }));
+    await assert.rejects(() => new PostgresInventoryStore(pool).list("attacker-session-id"));
+    assert.deepEqual(queries, []);
+    assert.equal(getDatabaseStatus(), "disabled", "and would wrongly mark the database degraded");
+  });
 });
 
 describe("PostgresInventoryStore — health reporting", () => {

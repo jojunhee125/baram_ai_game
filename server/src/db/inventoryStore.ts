@@ -55,6 +55,29 @@ function assertGrantableQuantity(quantity: number): void {
 }
 
 /**
+ * The same shape `deriveSsoUserId` already enforces on the way in, checked again here because
+ * that guard has exactly one caller (`GET /api/inventory`) and `awardLoot`'s combat-drop path is
+ * not it: with no SSO identity for the killer, it credits `lastHit.sessionId` instead — deliberately,
+ * so drops still work in local development against {@link InMemoryInventoryStore}, which owns no
+ * column and needs no such check.
+ *
+ * Against Postgres, a session id is never the uuid `owner_key` is declared as, so without this
+ * guard every such kill throws a driver-level `22P02` that {@link PostgresInventoryStore.query}
+ * cannot tell apart from a dropped connection — the exact confusion `deriveSsoUserId`'s own
+ * comment warns about, except reached from a path that never validated the shape first. Left
+ * unguarded, a production room with no SSO for a session (the WS auth PoC this project ships with
+ * is unverified) marks `/api/health` degraded on every kill that session lands, masking a real
+ * outage behind a fake one.
+ */
+function assertUuidOwnerKey(ownerKey: string): void {
+  if (!UUID_PATTERN.test(ownerKey)) {
+    throw new TypeError(`inventory owner key must be a uuid, not "${ownerKey}"`);
+  }
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
  * The store a server booted without `DATABASE_URL` runs on. Its contents live and die with the
  * process, so a restart is indistinguishable from a first visit.
  */
@@ -94,6 +117,7 @@ export class PostgresInventoryStore implements InventoryStore {
   constructor(private readonly pool: Pool) {}
 
   async list(ownerKey: string): Promise<readonly InventoryRow[]> {
+    assertUuidOwnerKey(ownerKey);
     // No ORDER BY: the caller orders against ITEM_DEFINITIONS, and an ordering here would be a
     // second answer to that question that nobody is keeping in step with the first.
     const result = await this.query<{ item_key: string; quantity: number }>(
@@ -105,6 +129,7 @@ export class PostgresInventoryStore implements InventoryStore {
 
   async add(ownerKey: string, itemKey: string, quantity: number): Promise<number | null> {
     assertGrantableQuantity(quantity);
+    assertUuidOwnerKey(ownerKey);
     // `INSERT ... SELECT ... WHERE` rather than the plain `VALUES` of design §3.2: the capacity
     // test rides along in the same statement, so a grant is still one round trip and still
     // atomic. A false WHERE inserts no row, returns no row, and that empty result *is* the full

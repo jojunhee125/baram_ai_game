@@ -1,3 +1,4 @@
+import type { ItemGranted } from "@zep-test/shared";
 import { loadInventory, type InventoryItem } from "../net/inventory";
 import { isTextEntry } from "../input/textEntry";
 
@@ -17,6 +18,28 @@ export const ITEM_ICON_ORDER = [
 
 /** One frame of items.png at 1x. The HUD column is CSS-sized, so this is CSS pixels. */
 const ICON_SIZE_PX = 32;
+
+/**
+ * Paints one column of `items.png` onto `node`, or leaves a visibly empty slot for an icon key
+ * this bundle has no column for — the server can hold a catalogue newer than the browser (the
+ * reason `icon` travels with the row at all), and an empty slot beside a real name beats a blank
+ * line or, worse, some other item's picture.
+ *
+ * Exported so the drop toast draws its icon by the same table and the same fallback. A second
+ * key-to-column mapping is exactly how the two windows would come to disagree.
+ */
+export function applyItemIcon(node: HTMLElement, icon: string): void {
+  const frame = (ITEM_ICON_ORDER as readonly string[]).indexOf(icon);
+  if (frame === -1) {
+    node.className = "bag__icon bag__icon--unknown";
+    return;
+  }
+  node.className = "bag__icon";
+  node.style.backgroundPosition = `-${frame * ICON_SIZE_PX}px 0`;
+}
+
+/** Which of the four mutually exclusive contents the window is currently drawing. */
+type PanelView = "loading" | "items" | "empty" | "error";
 
 /**
  * Open state lives on the module, not the instance, for the same reason the minimap's does: a
@@ -55,6 +78,8 @@ export class InventoryPanel {
    * a room hop built — all three share these nodes.
    */
   private request = 0;
+  /** Which block is on screen, so a live grant knows whether there is a list to patch. */
+  private view: PanelView = "loading";
 
   constructor() {
     this.button.addEventListener("click", this.handleToggleClick);
@@ -74,6 +99,36 @@ export class InventoryPanel {
    */
   get isOpen(): boolean {
     return panelOpen;
+  }
+
+  /**
+   * Folds one drop into an open bag, so a pickup shows up without a second `GET /api/inventory`.
+   * `ItemGranted.total` is the amount held afterwards, which is exactly what a row displays.
+   *
+   * A grant that lands while the window is loading or showing a failure is dropped: the read in
+   * flight will carry it, and the retry button covers the other case. That leaves the bag at most
+   * one pickup behind for the length of one request, which reopening resolves.
+   */
+  applyGrant(event: ItemGranted): void {
+    if (!panelOpen || this.view === "loading" || this.view === "error") {
+      return;
+    }
+    const count = this.findCount(event.itemKey);
+    if (count) {
+      count.textContent = String(event.total);
+      return;
+    }
+    this.list.append(
+      this.buildRow({
+        itemKey: event.itemKey,
+        name: event.name,
+        icon: event.icon,
+        quantity: event.total,
+      }),
+    );
+    this.list.hidden = false;
+    this.status.hidden = true;
+    this.view = "items";
   }
 
   /**
@@ -193,6 +248,7 @@ export class InventoryPanel {
   }
 
   private showLoading(): void {
+    this.view = "loading";
     this.list.replaceChildren();
     this.list.hidden = true;
     this.list.setAttribute("aria-busy", "true");
@@ -206,6 +262,7 @@ export class InventoryPanel {
   private showItems(items: readonly InventoryItem[]): void {
     this.list.setAttribute("aria-busy", "false");
     if (items.length === 0) {
+      this.view = "empty";
       this.list.replaceChildren();
       this.list.hidden = true;
       this.statusIcon.hidden = false;
@@ -216,12 +273,14 @@ export class InventoryPanel {
       this.status.hidden = false;
       return;
     }
+    this.view = "items";
     this.list.replaceChildren(...items.map((item) => this.buildRow(item)));
     this.list.hidden = false;
     this.status.hidden = true;
   }
 
   private showError(): void {
+    this.view = "error";
     this.list.replaceChildren();
     this.list.hidden = true;
     this.list.setAttribute("aria-busy", "false");
@@ -233,21 +292,24 @@ export class InventoryPanel {
     this.status.hidden = false;
   }
 
+  /** Looks the row up by walking the list rather than by selector: `itemKey` is server data. */
+  private findCount(itemKey: string): HTMLElement | null {
+    for (const row of this.list.children) {
+      if (row instanceof HTMLElement && row.dataset.itemKey === itemKey) {
+        return row.querySelector<HTMLElement>(".bag__count");
+      }
+    }
+    return null;
+  }
+
   private buildRow(item: InventoryItem): HTMLLIElement {
     const row = document.createElement("li");
     row.className = "bag__row";
+    // What `applyGrant` finds the row by, so a pickup lands on the item it belongs to.
+    row.dataset.itemKey = item.itemKey;
 
     const icon = document.createElement("span");
-    const frame = (ITEM_ICON_ORDER as readonly string[]).indexOf(item.icon);
-    if (frame === -1) {
-      // An icon key this sheet has no column for. The server can hold a catalogue newer than the
-      // browser (the reason `icon` travels with the row at all), and an empty slot beside a real
-      // name beats a blank line or, worse, some other item's picture.
-      icon.className = "bag__icon bag__icon--unknown";
-    } else {
-      icon.className = "bag__icon";
-      icon.style.backgroundPosition = `-${frame * ICON_SIZE_PX}px 0`;
-    }
+    applyItemIcon(icon, item.icon);
 
     const name = document.createElement("span");
     name.className = "bag__name";

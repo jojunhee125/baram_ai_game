@@ -8,11 +8,14 @@ import {
   type Direction,
   type InteractableEntered,
   type InteractableMarker,
+  type ItemGranted,
   type JoinOptions,
   type Monster,
+  type MonsterHit,
   type MoveRejected,
   type MoveRequest,
   type Player,
+  type PlayerHit,
   type PortalEntered,
   type PortalMarker,
   type QuizAnswerRequest,
@@ -83,6 +86,16 @@ export interface RoomEvents {
    * because the state makes them the same event (design §5.2). Whichever it was, the sprite goes.
    */
   onMonsterRemove?(monsterId: string): void;
+  /**
+   * A monster inside the view radius took a hit. The only path monster health takes to the
+   * client, so a monster nobody has swung at has no health to draw; `hpRemaining === 0` is the
+   * death notice, and the sprite still goes via {@link onMonsterRemove}.
+   */
+  onMonsterHit?(event: MonsterHit): void;
+  /** The local player took a hit. Unicast: nobody else's health ever arrives here. */
+  onPlayerHit?(event: PlayerHit): void;
+  /** A drop was credited to this account, and the store has already committed it. */
+  onItemGranted?(event: ItemGranted): void;
   onChat?(message: ChatBroadcast): void;
   onMoveRejected?(correction: MoveRejected): void;
   /** The local player stepped onto a portal trigger; the consumer owns the room transition. */
@@ -221,6 +234,15 @@ export class RoomConnection {
   }
 
   /**
+   * Swings once. No payload, for {@link sendReturnHome}'s reason: the server picks what the swing
+   * lands on from our own position and facing, so there is no monster to name. A swing that hits
+   * nothing is answered with silence, and so is one inside the server's cooldown.
+   */
+  sendAttack(): void {
+    this.room.send(ClientMessage.Attack);
+  }
+
+  /**
    * Hangs up on purpose, as the last step of a portal hop. `leaving` keeps the resulting
    * `room.onLeave` out of `RoomEvents.onLeave`, whose consumers treat a leave as a lost
    * connection and say so on screen.
@@ -316,6 +338,15 @@ export class RoomConnection {
     });
     this.room.onMessage(ServerMessage.QuizResult, (result: QuizResult) => {
       this.events.onQuizResult?.(result);
+    });
+    this.room.onMessage(ServerMessage.MonsterHit, (event: MonsterHit) => {
+      this.events.onMonsterHit?.(event);
+    });
+    this.room.onMessage(ServerMessage.PlayerHit, (event: PlayerHit) => {
+      this.events.onPlayerHit?.(event);
+    });
+    this.room.onMessage(ServerMessage.ItemGranted, (event: ItemGranted) => {
+      this.events.onItemGranted?.(event);
     });
   }
 

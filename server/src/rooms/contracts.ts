@@ -1,4 +1,5 @@
 import type { Client } from "colyseus";
+import type { InventoryStore } from "../db/inventoryStore";
 // `InteractableKind` is imported as a value, not just as a type: the authored table's
 // discriminant and the wire union's have to be the same string, so both read it from one place.
 import {
@@ -28,6 +29,19 @@ export interface RoomCreateOptions {
   mapKey: string;
   maxClients: number;
   spawn: SpawnArea;
+  /**
+   * Where a kill's drops are filed. The one live dependency among these otherwise static fields,
+   * injected at the `define()` call rather than authored in `ROOM_DEFINITIONS`, so the table stays
+   * data and the same store instance serves both the rooms and `GET /api/inventory` — two stores
+   * would mean drops that the bag window cannot see.
+   *
+   * Optional because the tests, the load-test harness and `npm run dev` all build rooms without
+   * one; a room with no store still fights, it just credits nothing. Not a hole a client can climb
+   * through, despite `onCreate` seeing the join options of whoever created the room: Colyseus
+   * merges the handler's options *over* the client's, so a fabricated `inventoryStore` key is
+   * overwritten by whatever was registered — including by `undefined`.
+   */
+  inventoryStore?: InventoryStore;
 }
 
 /** A registered room type. The `name` is the matchmaking name clients join by. */
@@ -274,15 +288,43 @@ export interface PlayerSession {
    * HOME_COOLDOWN_MS.
    */
   lastHomeAt: number;
+  /**
+   * Server clock of the last accepted attack, a third counter for `lastHomeAt`'s reason: walking
+   * must not buy a swing. See ATTACK_COOLDOWN_MS.
+   */
+  lastAttackAt: number;
+  /**
+   * Health, which is never in `RoomState` — nobody sees anybody else's number, and a field on the
+   * schema would patch every viewer in range on every hit. Full at join and after every room
+   * change, so no message is needed to establish it; it travels only as `PlayerHit`.
+   */
+  hp: number;
+  /**
+   * Server clock of the last hit taken; COMBAT_EXIT_MS is measured from it, and 0 means never hit.
+   * "Taken", not "dealt" — attacking something does not keep you in combat, being attacked does.
+   */
+  lastDamagedAt: number;
+  /**
+   * The account this session's drops are filed under, taken from the SSO token at `onAuth`, and
+   * null everywhere there is no SSO. Null is not a refusal: a grant then goes to the in-memory
+   * store under the session id instead, which is what keeps the whole drop path — including the
+   * `ItemGranted` toast — exercisable in local development.
+   */
+  ownerKey: string | null;
 }
 
 /**
- * `onAuth`'s return value from `ssoNickname` — never `string | null` directly: Colyseus
- * treats a falsy `onAuth` result as authentication failure and rejects the join, so the
- * "no SSO" case (local dev, tests) must still be a truthy object.
+ * `onAuth`'s return value — an object rather than the nullable strings inside it, because
+ * Colyseus treats a falsy `onAuth` result as an authentication failure and rejects the join, so
+ * the "no SSO" case (local dev, tests) still has to answer something truthy.
  */
 export interface AuthResult {
   ssoNickname: string | null;
+  /**
+   * The `sub` claim, which is the key everything persisted is filed under. Read here rather than
+   * later because the access token is only in reach during the handshake.
+   */
+  ssoUserId: string | null;
 }
 
 /** Generic argument for `extends Room<...>` in Colyseus 0.17. */

@@ -75,6 +75,65 @@ export const HOME_COOLDOWN_MS = 2000;
 export const MONSTER_TICK_MS = 200;
 
 /**
+ * Minimum interval between two accepted attacks from one client, mirrored by the client as its
+ * own input gate. HOME_COOLDOWN_MS's arrangement and its reason: the mirror is UX, this is the
+ * guard.
+ *
+ * It needs a budget of its own for chat's reason rather than movement's — one swing fans a
+ * `MonsterHit` unicast out to every viewer within VIEW_RADIUS_TILES of the target, so
+ * `maxMessagesPerSecond` (60) bounds the messages coming in but not the ones going out.
+ */
+export const ATTACK_COOLDOWN_MS = 600;
+
+/**
+ * How far a swing reaches, Chebyshev: the eight tiles around the attacker and the one they stand
+ * on, since monsters do not block movement and sharing a tile is reachable.
+ *
+ * Nothing on the client mirrors this — a swing carries no payload and the server picks what it
+ * lands on. It is shared anyway so that the numbers defining a fight are read in one place.
+ * `MONSTER_ATTACK_RANGE_TILES` is the monster's own reach and stays separate: changing the length
+ * of the player's arm is not a change to every monster's.
+ */
+export const ATTACK_RANGE_TILES = 1;
+
+/**
+ * Damage one hit does. Stats, levels and equipment are all out of scope, so the damage formula
+ * has exactly one input — and a formula with one input is a constant.
+ */
+export const PLAYER_ATTACK_DAMAGE = 4;
+
+/**
+ * Starting and maximum health. Mirrored by the client, and that mirror is the only way it knows
+ * the number before its first `PlayerHit`: health is never in `RoomState`, and joining or
+ * changing rooms always restores it in full, so "full on arrival" needs no message.
+ */
+export const PLAYER_MAX_HP = 30;
+
+/**
+ * Quiet time after the last hit before health starts coming back. Without a recovery of some
+ * kind, the optimal play from the second fight onwards is to die on purpose or to leave and
+ * rejoin — both restore full health for free, and nothing else does.
+ *
+ * Shared because the client mirrors the whole recovery curve. Recovery sends no message (a
+ * per-tick unicast to every hurt player is exactly the traffic this design keeps off the wire),
+ * so the client redraws its own bar from this, COMBAT_RECOVERY_HP_PER_TICK, MONSTER_TICK_MS and
+ * the time of its last `PlayerHit`. The two can only drift apart while nothing is happening, and
+ * the next `PlayerHit` carries the server's number.
+ */
+export const COMBAT_EXIT_MS = 5000;
+
+/**
+ * Health restored per MONSTER_TICK_MS once out of combat — 5 HP/s, so a player left on 1 HP is
+ * whole again six seconds after the recovery starts. Deliberately fast: what it has to beat is
+ * walking out of the door and rejoining, which is free, restores everything at once and takes
+ * about as long.
+ *
+ * Recovery rides the monster tick, so it runs only in a room that has monsters. That is the only
+ * room where health can be lost, and any room change restores it anyway.
+ */
+export const COMBAT_RECOVERY_HP_PER_TICK = 1;
+
+/**
  * Number of selectable avatar variants. Must equal the skin block count baked into
  * `assets/sprites/avatar.png` — the sheet is `row = skin * 4 + direction`, so its height
  * is `AVATAR_SKIN_COUNT * 4 * TILE_SIZE_PX`. Raising this without regenerating the sheet

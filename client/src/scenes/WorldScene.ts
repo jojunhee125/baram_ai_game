@@ -1,6 +1,13 @@
 import Phaser from "phaser";
-import { TILE_SIZE_PX, type ChatBroadcast, type JoinOptions } from "@zep-test/shared";
+import {
+  TILE_SIZE_PX,
+  type ChatBroadcast,
+  type JoinOptions,
+  type MonsterHit,
+  type PlayerHit,
+} from "@zep-test/shared";
 import { hideBootStatus, showBootError } from "../bootStatus";
+import { AttackKey } from "../input/attackKey";
 import { MovementKeys } from "../input/movementKeys";
 import { resolveJoinOptions } from "../net/identity";
 import { RoomConnection, type PlayerSnapshot } from "../net/roomConnection";
@@ -9,12 +16,16 @@ import { fadeFromBlack, fadeToBlack, showTransitionNotice } from "../transitionO
 import { ChatPanel } from "../ui/chatPanel";
 import { HomeButton } from "../ui/homeButton";
 import { InventoryPanel } from "../ui/inventoryPanel";
+import { ItemToasts } from "../ui/itemToasts";
 import { Minimap, type MinimapView } from "../ui/minimap";
 import { buildMinimapTerrain } from "../ui/minimapTerrain";
 import { ObjectPanel } from "../ui/objectPanel";
+import { PlayerVitals } from "../ui/playerVitals";
 import { ChatBubbles } from "../world/chatBubbles";
+import { CombatEffects } from "../world/combatEffects";
 import { drawInteractableMarkers } from "../world/interactableMarkers";
 import { LocalPlayer } from "../world/localPlayer";
+import { MonsterHealthBars } from "../world/monsterHealthBars";
 import {
   MONSTER_TEXTURE,
   MonsterSprites,
@@ -72,6 +83,8 @@ export class WorldScene extends Phaser.Scene {
 
   private players!: PlayerSprites;
   private monsters!: MonsterSprites;
+  private monsterHealth!: MonsterHealthBars;
+  private effects!: CombatEffects;
   private bubbles!: ChatBubbles;
   private nameTags!: NameTags;
   private connection!: RoomConnection;
@@ -82,8 +95,11 @@ export class WorldScene extends Phaser.Scene {
   private minimap: Minimap | null = null;
   private objectPanel: ObjectPanel | null = null;
   private inventoryPanel: InventoryPanel | null = null;
+  private vitals: PlayerVitals | null = null;
+  private toasts: ItemToasts | null = null;
   private localPlayer: LocalPlayer | null = null;
   private movementKeys: MovementKeys | null = null;
+  private attackKey: AttackKey | null = null;
   private lastStepAt = Number.NEGATIVE_INFINITY;
   private transitioning = false;
 
@@ -104,8 +120,11 @@ export class WorldScene extends Phaser.Scene {
     this.minimap = null;
     this.objectPanel = null;
     this.inventoryPanel = null;
+    this.vitals = null;
+    this.toasts = null;
     this.localPlayer = null;
     this.movementKeys = null;
+    this.attackKey = null;
     this.lastStepAt = Number.NEGATIVE_INFINITY;
     this.transitioning = false;
   }
@@ -142,6 +161,8 @@ export class WorldScene extends Phaser.Scene {
       registerMonsterAnimations(this);
       this.players = new PlayerSprites(this);
       this.monsters = new MonsterSprites(this);
+      this.monsterHealth = new MonsterHealthBars(this);
+      this.effects = new CombatEffects(this);
       this.bubbles = new ChatBubbles(this);
       this.nameTags = new NameTags(this);
     } catch (error) {
@@ -154,6 +175,11 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
 
+    // Built before attach(), unlike the other panels: attach() replays the monsters already in
+    // view, and that replay is what reveals this panel. Built after it, a player who joins within
+    // sight of a monster would have no health bar until the next one wandered in.
+    this.vitals = new PlayerVitals();
+
     this.connection.attach({
       onPlayerAdd: (sessionId, snapshot) => this.addPlayer(sessionId, snapshot),
       onPlayerChange: (sessionId, snapshot) => this.changePlayer(sessionId, snapshot),
@@ -162,9 +188,26 @@ export class WorldScene extends Phaser.Scene {
         this.nameTags.remove(sessionId);
         this.players.remove(sessionId);
       },
-      onMonsterAdd: (monsterId, snapshot) => this.monsters.add(monsterId, snapshot),
+      onMonsterAdd: (monsterId, snapshot) => {
+        this.monsters.add(monsterId, snapshot);
+        // A respawn reuses the id, and whatever stands there now has not been hit yet.
+        this.monsterHealth.remove(monsterId);
+        // A room that shows monsters is a room where health means something.
+        this.vitals?.reveal();
+      },
       onMonsterChange: (monsterId, snapshot) => this.monsters.update(monsterId, snapshot),
-      onMonsterRemove: (monsterId) => this.monsters.remove(monsterId),
+      onMonsterRemove: (monsterId) => {
+        this.monsters.remove(monsterId);
+        this.monsterHealth.remove(monsterId);
+      },
+      onMonsterHit: (event) => this.showMonsterHit(event),
+      onPlayerHit: (event) => this.showPlayerHit(event),
+      onItemGranted: (event) => {
+        this.toasts?.show(event);
+        // The bag is the one window that stays open in a fight, so a pickup lands in it live
+        // rather than waiting for the next read.
+        this.inventoryPanel?.applyGrant(event);
+      },
       onMoveRejected: (correction) => this.localPlayer?.applyRejection(correction),
       onTeleported: (destination) => this.localPlayer?.applyTeleport(destination),
       onChat: (message) => this.showChat(message),
@@ -199,6 +242,8 @@ export class WorldScene extends Phaser.Scene {
       connection.sendQuizAnswer(objectId, choiceIndex),
     );
     this.inventoryPanel = new InventoryPanel();
+    this.toasts = new ItemToasts();
+    this.attackKey = new AttackKey(() => this.swing());
     this.buildMinimap();
     // attach() replays the players already in view, so addPlayer() normally does this first.
     this.initLocalPlayer();
@@ -215,6 +260,9 @@ export class WorldScene extends Phaser.Scene {
   override update(time: number): void {
     this.bubbles.update(time);
     this.nameTags.update();
+    this.monsterHealth.update();
+    // Out-of-combat recovery is drawn, never messaged (design §6.3), so it ticks here.
+    this.vitals?.update();
     // Renderers, not input: these belong above the transition gate with the other two.
     this.minimap?.update(this.observeMinimap());
 
@@ -257,6 +305,80 @@ export class WorldScene extends Phaser.Scene {
       console.error(`${arrival.kind} transition failed`, error);
       void this.abandonTransition(arrivalFailureNotice(arrival));
     });
+  }
+
+  /**
+   * One swing, if the world is in a state to take one. Returns whether it was taken, which is
+   * what starts the input's cooldown mirror.
+   *
+   * Gated on the same two things {@link returnHome} is, plus the bag. The bag deliberately never
+   * blocks movement — being pinned in place while something chews on you is exactly what that
+   * decision avoids (`docs/design-hunting-inventory.md` §3.4) — but it does swallow this, because
+   * a keystroke aimed at a bag row must not also hit whatever is standing next to you.
+   */
+  private swing(): boolean {
+    if (this.transitioning || !this.localPlayer) {
+      return false;
+    }
+    if (this.objectPanel?.isOpen === true || this.inventoryPanel?.isOpen === true) {
+      return false;
+    }
+    this.connection.sendAttack();
+    this.vitals?.beginAttackCooldown();
+    // An empty swing gets no reply from the server (design §6.1), so this arc is the only proof
+    // the key registered. Drawn on the predicted facing, which is what the server will read too.
+    const sprite = this.players.get(this.connection.sessionId);
+    if (sprite) {
+      this.effects.swing(sprite, this.localPlayer.facing);
+    }
+    return true;
+  }
+
+  /**
+   * A monster in view took a hit. Its bar appears here rather than on its arrival because this
+   * message is the only thing that ever carries a monster's health (design §5.2), so a monster
+   * nobody has swung at genuinely has no number to draw.
+   */
+  private showMonsterHit(event: MonsterHit): void {
+    const sprite = this.monsters.get(event.monsterId);
+    if (!sprite) {
+      // The state deletion beat the message through. Nothing left on screen to draw this on.
+      return;
+    }
+    this.effects.flash(sprite);
+    this.effects.damage(
+      sprite,
+      event.damage,
+      event.bySessionId === this.connection.sessionId ? "dealt" : "dealt-by-other",
+    );
+    if (event.hpRemaining > 0) {
+      this.monsterHealth.applyHit(event.monsterId, sprite, event.hpRemaining, event.hpMax);
+      return;
+    }
+    // `hpRemaining === 0` is the death notice. Removing the sprite is not this handler's job:
+    // the `state.monsters` deletion already does it, which is why the puff is a detached object.
+    this.monsterHealth.remove(event.monsterId);
+    this.effects.death(sprite);
+  }
+
+  /**
+   * We took a hit. Unicast to the victim, so this is the only player health that exists on this
+   * client — an onlooker sees the flash and no number.
+   *
+   * Death costs nothing but the walk home, and that walk arrives as the ordinary `Teleported`
+   * this scene already handles, so there is nothing to move here.
+   */
+  private showPlayerHit(event: PlayerHit): void {
+    this.vitals?.applyHit(event);
+    const sprite = this.players.get(this.connection.sessionId);
+    if (!sprite) {
+      return;
+    }
+    this.effects.flash(sprite);
+    this.effects.damage(sprite, event.damage, "taken");
+    if (event.hpRemaining <= 0) {
+      this.effects.death(sprite);
+    }
   }
 
   /**
@@ -316,10 +438,13 @@ export class WorldScene extends Phaser.Scene {
     // Every one of these holds window/document listeners, which the scene restart does not touch.
     this.chat?.destroy();
     this.movementKeys?.destroy();
+    this.attackKey?.destroy();
     this.homeButton?.destroy();
     this.minimap?.destroy();
     this.objectPanel?.destroy();
     this.inventoryPanel?.destroy();
+    this.vitals?.destroy();
+    this.toasts?.destroy();
     this.scene.start(WorldScene.KEY, { connection: next } satisfies WorldSceneData);
   }
 

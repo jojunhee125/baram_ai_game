@@ -1,8 +1,12 @@
 import { StateView } from "@colyseus/schema";
 import { Room, type AuthContext } from "colyseus";
 import {
+  ATTACK_COOLDOWN_MS,
+  ATTACK_RANGE_TILES,
   AVATAR_SKIN_COUNT,
   CHAT_RADIUS_TILES,
+  COMBAT_EXIT_MS,
+  COMBAT_RECOVERY_HP_PER_TICK,
   ClientMessage,
   Direction,
   HOME_COOLDOWN_MS,
@@ -15,6 +19,8 @@ import {
   MONSTER_TICK_MS,
   Monster,
   PATCH_RATE_MS,
+  PLAYER_ATTACK_DAMAGE,
+  PLAYER_MAX_HP,
   Player,
   PortalMarker,
   RoomState,
@@ -23,16 +29,21 @@ import {
   type ChatBroadcast,
   type ChatRequest,
   type InteractableEntered,
+  type ItemGranted,
   type JoinOptions,
+  type MonsterHit,
   type MoveRejected,
   type MoveRequest,
+  type PlayerHit,
   type PortalEntered,
   type QuizAnswerRequest,
   type QuizResult,
   type Teleported,
   type TilePosition,
 } from "@zep-test/shared";
+import type { InventoryStore } from "../db/inventoryStore";
 import { TableInteractableIndex } from "../game/interactables";
+import { rollLoot, type LootGrant } from "../game/loot";
 import {
   decideMonsterAction,
   MonsterActionKind,
@@ -40,7 +51,7 @@ import {
   type MonsterSnapshot,
   type MonsterTarget,
 } from "../game/monsterAi";
-import { isDirection, TileMovementResolver } from "../game/movement";
+import { isDirection, STEP_BY_DIRECTION, TileMovementResolver } from "../game/movement";
 import { TablePortalIndex } from "../game/portals";
 import { chebyshevDistance, UniformGridProximityIndex } from "../game/proximity";
 import { TiledMapLoader } from "../game/tiledMap";
@@ -56,6 +67,7 @@ import type {
   SpawnArea,
 } from "./contracts";
 import { INTERACTABLE_DEFINITIONS } from "./interactableDefinitions";
+import { ITEM_DEFINITIONS } from "./itemDefinitions";
 import {
   MONSTER_SPAWN_DEFINITIONS,
   MONSTER_TYPES,
@@ -64,7 +76,7 @@ import {
   type MonsterType,
 } from "./monsterDefinitions";
 import { PORTAL_DEFINITIONS } from "./portalDefinitions";
-import { deriveSsoNickname } from "./ssoIdentity";
+import { deriveSsoNickname, deriveSsoUserId } from "./ssoIdentity";
 
 type RoomClient = MetaverseRoomOptions["client"];
 
@@ -104,6 +116,30 @@ interface MonsterRuntime {
   nextAttackAt: number;
   /** Only meaningful in the dead state. */
   respawnAt: number;
+  /** Full at every spawn. Off the schema for the reason the whole of this interface is. */
+  hp: number;
+  /** Null until somebody hits it, and null again on respawn. */
+  lastHitBy: LastHit | null;
+}
+
+/**
+ * Who last hit a monster, which is who its drops belong to. Holding the session *and* the account
+ * is the whole of the rule: the account is what the grant is filed under, so it still lands after
+ * the killer has walked out of the room, and the session is only the address the notification
+ * would go to if they are still here.
+ *
+ * The rejected alternatives were destroying the drop when the killer leaves — there is nothing to
+ * destroy, a bag belongs to an account and the grant is one statement — and passing it to the
+ * next contributor, which would mean a damage ledger per monster and rules for clearing it.
+ */
+interface LastHit {
+  /** Where an `ItemGranted` would go. Nothing is sent if that session has since left. */
+  sessionId: string;
+  /**
+   * The account credited. Null outside SSO, where the session id stands in for it against the
+   * in-memory store — see `PlayerSession.ownerKey`.
+   */
+  ownerKey: string | null;
 }
 
 export class MetaverseRoom extends Room<MetaverseRoomOptions> {
@@ -150,9 +186,19 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   private readonly monsterQueryBuffer: string[] = [];
   private readonly monsterNeighbourBuffer: string[] = [];
   private readonly monsterAggroBuffer: string[] = [];
+  /** "Monsters within reach of this swing" — {@link pickAttackTarget}'s query and nothing else. */
+  private readonly attackTargetBuffer: string[] = [];
+  /** "Players who can see this monster" — the `MonsterHit` fan-out's query and nothing else. */
+  private readonly hitAudienceBuffer: string[] = [];
   private readonly monstersInRange = new Set<string>();
   /** Rebuilt per monster per tick; the array itself is reused, the entries are not worth pooling. */
   private readonly monsterTargets: MonsterTarget[] = [];
+  /**
+   * Where drops are filed, handed over at `define()` time. Null in every room built without one —
+   * the tests, the load-test harness, `npm run dev` — where a kill still resolves and simply
+   * credits nothing.
+   */
+  private inventoryStore: InventoryStore | null = null;
   private collisionMap!: CollisionMap;
   private proximityIndex!: ProximityIndex;
   private portalIndex!: PortalIndex;
@@ -174,6 +220,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.maxClients = options.maxClients;
     this.spawn = options.spawn;
     this.home = { tileX: options.spawn.tileX, tileY: options.spawn.tileY, spreadRadiusInTiles: 0 };
+    this.inventoryStore = options.inventoryStore ?? null;
     this.setPatchRate(PATCH_RATE_MS);
     this.maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
 
@@ -205,6 +252,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     });
     this.onMessage(ClientMessage.QuizAnswer, (client: RoomClient, message: QuizAnswerRequest) => {
       this.handleQuizAnswer(client, message);
+    });
+    this.onMessage(ClientMessage.Attack, (client: RoomClient) => {
+      this.handleAttack(client);
     });
 
     // Last, and only where there is something to simulate. A room with no monsters stays purely
@@ -281,11 +331,31 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   }
 
   /**
-   * Always returns a truthy object — see {@link AuthResult}. `ssoNickname` is null outside
-   * SSO (local dev, tests), and `onJoin` then falls back to `options.nickname`.
+   * The room's one source of randomness, an overridable seam of the same family as
+   * {@link createProximityIndex} and its siblings: a test subclass drops in a seeded generator and
+   * gets exact, replayable draws.
+   *
+   * A seam rather than direct calls to `Math.random`, which is what spawn sampling used to do and
+   * what its tests had to swap the global out to control — that interferes with anything else
+   * running in the same process, and it leaves "the randomness belonging to this room" written
+   * nowhere in the code.
+   */
+  protected random(): number {
+    return Math.random();
+  }
+
+  /**
+   * Always returns a truthy object — see {@link AuthResult}. Both fields are null outside SSO
+   * (local dev, tests): `onJoin` then falls back to `options.nickname`, and drops are credited
+   * against the session id instead of an account.
    */
   onAuth(_client: RoomClient, _options: JoinOptions | undefined, context: AuthContext): AuthResult {
-    return { ssoNickname: deriveSsoNickname(context.headers) };
+    return {
+      ssoNickname: deriveSsoNickname(context.headers),
+      // Read here rather than inside `deriveSsoUserId`, which takes the token itself because its
+      // other caller is an express route holding a different kind of header container.
+      ssoUserId: deriveSsoUserId(context.headers.get("x-auth-request-access-token")),
+    };
   }
 
   onJoin(client: RoomClient, options?: JoinOptions): void {
@@ -316,7 +386,19 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       }),
     );
     this.proximityIndex.insert(client.sessionId, spawnTile);
-    client.userData = { nickname, lastMoveAt: 0, lastChatAt: 0, lastHomeAt: 0 };
+    client.userData = {
+      nickname,
+      lastMoveAt: 0,
+      lastChatAt: 0,
+      lastHomeAt: 0,
+      lastAttackAt: 0,
+      // Full health on every arrival, including one through a portal: there is no way to heal an
+      // injury that outlived the room it happened in, so carrying one across would be a state
+      // nothing could undo.
+      hp: PLAYER_MAX_HP,
+      lastDamagedAt: 0,
+      ownerKey: client.auth?.ssoUserId ?? null,
+    };
     client.view = new StateView();
     this.viewedBySession.set(client.sessionId, new Set());
     this.clientsBySession.set(client.sessionId, client);
@@ -480,6 +562,19 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     }
     session.lastHomeAt = now;
 
+    this.warpHome(client, player);
+  }
+
+  /**
+   * Puts one player on the room's home tile and tells them so.
+   *
+   * Shared by the return-home request and by death, which is the same movement reached from a
+   * different place ({@link damagePlayer}). One copy rather than two on purpose: the ordering
+   * below is load-bearing and invisible, so a second copy of it is a second chance to get it
+   * wrong somewhere nobody is looking. The cooldown is the caller's business, not this one's —
+   * death does not consult it.
+   */
+  private warpHome(client: RoomClient, player: Player): void {
     const destination = this.pickSpawnTile(this.home);
     const from = { tileX: player.tileX, tileY: player.tileY };
     player.tileX = destination.tileX;
@@ -552,6 +647,178 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   }
 
   /**
+   * One swing. The client names no target: the server picks what the blow lands on from the
+   * attacker's own position and facing, so a monster that is not there cannot be named.
+   *
+   * A swing that reaches nothing is answered with silence — there is no predicted position to
+   * correct, unlike a refused move, and the client's animation is its own business.
+   */
+  private handleAttack(client: RoomClient): void {
+    const session = client.userData;
+    const player = this.state.players.get(client.sessionId);
+    if (!session || !player) {
+      return;
+    }
+    // A room with no monsters never built a monster index, so there is nothing here to swing at
+    // and nothing to rate-limit either: the whole handler is one branch on grand-plaza.
+    if (!this.hasMonsters) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - session.lastAttackAt < ATTACK_COOLDOWN_MS) {
+      // Dropped in silence, as a return-home inside its cooldown is, and for the same reason: the
+      // client mirrors this window as its own input gate, so anything arriving inside it is a
+      // duplicate rather than a misprediction to correct.
+      return;
+    }
+    // Stamped before the target search, so a miss costs the cooldown too. Otherwise a client
+    // swinging at thin air would buy `maxMessagesPerSecond` proximity queries a second.
+    session.lastAttackAt = now;
+
+    const monsterId = this.pickAttackTarget(player);
+    if (monsterId === null) {
+      return;
+    }
+    const runtime = this.monsterRuntimes.get(monsterId);
+    const monster = this.state.monsters.get(monsterId);
+    if (!runtime || !monster) {
+      return;
+    }
+
+    runtime.hp -= PLAYER_ATTACK_DAMAGE;
+    // Overwritten on every hit, not only the killing one: the last person to connect is who the
+    // drops belong to, and holding the account as well as the session is what makes the grant
+    // survive them walking out of the room before it lands.
+    const lastHit: LastHit = { sessionId: client.sessionId, ownerKey: session.ownerKey };
+    runtime.lastHitBy = lastHit;
+
+    const hpRemaining = Math.max(0, runtime.hp);
+    const hit: MonsterHit = {
+      monsterId,
+      bySessionId: client.sessionId,
+      damage: PLAYER_ATTACK_DAMAGE,
+      hpRemaining,
+      hpMax: runtime.type.maxHp,
+    };
+    // Anchored on the monster and measured with VIEW_RADIUS_TILES, not CHAT_RADIUS_TILES: a bar
+    // has to be watchable for as long as the monster is on screen, and a hit on a monster outside
+    // the viewer's radius is an event about an entity their client has never been told exists.
+    // Sent before the kill below, so the audience is read while the monster is still on the map.
+    for (const sessionId of this.proximityIndex.within(monster, VIEW_RADIUS_TILES, this.hitAudienceBuffer)) {
+      this.clientsBySession.get(sessionId)?.send(ServerMessage.MonsterHit, hit);
+    }
+
+    if (hpRemaining > 0) {
+      return;
+    }
+    this.killMonster(monsterId, now);
+    const grants = rollLoot(runtime.type.loot, () => this.random());
+    // Deliberately not awaited, here or anywhere the tick can reach: a database round trip that
+    // holds this handler holds the whole room, and the wire has already said everything it can
+    // say truthfully — `ItemGranted` is the one message that has to wait for the store.
+    void this.awardLoot(lastHit, grants);
+  }
+
+  /**
+   * What a swing lands on: the living monster within ATTACK_RANGE_TILES that the attacker is
+   * facing, else the nearest one, ties broken by monster id. Null when the swing reaches nothing.
+   *
+   * The tie-break is not cosmetic — two monsters sharing a tile is reachable (they do not block
+   * each other any more than they block players), and an order that came out of a hash map would
+   * make the same fight play out differently on two runs and untestably on either.
+   */
+  private pickAttackTarget(player: Player): string | null {
+    const step = STEP_BY_DIRECTION[player.facing as Direction];
+    const facedX = player.tileX + step.dx;
+    const facedY = player.tileY + step.dy;
+
+    let bestId: string | null = null;
+    let bestFaced = false;
+    let bestDistance = 0;
+    for (const monsterId of this.monsterIndex.within(player, ATTACK_RANGE_TILES, this.attackTargetBuffer)) {
+      // The index holds only the living — `killMonster` removes the entry — so this lookup is
+      // really about reading the position; a miss would mean the two had drifted apart.
+      const monster = this.state.monsters.get(monsterId);
+      if (monster === undefined) {
+        continue;
+      }
+      const faced = monster.tileX === facedX && monster.tileY === facedY;
+      const distance = chebyshevDistance(player, monster);
+      // The three rules in the order they are written: the faced tile wins, then the shorter
+      // reach, then the lower id.
+      const better =
+        bestId === null ||
+        (faced !== bestFaced
+          ? faced
+          : distance !== bestDistance
+            ? distance < bestDistance
+            : monsterId < bestId);
+      if (better) {
+        bestId = monsterId;
+        bestFaced = faced;
+        bestDistance = distance;
+      }
+    }
+    return bestId;
+  }
+
+  /**
+   * Files one kill's drops and, only once the store has committed them, tells the killer.
+   *
+   * Async and never awaited by its caller, which is the whole shape of it: the grant belongs to an
+   * account rather than to a session, so it stays correct if the killer leaves in the middle of
+   * it, and the room must not stop simulating while a database answers.
+   */
+  private async awardLoot(lastHit: LastHit, grants: readonly LootGrant[]): Promise<void> {
+    const store = this.inventoryStore;
+    if (store === null || grants.length === 0) {
+      return;
+    }
+    // No SSO means no account to file under, so the session id stands in against the in-memory
+    // store — which is what keeps this whole path exercised in local development.
+    const ownerKey = lastHit.ownerKey ?? lastHit.sessionId;
+
+    for (const grant of grants) {
+      let total: number | null;
+      try {
+        total = await store.add(ownerKey, grant.itemKey, grant.quantity);
+      } catch (cause) {
+        // Nothing is sent. "You picked it up" followed by an empty bag next login is the worse of
+        // the two failures; the opposite — stored but unannounced — resolves itself on the next
+        // bag open. The remaining grants are still attempted: they are independent rows.
+        console.warn(
+          `[zep-test] could not credit ${grant.quantity}x ${grant.itemKey} to ${ownerKey}`,
+          cause,
+        );
+        continue;
+      }
+      if (total === null) {
+        // A full bag is a result rather than a fault (InventoryStore.add). Nothing was stored, so
+        // by the rule above nothing is announced.
+        continue;
+      }
+      const definition = ITEM_DEFINITIONS.find((item) => item.key === grant.itemKey);
+      if (definition === undefined) {
+        // Boot validation refuses a loot row naming a key that is not in the catalogue, so this
+        // is unreachable in production and is a lost toast rather than a lost item if it is not.
+        continue;
+      }
+      // Resolved now rather than before the await: the killer may have left the room, or walked
+      // through a door into another one, while the store was answering.
+      this.clientsBySession.get(lastHit.sessionId)?.send(ServerMessage.ItemGranted, {
+        itemKey: definition.key,
+        // Sent rather than looked up, so a client older than the catalogue still draws the row it
+        // was handed — `GET /api/inventory` hands its rows over on the same terms.
+        name: definition.name,
+        icon: definition.icon,
+        quantity: grant.quantity,
+        total,
+      } satisfies ItemGranted);
+    }
+  }
+
+  /**
    * A walkable tile within `area.spreadRadiusInTiles` of `area`'s centre. Spreading matters
    * beyond looks: with everyone stacked on one tile every client sits inside every other
    * client's view radius, so interest management filters nothing and a load test measures the
@@ -572,8 +839,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     const span = radius * 2 + 1;
     for (let attempt = 0; attempt < SPAWN_SAMPLE_ATTEMPTS; attempt++) {
       // Draws outside the map need no separate guard: isWalkable() already reports them blocked.
-      const tileX = area.tileX - radius + Math.floor(Math.random() * span);
-      const tileY = area.tileY - radius + Math.floor(Math.random() * span);
+      const tileX = area.tileX - radius + Math.floor(this.random() * span);
+      const tileY = area.tileY - radius + Math.floor(this.random() * span);
       if (this.collisionMap.isWalkable(tileX, tileY)) {
         return { tileX, tileY };
       }
@@ -730,6 +997,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         nextStepAt: 0,
         nextAttackAt: 0,
         respawnAt: 0,
+        hp: type.maxHp,
+        lastHitBy: null,
       };
       this.monsterRuntimes.set(definition.id, runtime);
       this.spawnMonster(definition.id, runtime);
@@ -754,6 +1023,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.monsterIndex.insert(monsterId, at);
     this.refreshMonsterViewAround(monsterId, null, at);
     runtime.state = MonsterAiState.Idle;
+    // A respawn is a new monster: it arrives whole, and it owes its drops to nobody.
+    runtime.hp = runtime.type.maxHp;
+    runtime.lastHitBy = null;
   }
 
   /**
@@ -838,8 +1110,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
           if (monster !== undefined && action.facing !== null) {
             monster.facing = action.facing;
           }
-          // Nothing else happens here yet. Damage, the hit fan-out and the player's own health
-          // are Pass E's; this pass computes the transition into `attack` and stops there.
+          if (action.targetSessionId !== null) {
+            this.damagePlayer(action.targetSessionId, monsterId, runtime.type.damage, now);
+          }
           break;
         case MonsterActionKind.Respawn:
           this.spawnMonster(monsterId, runtime);
@@ -847,6 +1120,69 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         case MonsterActionKind.Hold:
           break;
       }
+    }
+
+    // After the monsters, so that a player hit this tick cannot also be healed by it.
+    this.recoverOutOfCombat(now);
+  }
+
+  /**
+   * One monster's blow landing on one player.
+   *
+   * The number goes to the victim and to nobody else — the discipline that kept monster health
+   * out of `RoomState`, applied to the other side: onlookers get the monster's attack animation
+   * and no figure. Death costs nothing but the walk back: no items, no experience, no wait.
+   */
+  private damagePlayer(sessionId: string, monsterId: string, damage: number, now: number): void {
+    const client = this.clientsBySession.get(sessionId);
+    const session = client?.userData;
+    const player = this.state.players.get(sessionId);
+    if (!client || !session || !player) {
+      return;
+    }
+
+    session.hp -= damage;
+    // "Taken", not "dealt": swinging at something does not keep you in combat, being swung at
+    // does. This is what COMBAT_EXIT_MS is measured from.
+    session.lastDamagedAt = now;
+    const hpRemaining = Math.max(0, session.hp);
+    client.send(ServerMessage.PlayerHit, {
+      monsterId,
+      damage,
+      hpRemaining,
+      hpMax: PLAYER_MAX_HP,
+    } satisfies PlayerHit);
+
+    if (hpRemaining > 0) {
+      return;
+    }
+    session.hp = PLAYER_MAX_HP;
+    // The existing message for "the server moved you without you walking", rather than a death
+    // message of its own: the home warp already proved that path, and the client reads
+    // `hpRemaining === 0` on the hit above as the death itself.
+    this.warpHome(client, player);
+  }
+
+  /**
+   * Gives health back to everyone who has been left alone for COMBAT_EXIT_MS.
+   *
+   * Sends nothing at all. The client redraws the same curve from COMBAT_EXIT_MS,
+   * COMBAT_RECOVERY_HP_PER_TICK and the time of its own last `PlayerHit`, so a per-tick unicast
+   * to every hurt player would be exactly the traffic this design keeps off the wire — and the
+   * next `PlayerHit` carries the server's number anyway, which bounds how far the two can drift.
+   *
+   * Rides the monster tick, so it runs only in a room that has monsters. That is the only room
+   * health can be lost in, and any room change restores it in full regardless.
+   */
+  private recoverOutOfCombat(now: number): void {
+    for (const client of this.clientsBySession.values()) {
+      const session = client.userData;
+      // `lastDamagedAt` is 0 for a player who has never been hit, and this guard is what stops
+      // that from reading as "out of combat since the epoch" on somebody already at full health.
+      if (!session || session.hp >= PLAYER_MAX_HP || now - session.lastDamagedAt < COMBAT_EXIT_MS) {
+        continue;
+      }
+      session.hp = Math.min(PLAYER_MAX_HP, session.hp + COMBAT_RECOVERY_HP_PER_TICK);
     }
   }
 

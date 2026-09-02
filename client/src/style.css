@@ -322,6 +322,196 @@ body {
 }
 
 /*
+ * Vitals, top-left. Over the canvas, so the same fixed dark treatment .chat and .hud use rather
+ * than the page's scheme. Click-through: it is a readout, and nothing in it is pressable.
+ */
+.vitals {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-3);
+  width: 148px;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(20, 19, 26, 0.72);
+  color: #eceaf4;
+  pointer-events: none;
+}
+
+.vitals__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-1);
+}
+
+.vitals__label {
+  color: rgba(236, 234, 244, 0.62);
+  font-size: 11px;
+  font-weight: 600;
+  /* Positive tracking, because this is a small label rather than running text. */
+  letter-spacing: 0.06em;
+}
+
+/* Tabular figures: this number changes on every hit and must not reflow the row as it does. */
+.vitals__count {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.vitals__track {
+  overflow: hidden;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(236, 234, 244, 0.14);
+}
+
+/* scaleX, never width: the bar moves on every hit, and a transform is the cheap half of that. */
+.vitals__fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+  background: #8ec97f;
+  transform-origin: left center;
+  transform: scaleX(1);
+  transition: transform 160ms ease, background-color 160ms ease;
+}
+
+/* State colours, not the interface accent: how close to dead you are is all this panel says. */
+.vitals[data-level="low"] .vitals__fill {
+  background: #e0c26f;
+}
+
+.vitals[data-level="critical"] .vitals__fill {
+  background: var(--danger);
+}
+
+.vitals__hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+  color: rgba(236, 234, 244, 0.62);
+  font-size: 11px;
+  transition: opacity 120ms ease;
+}
+
+/* Dimmed while the swing recharges, so the row still reads as "not yet" without the bar below. */
+.vitals[data-attack="cooling"] .vitals__hint {
+  opacity: 0.5;
+}
+
+.vitals__key {
+  padding: 1px 5px;
+  border: 1px solid rgba(236, 234, 244, 0.24);
+  border-radius: 4px;
+  background: rgba(236, 234, 244, 0.08);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.vitals__cooldown {
+  display: block;
+  overflow: hidden;
+  height: 2px;
+  margin-top: var(--space-1);
+  border-radius: 1px;
+  background: rgba(236, 234, 244, 0.12);
+}
+
+/*
+ * The refill. Its duration is written from ATTACK_COOLDOWN_MS by playerVitals.ts rather than
+ * repeated here, so the mirror can never drift from the constant the server enforces.
+ */
+.vitals__cooldown-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: rgba(236, 234, 244, 0.45);
+  transform-origin: left center;
+  transform: scaleX(1);
+  transition-property: transform;
+  transition-timing-function: linear;
+}
+
+/*
+ * Drop notices, bottom-right: the corner the chat log and the HUD column both leave alone. The
+ * newest sits closest to the corner and older ones ride up above it. Click-through like .chat's
+ * wrapper — a toast that swallowed a click meant for the world would be worse than one you
+ * cannot dismiss.
+ */
+.toasts {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: min(60%, 240px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3) var(--space-1) var(--space-2);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(20, 19, 26, 0.88);
+  color: #eceaf4;
+  /* One short rise, so a pickup is noticed in peripheral vision without pulling the eye off. */
+  animation: toast-in 160ms ease-out;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* Opacity only on the way out, so a leaving toast never shifts the ones stacked above it. */
+.toast[data-state="leaving"] {
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.toast__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.toast__name {
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.toast__total {
+  color: rgba(236, 234, 244, 0.55);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.toast__gain {
+  margin-left: auto;
+  color: #8ec97f;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
  * Top-right cluster: the controls row, with the minimap unfolding beneath it. Its width is 240
  * of the 1024px backing canvas, and the minimap panel takes a percentage of that, so the whole
  * cluster scales with the stage exactly as Phaser's Scale.FIT scales the world.
@@ -972,7 +1162,19 @@ body {
   .object__open,
   .picker__cell,
   .picker__start,
-  .transition {
+  .toast[data-state="leaving"],
+  .transition,
+  .vitals__fill,
+  .vitals__hint {
     transition: none;
+  }
+
+  /*
+   * The toast still appears and still leaves; only the rise is dropped. The cooldown bar is not
+   * listed because its duration is an inline style — playerVitals.ts reads the same media query
+   * and snaps the bar instead.
+   */
+  .toast {
+    animation: none;
   }
 }

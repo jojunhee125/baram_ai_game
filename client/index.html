@@ -42,6 +42,47 @@
         </div>
 
         <!--
+          Vitals: health, and the key that spends it. Top-left, the one corner the chat log, the
+          HUD column and the centred notice all leave free.
+
+          Hidden until this room has shown its first monster — a health bar in the plaza promises a
+          fight that room does not have, and "which rooms have monsters" is the server's fact
+          rather than a table this bundle keeps. playerVitals.ts reveals it.
+        -->
+        <div class="vitals" id="vitals" data-level="ok" hidden>
+          <p class="vitals__head">
+            <span class="vitals__label">체력</span>
+            <span class="vitals__count" id="vitals-count">30 / 30</span>
+          </p>
+          <div
+            class="vitals__track"
+            id="vitals-track"
+            role="progressbar"
+            aria-label="체력"
+            aria-valuemin="0"
+            aria-valuemax="30"
+            aria-valuenow="30"
+          >
+            <span class="vitals__fill" id="vitals-fill"></span>
+          </div>
+          <p class="vitals__hint"><kbd class="vitals__key">Space</kbd> 공격</p>
+          <!--
+            Cooldown mirror, not a guard: the server owns ATTACK_COOLDOWN_MS. Decorative, so it is
+            hidden from the accessibility tree — the swing itself is the feedback that matters.
+          -->
+          <span class="vitals__cooldown" aria-hidden="true">
+            <span class="vitals__cooldown-fill" id="vitals-cooldown"></span>
+          </span>
+        </div>
+
+        <!--
+          Drop notices. Bottom-right, clear of the chat log and of the HUD column, and a live
+          region so a pickup is announced and not only drawn. Click-through: a toast that ate a
+          click meant for the world would be worse than one you cannot dismiss.
+        -->
+        <ul class="toasts" id="item-toasts" role="status" aria-live="polite"></ul>
+
+        <!--
           One top-right cluster: the controls row, and the minimap and the bag unfolding under it.
           Before #transition so the wipe, the notice and the boot overlay all draw over it. The
           wrapper is click-through; only the controls take pointer events, or its empty area would
