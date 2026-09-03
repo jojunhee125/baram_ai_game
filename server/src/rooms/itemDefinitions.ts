@@ -39,8 +39,8 @@ export const MAX_DISTINCT_ITEMS = 24;
  * being tempted to change a `key` the database is already holding.
  */
 export const ITEM_DEFINITIONS: readonly ItemDefinition[] = [
-  { key: "slime-jelly", name: "슬라임 젤리", icon: "slime-jelly" },
-  { key: "bat-wing", name: "박쥐 날개", icon: "bat-wing" },
+  { key: "acorn", name: "도토리", icon: "acorn" },
+  { key: "carrot", name: "당근", icon: "carrot" },
   { key: "copper-coin", name: "구리 동전", icon: "copper-coin" },
   { key: "herb", name: "약초", icon: "herb" },
   { key: "old-dagger", name: "낡은 단검", icon: "old-dagger" },

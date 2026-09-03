@@ -13,27 +13,37 @@ const PROFILE_PATH = "/api/profile";
 const LOAD_TIMEOUT_MS = 3000;
 
 /**
- * The skin this account chose last time, or null when there is nothing to restore. Never chose
- * before, no SSO identity (local dev), and a failed request are one return value rather than
- * three, because the caller does the same thing in all three cases: open the picker as it always
- * did, on the first skin.
+ * The outcome of asking the account what it last picked.
  *
+ * `ok` and `skin` are independent on purpose (Phase C, 2026-09-03): "never chose before" and "no
+ * SSO identity" are a *successful* read that legitimately found nothing, so `ok: true, skin:
+ * null` — only a request that actually failed (network error, timeout, non-OK status) is `ok:
+ * false`. Collapsing those into one `null` used to be `BootScene`'s bug: it could not tell "you
+ * have never picked" from "the request to check just failed", so it saved over a real stored skin
+ * with the picker's arbitrary fallback whenever a transient failure hit mid-boot.
+ */
+export interface LoadedAvatarSkin {
+  ok: boolean;
+  skin: number | null;
+}
+
+/**
  * Deliberately outside `RoomConnection`: this is account data, read once before the world exists
  * and before any room is joined, so it never touches the join path that carries 500 CCU.
  */
-export async function loadAvatarSkin(): Promise<number | null> {
+export async function loadAvatarSkin(): Promise<LoadedAvatarSkin> {
   try {
     const response = await fetch(PROFILE_PATH, {
       headers: { accept: "application/json" },
       signal: AbortSignal.timeout(LOAD_TIMEOUT_MS),
     });
     if (!response.ok) {
-      return null;
+      return { ok: false, skin: null };
     }
-    return readSkin(await response.json());
+    return { ok: true, skin: readSkin(await response.json()) };
   } catch (error) {
     console.warn("could not read the stored avatar skin; starting from the first one", error);
-    return null;
+    return { ok: false, skin: null };
   }
 }
 

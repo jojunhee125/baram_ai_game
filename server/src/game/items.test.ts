@@ -7,12 +7,12 @@ import { validateItemDefinitions } from "./items";
 const CAP = 8;
 
 function item(overrides: Partial<ItemDefinition> = {}): ItemDefinition {
-  return { key: "slime-jelly", name: "슬라임 젤리", icon: "slime-jelly", ...overrides };
+  return { key: "acorn", name: "도토리", icon: "acorn", ...overrides };
 }
 
 const TABLE: readonly ItemDefinition[] = [
   item(),
-  item({ key: "bat-wing", name: "박쥐 날개", icon: "bat-wing" }),
+  item({ key: "carrot", name: "당근", icon: "carrot" }),
 ];
 
 describe("validateItemDefinitions", () => {
@@ -35,14 +35,14 @@ describe("validateItemDefinitions", () => {
   });
 
   it("rejects padding around a key, which the database would store verbatim", () => {
-    const { errors } = validateItemDefinitions([item({ key: " slime-jelly" })], CAP);
+    const { errors } = validateItemDefinitions([item({ key: " acorn" })], CAP);
     assert.equal(errors.length, 1);
     assert.match(errors[0] ?? "", /leading or trailing whitespace/);
   });
 
   it("rejects a duplicate key, which is one row the bag can never show", () => {
     const { errors } = validateItemDefinitions([item(), item({ name: "다른 이름" })], CAP);
-    assert.deepEqual(errors, ['item "slime-jelly" is declared more than once']);
+    assert.deepEqual(errors, ['item "acorn" is declared more than once']);
   });
 
   it("rejects a third copy too, rather than reporting the first duplicate only", () => {
@@ -53,8 +53,8 @@ describe("validateItemDefinitions", () => {
   it("rejects an empty name and an empty icon", () => {
     const { errors } = validateItemDefinitions([item({ name: "  ", icon: "" })], CAP);
     assert.deepEqual(errors, [
-      'item "slime-jelly" has an empty name',
-      'item "slime-jelly" has an empty icon key',
+      'item "acorn" has an empty name',
+      'item "acorn" has an empty icon key',
     ]);
   });
 
@@ -109,7 +109,7 @@ describe("ITEM_DEFINITIONS", () => {
     // boot refusal; a row reordered here without those is every icon drawn as the wrong item.
     assert.deepEqual(
       ITEM_DEFINITIONS.map((definition) => definition.key),
-      ["slime-jelly", "bat-wing", "copper-coin", "herb", "old-dagger"],
+      ["acorn", "carrot", "copper-coin", "herb", "old-dagger"],
     );
   });
 

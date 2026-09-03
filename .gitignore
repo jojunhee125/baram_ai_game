@@ -5,6 +5,14 @@ node_modules/
 client/dist/
 **/.vite/
 
+# Playwright run artifacts (client/e2e). Playwright resolves output relative to the workspace
+# root it's invoked from (client/), not the e2e config's own directory, so both locations need
+# covering or a run from client/ leaks test-results/ back into the tracked tree.
+client/e2e/test-results/
+client/e2e/playwright-report/
+client/test-results/
+client/playwright-report/
+
 .env
 .env.*
 !.env.example

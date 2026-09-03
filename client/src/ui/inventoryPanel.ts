@@ -9,8 +9,8 @@ import { isTextEntry } from "../input/textEntry";
  * disagrees — the same guard MONSTER_SPRITE_ORDER carries.
  */
 export const ITEM_ICON_ORDER = [
-  "slime-jelly",
-  "bat-wing",
+  "acorn",
+  "carrot",
   "copper-coin",
   "herb",
   "old-dagger",

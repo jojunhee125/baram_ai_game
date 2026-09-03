@@ -9,11 +9,11 @@ const DIRECTIONS_PER_KIND = 4;
 
 /**
  * The sheet's row blocks, in order; the index *is* the kindIndex baked into monster.png, so
- * **never reorder this** — a slime would draw bat frames. tools/generate-monster-art.mjs reads
- * this array, compares it against its own KINDS table and refuses to bake the sheet if they have
- * drifted, the same guard import-avatar.mjs puts on AVATAR_SKIN_COUNT.
+ * **never reorder this** — a squirrel would draw rabbit frames. tools/generate-monster-art.mjs
+ * reads this array, compares it against its own KINDS table and refuses to bake the sheet if they
+ * have drifted, the same guard import-avatar.mjs puts on AVATAR_SKIN_COUNT.
  */
-export const MONSTER_SPRITE_ORDER = ["slime", "bat"] as const;
+export const MONSTER_SPRITE_ORDER = ["squirrel", "rabbit"] as const;
 
 /**
  * One tile of monster movement. Sized like STEP_TWEEN_MS — the shortest step interval any kind
@@ -53,6 +53,21 @@ interface TrackedMonster {
 function kindIndexOf(kind: string): number {
   const index = (MONSTER_SPRITE_ORDER as readonly string[]).indexOf(kind);
   return index === -1 ? 0 : index;
+}
+
+/** Wire string to Korean display label, for the name tag drawn above a monster's head. */
+const MONSTER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  squirrel: "다람쥐",
+  rabbit: "토끼",
+};
+
+/**
+ * Unlike {@link kindIndexOf}'s index-0 fallback (which has to pick *some* body to draw), an
+ * unrecognised kind falls back to its own wire string here — labelling an unknown monster as
+ * "다람쥐" would be a worse lie than an untranslated kind showing through.
+ */
+export function monsterDisplayName(kind: string): string {
+  return MONSTER_DISPLAY_NAMES[kind] ?? kind;
 }
 
 function directionBase(kindIndex: number, facing: Direction): number {
@@ -103,8 +118,14 @@ export function registerMonsterAnimations(scene: Phaser.Scene): void {
  * with `skin` renamed, and folding them into one class would mean a renderer parameterised over
  * two textures, two animation namespaces and two tween lengths to save thirty lines.
  *
- * No name tags and no HP bars here — a monster carries nothing above its head, which is the
- * second thing (after the silhouette) telling a player which sprites are people.
+ * No HP bars here — those only appear once a monster's been hit (`MonsterHealthBars`). Name tags
+ * are drawn the same way, by `WorldScene`'s own `NameTags` instance using `monsterDisplayName()`
+ * above: this class only owns the sprite, never what floats above it.
+ *
+ * Until Phase B (2026-09-03) a monster carried nothing above its head at all, which was the
+ * second thing (after the silhouette) telling a player which sprites were people — traded away
+ * deliberately for readability once players asked what they were fighting
+ * (`docs/feasibility-review-2026-09-02-balance.md` §4-A).
  */
 export class MonsterSprites {
   private readonly tracked = new Map<string, TrackedMonster>();

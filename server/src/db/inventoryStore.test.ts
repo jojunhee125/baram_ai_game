@@ -60,33 +60,33 @@ function assertInventoryStoreContract(label: string, create: () => InventoryStor
 
     it("returns what was granted, with the total", async () => {
       const store = create();
-      assert.equal(await store.add(OWNER, "slime-jelly", 3), 3);
-      assert.deepEqual(await store.list(OWNER), [{ itemKey: "slime-jelly", quantity: 3 }]);
+      assert.equal(await store.add(OWNER, "acorn", 3), 3);
+      assert.deepEqual(await store.list(OWNER), [{ itemKey: "acorn", quantity: 3 }]);
     });
 
     it("adds to an existing stack rather than replacing it", async () => {
       const store = create();
-      await store.add(OWNER, "slime-jelly", 3);
-      assert.equal(await store.add(OWNER, "slime-jelly", 4), 7, "the total is after the grant");
-      assert.deepEqual(await store.list(OWNER), [{ itemKey: "slime-jelly", quantity: 7 }]);
+      await store.add(OWNER, "acorn", 3);
+      assert.equal(await store.add(OWNER, "acorn", 4), 7, "the total is after the grant");
+      assert.deepEqual(await store.list(OWNER), [{ itemKey: "acorn", quantity: 7 }]);
     });
 
     it("keeps two item kinds apart in one bag", async () => {
       const store = create();
-      await store.add(OWNER, "slime-jelly", 2);
-      await store.add(OWNER, "bat-wing", 5);
+      await store.add(OWNER, "acorn", 2);
+      await store.add(OWNER, "carrot", 5);
       assert.deepEqual(sorted(await store.list(OWNER)), [
-        { itemKey: "bat-wing", quantity: 5 },
-        { itemKey: "slime-jelly", quantity: 2 },
+        { itemKey: "acorn", quantity: 2 },
+        { itemKey: "carrot", quantity: 5 },
       ]);
     });
 
     it("keeps two owners apart", async () => {
       const store = create();
-      await store.add(OWNER, "slime-jelly", 2);
-      await store.add(OTHER_OWNER, "slime-jelly", 9);
-      assert.deepEqual(await store.list(OWNER), [{ itemKey: "slime-jelly", quantity: 2 }]);
-      assert.deepEqual(await store.list(OTHER_OWNER), [{ itemKey: "slime-jelly", quantity: 9 }]);
+      await store.add(OWNER, "acorn", 2);
+      await store.add(OTHER_OWNER, "acorn", 9);
+      assert.deepEqual(await store.list(OWNER), [{ itemKey: "acorn", quantity: 2 }]);
+      assert.deepEqual(await store.list(OTHER_OWNER), [{ itemKey: "acorn", quantity: 9 }]);
     });
 
     it("survives a hundred grants of the same key without losing one", async () => {
@@ -141,14 +141,14 @@ function assertInventoryStoreContract(label: string, create: () => InventoryStor
       for (let index = 0; index < MAX_DISTINCT_ITEMS; index += 1) {
         await store.add(OWNER, `filler-${index}`, 1);
       }
-      assert.equal(await store.add(OTHER_OWNER, "slime-jelly", 1), 1);
+      assert.equal(await store.add(OTHER_OWNER, "acorn", 1), 1);
     });
 
     it("rejects a quantity the quantity > 0 CHECK would reject, in both implementations", async () => {
       const store = create();
       for (const quantity of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
         await assert.rejects(
-          () => store.add(OWNER, "slime-jelly", quantity),
+          () => store.add(OWNER, "acorn", quantity),
           /positive integer/,
           `quantity ${quantity}`,
         );
@@ -193,24 +193,24 @@ assertInventoryStoreContract("PostgresInventoryStore", inMemoryBackedPostgresSto
 describe("InMemoryInventoryStore", () => {
   it("keeps nothing across instances, which is what makes a restart look like a first visit", async () => {
     const first = new InMemoryInventoryStore();
-    await first.add(OWNER, "slime-jelly", 4);
+    await first.add(OWNER, "acorn", 4);
     assert.deepEqual(await new InMemoryInventoryStore().list(OWNER), []);
   });
 
   it("never touches the database status field", async () => {
     resetDatabaseStatus();
     const store = new InMemoryInventoryStore();
-    await store.add(OWNER, "slime-jelly", 1);
+    await store.add(OWNER, "acorn", 1);
     await store.list(OWNER);
     assert.equal(getDatabaseStatus(), "disabled", "the no-database mode must stay 'disabled'");
   });
 
   it("hands out a snapshot the caller cannot write back through", async () => {
     const store = new InMemoryInventoryStore();
-    await store.add(OWNER, "slime-jelly", 1);
+    await store.add(OWNER, "acorn", 1);
     const rows = await store.list(OWNER);
     (rows[0] as InventoryRow).quantity = 999;
-    assert.deepEqual(await store.list(OWNER), [{ itemKey: "slime-jelly", quantity: 1 }]);
+    assert.deepEqual(await store.list(OWNER), [{ itemKey: "acorn", quantity: 1 }]);
   });
 });
 
@@ -220,14 +220,14 @@ describe("PostgresInventoryStore — the statements it sends", () => {
   it("reads one owner's rows and nothing else", async () => {
     const { pool, queries } = stubPool(() => ({
       rows: [
-        { item_key: "slime-jelly", quantity: 3 },
-        { item_key: "bat-wing", quantity: 1 },
+        { item_key: "acorn", quantity: 3 },
+        { item_key: "carrot", quantity: 1 },
       ],
     }));
     const rows = await new PostgresInventoryStore(pool).list(OWNER);
     assert.deepEqual(rows, [
-      { itemKey: "slime-jelly", quantity: 3 },
-      { itemKey: "bat-wing", quantity: 1 },
+      { itemKey: "acorn", quantity: 3 },
+      { itemKey: "carrot", quantity: 1 },
     ]);
     assert.equal(queries.length, 1);
     assert.match(
@@ -249,19 +249,19 @@ describe("PostgresInventoryStore — the statements it sends", () => {
 
   it("grants with a single statement, so a drop cannot be lost between a read and a write", async () => {
     const { pool, queries } = stubPool(() => ({ rows: [{ quantity: 7 }] }));
-    assert.equal(await new PostgresInventoryStore(pool).add(OWNER, "slime-jelly", 3), 7);
+    assert.equal(await new PostgresInventoryStore(pool).add(OWNER, "acorn", 3), 7);
     assert.equal(queries.length, 1, "read-modify-write would be two statements");
     const sql = queries[0]?.sql ?? "";
     assert.match(sql, /INSERT INTO inventory_item/);
     assert.match(sql, /ON CONFLICT \(owner_key, item_key\)/);
     assert.match(sql, /DO UPDATE SET quantity = inventory_item\.quantity \+ EXCLUDED\.quantity/);
     assert.match(sql, /RETURNING quantity/, "ItemGranted.total comes from here");
-    assert.deepEqual(queries[0]?.values, [OWNER, "slime-jelly", 3, MAX_DISTINCT_ITEMS]);
+    assert.deepEqual(queries[0]?.values, [OWNER, "acorn", 3, MAX_DISTINCT_ITEMS]);
   });
 
   it("carries the capacity test inside that same statement", async () => {
     const { pool, queries } = stubPool(() => ({ rows: [{ quantity: 1 }] }));
-    await new PostgresInventoryStore(pool).add(OWNER, "slime-jelly", 1);
+    await new PostgresInventoryStore(pool).add(OWNER, "acorn", 1);
     const sql = queries[0]?.sql ?? "";
     assert.match(sql, /count\(\*\)/, "a separate COUNT round trip is what this avoids");
     assert.match(sql, /EXISTS/, "a held key must top up regardless of the count");
@@ -272,19 +272,19 @@ describe("PostgresInventoryStore — the statements it sends", () => {
     // Not a security point — the value is a module constant — but a per-call literal would give
     // the planner a new statement text for every distinct cap and lose the prepared plan.
     const { pool, queries } = stubPool(() => ({ rows: [{ quantity: 1 }] }));
-    await new PostgresInventoryStore(pool).add(OWNER, "slime-jelly", 1);
+    await new PostgresInventoryStore(pool).add(OWNER, "acorn", 1);
     assert.doesNotMatch(queries[0]?.sql ?? "", new RegExp(`< ${MAX_DISTINCT_ITEMS}\\b`));
     assert.match(queries[0]?.sql ?? "", /< \$4/);
   });
 
   it("reads an empty result as a full bag rather than as an error", async () => {
     const { pool } = stubPool(() => ({ rows: [] }));
-    assert.equal(await new PostgresInventoryStore(pool).add(OWNER, "slime-jelly", 1), null);
+    assert.equal(await new PostgresInventoryStore(pool).add(OWNER, "acorn", 1), null);
   });
 
   it("sends nothing at all for a quantity the CHECK would refuse", async () => {
     const { pool, queries } = stubPool(() => ({ rows: [{ quantity: 1 }] }));
-    await assert.rejects(() => new PostgresInventoryStore(pool).add(OWNER, "slime-jelly", 0));
+    await assert.rejects(() => new PostgresInventoryStore(pool).add(OWNER, "acorn", 0));
     assert.deepEqual(queries, [], "a 23514 would be indistinguishable from a dropped connection");
     assert.equal(getDatabaseStatus(), "disabled", "and would wrongly mark the database degraded");
   });
@@ -294,7 +294,7 @@ describe("PostgresInventoryStore — the statements it sends", () => {
     // which is never a uuid. A `22P02` here would be exactly as indistinguishable from a dropped
     // connection as the quantity CHECK's `23514` above.
     const { pool, queries } = stubPool(() => ({ rows: [{ quantity: 1 }] }));
-    await assert.rejects(() => new PostgresInventoryStore(pool).add("attacker-session-id", "slime-jelly", 1));
+    await assert.rejects(() => new PostgresInventoryStore(pool).add("attacker-session-id", "acorn", 1));
     assert.deepEqual(queries, []);
     assert.equal(getDatabaseStatus(), "disabled", "and would wrongly mark the database degraded");
   });
@@ -318,13 +318,13 @@ describe("PostgresInventoryStore — health reporting", () => {
 
   it("marks the database ok on a successful grant", async () => {
     const { pool } = stubPool(() => ({ rows: [{ quantity: 1 }] }));
-    await new PostgresInventoryStore(pool).add(OWNER, "slime-jelly", 1);
+    await new PostgresInventoryStore(pool).add(OWNER, "acorn", 1);
     assert.equal(getDatabaseStatus(), "ok");
   });
 
   it("marks the database ok on a full bag, which is an answer and not a fault", async () => {
     const { pool } = stubPool(() => ({ rows: [] }));
-    assert.equal(await new PostgresInventoryStore(pool).add(OWNER, "slime-jelly", 1), null);
+    assert.equal(await new PostgresInventoryStore(pool).add(OWNER, "acorn", 1), null);
     assert.equal(getDatabaseStatus(), "ok");
   });
 
@@ -345,7 +345,7 @@ describe("PostgresInventoryStore — health reporting", () => {
       throw new Error("connection terminated unexpectedly");
     });
     await assert.rejects(
-      () => new PostgresInventoryStore(pool).add(OWNER, "slime-jelly", 1),
+      () => new PostgresInventoryStore(pool).add(OWNER, "acorn", 1),
       /connection terminated/,
       "a failed grant must not read as a full bag — the caller would tell the player the wrong thing",
     );
@@ -358,13 +358,13 @@ describe("PostgresInventoryStore — health reporting", () => {
       if (fail) {
         throw new Error("terminating connection due to administrator command");
       }
-      return { rows: [{ item_key: "slime-jelly", quantity: 2 }] };
+      return { rows: [{ item_key: "acorn", quantity: 2 }] };
     });
     const store = new PostgresInventoryStore(pool);
     await assert.rejects(() => store.list(OWNER));
     assert.equal(getDatabaseStatus(), "degraded");
     fail = false;
-    assert.deepEqual(await store.list(OWNER), [{ itemKey: "slime-jelly", quantity: 2 }]);
+    assert.deepEqual(await store.list(OWNER), [{ itemKey: "acorn", quantity: 2 }]);
     assert.equal(getDatabaseStatus(), "ok", "a database that answers again must stop reading as degraded");
   });
 
@@ -485,7 +485,7 @@ describe("PostgresInventoryStore — against a real server", { skip: REAL_DATABA
     //
     // The statement is captured from the store rather than copied here, so this cannot drift.
     const { pool: recorder, queries } = stubPool(() => ({ rows: [{ quantity: 1 }] }));
-    await new PostgresInventoryStore(recorder).add(OWNER, "slime-jelly", 1);
+    await new PostgresInventoryStore(recorder).add(OWNER, "acorn", 1);
     const grantSql = queries[0]?.sql;
     assert.ok(grantSql, "the store sent no statement to capture");
 
@@ -539,7 +539,7 @@ describe("PostgresInventoryStore — against a real server", { skip: REAL_DATABA
       () =>
         pool.query("INSERT INTO inventory_item (owner_key, item_key, quantity) VALUES ($1, $2, $3)", [
           owner,
-          "slime-jelly",
+          "acorn",
           0,
         ]),
       /quantity/,
@@ -551,14 +551,14 @@ describe("PostgresInventoryStore — against a real server", { skip: REAL_DATABA
     const owner = randomUUID();
     await pool.query("INSERT INTO inventory_item (owner_key, item_key, quantity) VALUES ($1, $2, $3)", [
       owner,
-      "bat-wing",
+      "carrot",
       1,
     ]);
     await assert.rejects(
       () =>
         pool.query("INSERT INTO inventory_item (owner_key, item_key, quantity) VALUES ($1, $2, $3)", [
           owner,
-          "bat-wing",
+          "carrot",
           1,
         ]),
       /duplicate key/,

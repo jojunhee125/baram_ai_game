@@ -148,13 +148,14 @@ const GRAND_PLAZA_MOVES_PER_SECOND = 500 * MAX_MOVES_PER_SECOND;
 /* ---------------------------------------------------- hunting ground ------ */
 
 /**
- * Monster kinds in the ratio the authored table uses (14 slimes to 6 bats), with each kind's
- * authored wander radius. The mix is not cosmetic: a bat wanders every 1200 ms against a slime's
- * 1600 ms and over a radius-3 box rather than radius-2, and step frequency is what a tick costs.
+ * Monster kinds in the ratio the authored table uses (14 squirrels to 6 rabbits), with each
+ * kind's authored wander radius. The mix is not cosmetic: a rabbit wanders every 1200 ms against
+ * a squirrel's 1600 ms and over a radius-3 box rather than radius-2, and step frequency is what a
+ * tick costs.
  */
 const SPAWN_MIX = [
-  { kind: MonsterKind.Slime, share: 0.7, wanderRadiusTiles: 2 },
-  { kind: MonsterKind.Bat, share: 0.3, wanderRadiusTiles: 3 },
+  { kind: MonsterKind.Squirrel, share: 0.7, wanderRadiusTiles: 2 },
+  { kind: MonsterKind.Rabbit, share: 0.3, wanderRadiusTiles: 3 },
 ];
 
 /**

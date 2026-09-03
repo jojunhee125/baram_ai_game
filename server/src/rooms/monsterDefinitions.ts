@@ -13,8 +13,8 @@ import type {
  * table that drifts away from it.
  */
 export const MonsterKind = {
-  Slime: "slime",
-  Bat: "bat",
+  Squirrel: "squirrel",
+  Rabbit: "rabbit",
 } as const;
 
 export type MonsterKind = (typeof MonsterKind)[keyof typeof MonsterKind];
@@ -65,43 +65,49 @@ export interface MonsterType {
  * deadline rounds up to the next tick and this table quietly stops describing what happens.
  *
  * Derived from constants that are already fixed, not picked:
- *  - player damage 4 every 600ms -> 6.67 DPS, player HP 30
+ *  - player damage 4 every 600ms -> 6.67 DPS, player HP 100
  *  - a walking player covers a tile per STEP_TWEEN_MS (120ms) = 8.3 tiles/s
  *  - the viewport shows 8 tiles above the player, so aggro must stay <= 8 or monsters charge in
  *    from off screen
  *
- * The result: one monster can never kill a player (18s and 8s to do 30 damage, against a 5s
+ * `damage` was retuned in Phase A (2026-09-03, from 2/3 to 7/10) alongside PLAYER_MAX_HP's
+ * 30->100 and COMBAT_EXIT_MS's 5000->2000, so that a solo kill still takes the same 18s/8s it
+ * always did — the fix for "recovery is structurally 0" is the shorter exit window (reachable
+ * during normal hunting-ground density) and the bigger HP buffer against burst/multi-aggro, not a
+ * cheaper monster.
+ *
+ * The result: one monster can never kill a player (18s and 8s to do 100 damage, against a 2s
  * out-of-combat recovery), three at once can. That is the difficulty a starter field wants.
  */
 export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
   [
-    MonsterKind.Slime,
+    MonsterKind.Squirrel,
     {
-      kind: MonsterKind.Slime,
+      kind: MonsterKind.Squirrel,
       /** Exactly three hits (4x3). The beginner monster has to be countable. */
       maxHp: 12,
-      damage: 2,
+      damage: 7,
       attackCooldownMs: 1200,
       wanderStepIntervalMs: 1600,
-      /** 1.67 tiles/s, a fifth of a walking player: you can always stroll away from a slime. */
+      /** 1.67 tiles/s, a fifth of a walking player: you can always stroll away from a squirrel. */
       chaseStepIntervalMs: 600,
       aggroRadiusTiles: 2,
       leashRadiusTiles: 8,
       respawnDelayMs: 8000,
       loot: [
-        { itemKey: "slime-jelly", chance: 0.6, quantity: 1 },
+        { itemKey: "acorn", chance: 0.6, quantity: 1 },
         { itemKey: "copper-coin", chance: 0.25, quantity: 1 },
         { itemKey: "herb", chance: 0.08, quantity: 1 },
       ],
     },
   ],
   [
-    MonsterKind.Bat,
+    MonsterKind.Rabbit,
     {
-      kind: MonsterKind.Bat,
-      /** Five hits — unmistakably a different fight from the slime's three. */
+      kind: MonsterKind.Rabbit,
+      /** Five hits — unmistakably a different fight from the squirrel's three. */
       maxHp: 20,
-      damage: 3,
+      damage: 10,
       attackCooldownMs: 800,
       wanderStepIntervalMs: 1200,
       /** 2.5 tiles/s. Still a third of a player's pace, so fleeing always works. */
@@ -110,7 +116,7 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       leashRadiusTiles: 10,
       respawnDelayMs: 12000,
       loot: [
-        { itemKey: "bat-wing", chance: 0.55, quantity: 1 },
+        { itemKey: "carrot", chance: 0.55, quantity: 1 },
         { itemKey: "copper-coin", chance: 0.35, quantity: 1 },
         { itemKey: "herb", chance: 0.12, quantity: 1 },
         { itemKey: "old-dagger", chance: 0.03, quantity: 1 },
@@ -151,36 +157,36 @@ export interface MonsterSpawnDefinition {
  * That is a property of this table rather than of a boot check, so keep it when adding rows.
  * A monster dragged down to the door by a player is inside its leash and is working as intended.
  *
- * Difficulty runs south to north: slimes at the y23-24 entrance band, bats at the y10 far edge.
- * Coordinates were checked against `assets/maps/hunting-ground.json` (walkable, inside the
+ * Difficulty runs south to north: squirrels at the y23-24 entrance band, rabbits at the y10 far
+ * edge. Coordinates were checked against `assets/maps/hunting-ground.json` (walkable, inside the
  * interior, clear of the portal tiles, and at least 6 tiles from the arrival and player spawn).
  */
 export const MONSTER_SPAWN_DEFINITIONS: readonly MonsterSpawnDefinition[] = [
-  // -- Southern band, nearest the entrance; all slimes --
-  { id: "hg-slime-01", room: "hunting-ground", kind: MonsterKind.Slime, at: { tileX: 19, tileY: 24 }, wanderRadiusTiles: 2 },
-  { id: "hg-slime-02", room: "hunting-ground", kind: MonsterKind.Slime, at: { tileX: 24, tileY: 23 }, wanderRadiusTiles: 2 },
-  { id: "hg-slime-03", room: "hunting-ground", kind: MonsterKind.Slime, at: { tileX: 29, tileY: 24 }, wanderRadiusTiles: 2 },
-  { id: "hg-slime-04", room: "hunting-ground", kind: MonsterKind.Slime, at: { tileX: 41, tileY: 24 }, wanderRadiusTiles: 2 },
-  { id: "hg-slime-05", room: "hunting-ground", kind: MonsterKind.Slime, at: { tileX: 46, tileY: 23 }, wanderRadiusTiles: 2 },
-  { id: "hg-slime-06", room: "hunting-ground", kind: MonsterKind.Slime, at: { tileX: 51, tileY: 24 }, wanderRadiusTiles: 2 },
+  // -- Southern band, nearest the entrance; all squirrels --
+  { id: "hg-squirrel-01", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 19, tileY: 24 }, wanderRadiusTiles: 2 },
+  { id: "hg-squirrel-02", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 24, tileY: 23 }, wanderRadiusTiles: 2 },
+  { id: "hg-squirrel-03", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 29, tileY: 24 }, wanderRadiusTiles: 2 },
+  { id: "hg-squirrel-04", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 41, tileY: 24 }, wanderRadiusTiles: 2 },
+  { id: "hg-squirrel-05", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 46, tileY: 23 }, wanderRadiusTiles: 2 },
+  { id: "hg-squirrel-06", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 51, tileY: 24 }, wanderRadiusTiles: 2 },
   // -- Middle band --
-  { id: "hg-slime-07", room: "hunting-ground", kind: MonsterKind.Slime, at: { tileX: 18, tileY: 19 }, wanderRadiusTiles: 2 },
-  { id: "hg-slime-08", room: "hunting-ground", kind: MonsterKind.Slime, at: { tileX: 23, tileY: 20 }, wanderRadiusTiles: 2 },
-  { id: "hg-slime-09", room: "hunting-ground", kind: MonsterKind.Slime, at: { tileX: 28, tileY: 18 }, wanderRadiusTiles: 2 },
-  { id: "hg-slime-10", room: "hunting-ground", kind: MonsterKind.Slime, at: { tileX: 33, tileY: 20 }, wanderRadiusTiles: 2 },
-  { id: "hg-slime-11", room: "hunting-ground", kind: MonsterKind.Slime, at: { tileX: 44, tileY: 19 }, wanderRadiusTiles: 2 },
-  { id: "hg-slime-12", room: "hunting-ground", kind: MonsterKind.Slime, at: { tileX: 49, tileY: 20 }, wanderRadiusTiles: 2 },
-  // -- Northern band, the bat ground; the two slimes at either end are the transition --
-  { id: "hg-slime-13", room: "hunting-ground", kind: MonsterKind.Slime, at: { tileX: 21, tileY: 14 }, wanderRadiusTiles: 2 },
-  { id: "hg-slime-14", room: "hunting-ground", kind: MonsterKind.Slime, at: { tileX: 52, tileY: 14 }, wanderRadiusTiles: 2 },
-  { id: "hg-bat-01", room: "hunting-ground", kind: MonsterKind.Bat, at: { tileX: 26, tileY: 14 }, wanderRadiusTiles: 3 },
-  { id: "hg-bat-02", room: "hunting-ground", kind: MonsterKind.Bat, at: { tileX: 38, tileY: 13 }, wanderRadiusTiles: 3 },
-  { id: "hg-bat-03", room: "hunting-ground", kind: MonsterKind.Bat, at: { tileX: 45, tileY: 15 }, wanderRadiusTiles: 3 },
+  { id: "hg-squirrel-07", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 18, tileY: 19 }, wanderRadiusTiles: 2 },
+  { id: "hg-squirrel-08", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 23, tileY: 20 }, wanderRadiusTiles: 2 },
+  { id: "hg-squirrel-09", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 28, tileY: 18 }, wanderRadiusTiles: 2 },
+  { id: "hg-squirrel-10", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 33, tileY: 20 }, wanderRadiusTiles: 2 },
+  { id: "hg-squirrel-11", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 44, tileY: 19 }, wanderRadiusTiles: 2 },
+  { id: "hg-squirrel-12", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 49, tileY: 20 }, wanderRadiusTiles: 2 },
+  // -- Northern band, the rabbit ground; the two squirrels at either end are the transition --
+  { id: "hg-squirrel-13", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 21, tileY: 14 }, wanderRadiusTiles: 2 },
+  { id: "hg-squirrel-14", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 52, tileY: 14 }, wanderRadiusTiles: 2 },
+  { id: "hg-rabbit-01", room: "hunting-ground", kind: MonsterKind.Rabbit, at: { tileX: 26, tileY: 14 }, wanderRadiusTiles: 3 },
+  { id: "hg-rabbit-02", room: "hunting-ground", kind: MonsterKind.Rabbit, at: { tileX: 38, tileY: 13 }, wanderRadiusTiles: 3 },
+  { id: "hg-rabbit-03", room: "hunting-ground", kind: MonsterKind.Rabbit, at: { tileX: 45, tileY: 15 }, wanderRadiusTiles: 3 },
   // y = 10 rather than y = 9: a radius-3 wander box has 36 of 49 tiles walkable there against 29
   // one row up, so these three scrape the boundary band far less.
-  { id: "hg-bat-04", room: "hunting-ground", kind: MonsterKind.Bat, at: { tileX: 22, tileY: 10 }, wanderRadiusTiles: 3 },
-  { id: "hg-bat-05", room: "hunting-ground", kind: MonsterKind.Bat, at: { tileX: 35, tileY: 10 }, wanderRadiusTiles: 3 },
-  { id: "hg-bat-06", room: "hunting-ground", kind: MonsterKind.Bat, at: { tileX: 49, tileY: 10 }, wanderRadiusTiles: 3 },
+  { id: "hg-rabbit-04", room: "hunting-ground", kind: MonsterKind.Rabbit, at: { tileX: 22, tileY: 10 }, wanderRadiusTiles: 3 },
+  { id: "hg-rabbit-05", room: "hunting-ground", kind: MonsterKind.Rabbit, at: { tileX: 35, tileY: 10 }, wanderRadiusTiles: 3 },
+  { id: "hg-rabbit-06", room: "hunting-ground", kind: MonsterKind.Rabbit, at: { tileX: 49, tileY: 10 }, wanderRadiusTiles: 3 },
 ];
 
 /** Boot-validation outcome. Every error refuses boot; warnings are authoring smells only. */

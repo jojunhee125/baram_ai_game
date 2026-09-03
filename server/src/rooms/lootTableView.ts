@@ -7,8 +7,8 @@ import { ITEM_DEFINITIONS } from "./itemDefinitions";
  * only `kind` crosses the wire (design §5.2), and nothing needed a name until this panel.
  */
 export const MONSTER_DISPLAY_NAMES: Readonly<Record<MonsterKind, string>> = {
-  slime: "슬라임",
-  bat: "박쥐",
+  squirrel: "다람쥐",
+  rabbit: "토끼",
 };
 
 export interface LootTableDropView {
@@ -29,7 +29,7 @@ export interface LootTableMonsterView {
  * Every monster kind with at least one spawn point in `roomName`, each carrying its full loot
  * table — the same rows for every spawn of that kind, because population is spawn *points*
  * (design §5.2), not per-monster instances with independent tables. Order follows `MONSTER_TYPES`'
- * own declaration order (slime before bat) — the same "table order is display order" rule
+ * own declaration order (squirrel before rabbit) — the same "table order is display order" rule
  * `ITEM_DEFINITIONS` already carries (design §3.2), which here also happens to be difficulty order.
  *
  * A room with no spawn rows (grand-plaza, plaza, an unrecognised name) returns `[]`. There is no

@@ -107,7 +107,7 @@ export const PLAYER_ATTACK_DAMAGE = 4;
  * the number before its first `PlayerHit`: health is never in `RoomState`, and joining or
  * changing rooms always restores it in full, so "full on arrival" needs no message.
  */
-export const PLAYER_MAX_HP = 30;
+export const PLAYER_MAX_HP = 100;
 
 /**
  * Quiet time after the last hit before health starts coming back. Without a recovery of some
@@ -120,18 +120,23 @@ export const PLAYER_MAX_HP = 30;
  * the time of its last `PlayerHit`. The two can only drift apart while nothing is happening, and
  * the next `PlayerHit` carries the server's number.
  */
-export const COMBAT_EXIT_MS = 5000;
+export const COMBAT_EXIT_MS = 2000;
 
 /**
- * Health restored per MONSTER_TICK_MS once out of combat — 5 HP/s, so a player left on 1 HP is
- * whole again six seconds after the recovery starts. Deliberately fast: what it has to beat is
- * walking out of the door and rejoining, which is free, restores everything at once and takes
+ * Health restored per MONSTER_TICK_MS once out of combat — 15 HP/s, so a player left on 1 HP is
+ * whole again about 6.6 seconds after the recovery starts. Deliberately fast: what it has to beat
+ * is walking out of the door and rejoining, which is free, restores everything at once and takes
  * about as long.
+ *
+ * Scaled with PLAYER_MAX_HP (Phase A, 2026-09-03) rather than left at 1: an unscaled per-tick
+ * amount would still recover in absolute HP terms but would take 3.3x longer in wall-clock time
+ * to refill the now-3.3x-bigger bar, which is exactly the "recovery might as well not exist"
+ * complaint this phase exists to fix, just moved from COMBAT_EXIT_MS to here.
  *
  * Recovery rides the monster tick, so it runs only in a room that has monsters. That is the only
  * room where health can be lost, and any room change restores it anyway.
  */
-export const COMBAT_RECOVERY_HP_PER_TICK = 1;
+export const COMBAT_RECOVERY_HP_PER_TICK = 3;
 
 /**
  * Number of selectable avatar variants. Must equal the skin block count baked into

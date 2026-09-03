@@ -461,7 +461,7 @@ describe("hunting-ground — monsters over the wire", () => {
       );
       const monster = decodedMonsterOf(hunter, monsterId);
       assert.ok(
-        monster.kind === MonsterKind.Slime || monster.kind === MonsterKind.Bat,
+        monster.kind === MonsterKind.Squirrel || monster.kind === MonsterKind.Rabbit,
         `decoded kind "${monster.kind}", which the client has no sprite for`,
       );
     }
@@ -518,12 +518,12 @@ describe("hunting-ground — monsters over the wire", () => {
     // way to stage a death today, and staging it is the entire point.
     const room = await createRoom(HUNTING_GROUND);
     const hunter = await join(room, "hunter");
-    const victim = "hg-slime-10";
-    const slime = MONSTER_TYPES.get(MonsterKind.Slime);
-    assert.ok(slime, "MONSTER_TYPES has no slime row");
+    const victim = "hg-squirrel-10";
+    const squirrel = MONSTER_TYPES.get(MonsterKind.Squirrel);
+    assert.ok(squirrel, "MONSTER_TYPES has no squirrel row");
     assert.ok(
-      HUNTING_SPAWNS.some((spawn) => spawn.id === victim && spawn.kind === MonsterKind.Slime),
-      `${victim} is no longer a slime spawn row; pick another victim`,
+      HUNTING_SPAWNS.some((spawn) => spawn.id === victim && spawn.kind === MonsterKind.Squirrel),
+      `${victim} is no longer a squirrel spawn row; pick another victim`,
     );
 
     await waitUntil(
@@ -539,7 +539,7 @@ describe("hunting-ground — monsters over the wire", () => {
     await waitUntil(
       () => decodedMonsters(hunter).includes(victim),
       `${victim} to respawn on the wire`,
-      slime.respawnDelayMs + 5000,
+      squirrel.respawnDelayMs + 5000,
     );
     const revived = decodedMonsterOf(hunter, victim);
     const spawnRow = HUNTING_SPAWNS.find((spawn) => spawn.id === victim);

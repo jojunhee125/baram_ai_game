@@ -13,11 +13,11 @@ import {
 } from "./monsterAi";
 
 /**
- * Slime's real numbers. Kept as a literal rather than read out of MONSTER_TYPES so that a
+ * Squirrel's real numbers. Kept as a literal rather than read out of MONSTER_TYPES so that a
  * balance change to the table cannot silently rewrite what these cases claim to prove.
  */
-const SLIME: MonsterType = {
-  kind: MonsterKind.Slime,
+const SQUIRREL: MonsterType = {
+  kind: MonsterKind.Squirrel,
   maxHp: 12,
   damage: 2,
   attackCooldownMs: 1200,
@@ -34,7 +34,7 @@ const NOW = 1_000_000;
 
 function snapshot(overrides: Partial<MonsterSnapshot> = {}): MonsterSnapshot {
   return {
-    id: "hg-slime-01",
+    id: "hg-squirrel-01",
     state: MonsterAiState.Idle,
     tileX: SPAWN.tileX,
     tileY: SPAWN.tileY,
@@ -55,7 +55,7 @@ function decide(
   overrides: Partial<MonsterSnapshot>,
   nearby: readonly MonsterTarget[] = [],
   now: number = NOW,
-  type: MonsterType = SLIME,
+  type: MonsterType = SQUIRREL,
 ): MonsterAction {
   return decideMonsterAction(snapshot(overrides), nearby, now, type);
 }
@@ -111,7 +111,7 @@ describe("decideMonsterAction — idle and wander", () => {
     const action = decide({ nextStepAt: NOW });
     assert.equal(action.state, MonsterAiState.Wander);
     assert.equal(action.targetSessionId, null);
-    assert.equal(stepOf(action).nextStepAt, NOW + SLIME.wanderStepIntervalMs);
+    assert.equal(stepOf(action).nextStepAt, NOW + SQUIRREL.wanderStepIntervalMs);
   });
 
   it("offers all four directions from the centre of the wander box", () => {
@@ -140,13 +140,13 @@ describe("decideMonsterAction — idle and wander", () => {
 
   it("is reproducible: the same id and tick always produce the same walk", () => {
     assert.deepEqual(decide({}), decide({}));
-    assert.deepEqual(decide({ id: "hg-bat-04" }), decide({ id: "hg-bat-04" }));
+    assert.deepEqual(decide({ id: "hg-rabbit-04" }), decide({ id: "hg-rabbit-04" }));
   });
 
   it("does not march every monster in step — ids diverge at one shared tick", () => {
     const first = new Set<Direction | undefined>();
     for (let index = 0; index < 20; index++) {
-      first.add(stepOf(decide({ id: `hg-slime-${index}` })).directions[0]);
+      first.add(stepOf(decide({ id: `hg-squirrel-${index}` })).directions[0]);
     }
     assert.ok(first.size > 1, `every id picked the same direction: ${JSON.stringify([...first])}`);
   });
@@ -168,11 +168,11 @@ describe("decideMonsterAction — leash", () => {
     assert.equal(action.state, MonsterAiState.Wander);
     const { directions, nextStepAt } = stepOf(action);
     assert.deepEqual(directions, [Direction.Left], "the only axis with a delta points home");
-    assert.equal(nextStepAt, NOW + SLIME.wanderStepIntervalMs, "walking home is not a chase");
+    assert.equal(nextStepAt, NOW + SQUIRREL.wanderStepIntervalMs, "walking home is not a chase");
   });
 
   it("drops a target the moment the leash radius is exceeded, even from point blank", () => {
-    const far = { tileX: SPAWN.tileX + SLIME.leashRadiusTiles + 1, tileY: SPAWN.tileY };
+    const far = { tileX: SPAWN.tileX + SQUIRREL.leashRadiusTiles + 1, tileY: SPAWN.tileY };
     const action = decide(far, [player("a", far.tileX + 1, far.tileY)]);
     assert.equal(action.targetSessionId, null, "a leashed monster has no target at all");
     assert.equal(action.state, MonsterAiState.Wander);
@@ -180,7 +180,7 @@ describe("decideMonsterAction — leash", () => {
   });
 
   it("still chases at exactly the leash radius — the break is strictly beyond it", () => {
-    const edge = { tileX: SPAWN.tileX + SLIME.leashRadiusTiles, tileY: SPAWN.tileY };
+    const edge = { tileX: SPAWN.tileX + SQUIRREL.leashRadiusTiles, tileY: SPAWN.tileY };
     const action = decide(edge, [player("a", edge.tileX + 3, edge.tileY)]);
     assert.equal(action.state, MonsterAiState.Chase);
     assert.equal(action.targetSessionId, "a");
@@ -189,13 +189,13 @@ describe("decideMonsterAction — leash", () => {
 
 describe("decideMonsterAction — target selection", () => {
   it("ignores a player one tile outside the aggro radius", () => {
-    const action = decide({}, [player("a", SPAWN.tileX + SLIME.aggroRadiusTiles + 1, SPAWN.tileY)]);
+    const action = decide({}, [player("a", SPAWN.tileX + SQUIRREL.aggroRadiusTiles + 1, SPAWN.tileY)]);
     assert.equal(action.targetSessionId, null);
     assert.equal(action.state, MonsterAiState.Wander);
   });
 
   it("takes a player standing exactly on the aggro radius", () => {
-    const action = decide({}, [player("a", SPAWN.tileX + SLIME.aggroRadiusTiles, SPAWN.tileY)]);
+    const action = decide({}, [player("a", SPAWN.tileX + SQUIRREL.aggroRadiusTiles, SPAWN.tileY)]);
     assert.equal(action.targetSessionId, "a");
     assert.equal(action.state, MonsterAiState.Chase);
   });
@@ -250,7 +250,7 @@ describe("decideMonsterAction — chase", () => {
 
   it("books the next step a chase interval out, not a wander interval", () => {
     const action = decide({}, [player("a", SPAWN.tileX + 3, SPAWN.tileY)]);
-    assert.equal(stepOf(action).nextStepAt, NOW + SLIME.chaseStepIntervalMs);
+    assert.equal(stepOf(action).nextStepAt, NOW + SQUIRREL.chaseStepIntervalMs);
   });
 
   it("holds in the chase state between steps rather than dropping back to idle", () => {
@@ -278,7 +278,7 @@ describe("decideMonsterAction — attack", () => {
     assert.equal(action.targetSessionId, "a");
     assert.ok(action.kind === MonsterActionKind.Attack);
     assert.equal(action.facing, Direction.Right);
-    assert.equal(action.nextAttackAt, NOW + SLIME.attackCooldownMs);
+    assert.equal(action.nextAttackAt, NOW + SQUIRREL.attackCooldownMs);
   });
 
   it("holds in the attack state while the cooldown is running, and does not step", () => {

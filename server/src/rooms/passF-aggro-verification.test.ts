@@ -8,7 +8,7 @@ import { STEP_BY_DIRECTION } from "../game/movement";
 import { MONSTER_SPAWN_DEFINITIONS, MONSTER_TYPES, MonsterKind } from "./monsterDefinitions";
 
 /**
- * Pass F, F-4: `MONSTER_TYPES.aggroRadiusTiles` went from 4/6 (slime/bat) to 2/2
+ * Pass F, F-4: `MONSTER_TYPES.aggroRadiusTiles` went from 4/6 (squirrel/rabbit) to 2/2
  * (`docs/design-hunting-inventory.md` 부록 F). `monsterAi.test.ts` proves the FSM gate itself
  * against a literal fixture that is deliberately decoupled from this table (its own header
  * comment says so), so a typo in `monsterDefinitions.ts` would not fail anything there. This
@@ -143,7 +143,7 @@ function chebyshev(a: { tileX: number; tileY: number }, b: { tileX: number; tile
  * `aggroRadiusTiles` (2), makes the live distance bounded and safe for the whole test regardless
  * of where in its box the monster happens to be: `[marginTiles - W, marginTiles + W]` never dips
  * to 2 or below by wandering alone. The floor of that range, `marginTiles - W`, is also chosen to
- * still sit at or under the *old*, pre-Pass-F radius (4 for slime, 6 for bat) -- so a regression
+ * still sit at or under the *old*, pre-Pass-F radius (4 for squirrel, 6 for rabbit) -- so a regression
  * that silently restored the old value would show up here as a monster that starts closing the
  * distance instead of pacing it, which the assertion below would catch.
  */
@@ -227,32 +227,32 @@ afterEach(async () => {
 });
 
 describe("hunting-ground — F-4 aggro radius, against the real MONSTER_TYPES table", () => {
-  it(`the real slime aggroRadiusTiles is 2, not the pre-Pass-F 4`, () => {
-    const slime = MONSTER_TYPES.get(MonsterKind.Slime);
-    assert.ok(slime);
-    assert.equal(slime.aggroRadiusTiles, 2);
+  it(`the real squirrel aggroRadiusTiles is 2, not the pre-Pass-F 4`, () => {
+    const squirrel = MONSTER_TYPES.get(MonsterKind.Squirrel);
+    assert.ok(squirrel);
+    assert.equal(squirrel.aggroRadiusTiles, 2);
   });
 
-  it(`the real bat aggroRadiusTiles is 2, not the pre-Pass-F 6`, () => {
-    const bat = MONSTER_TYPES.get(MonsterKind.Bat);
-    assert.ok(bat);
-    assert.equal(bat.aggroRadiusTiles, 2);
+  it(`the real rabbit aggroRadiusTiles is 2, not the pre-Pass-F 6`, () => {
+    const rabbit = MONSTER_TYPES.get(MonsterKind.Rabbit);
+    assert.ok(rabbit);
+    assert.equal(rabbit.aggroRadiusTiles, 2);
   });
 
   it(
-    "a hunter 5 tiles from a live slime's spawn is never chased across two wander cycles, " +
+    "a hunter 5 tiles from a live squirrel's spawn is never chased across two wander cycles, " +
       "but holding at exactly 2 tiles from its live position starts a real chase",
     async () => {
       const room = await createRoom();
       const hunter = await join(room, "hunter");
       const map = await new TiledMapLoader().load("hunting-ground");
-      const slimeType = MONSTER_TYPES.get(MonsterKind.Slime);
-      assert.ok(slimeType);
+      const squirrelType = MONSTER_TYPES.get(MonsterKind.Squirrel);
+      assert.ok(squirrelType);
 
       const spawnRow = MONSTER_SPAWN_DEFINITIONS.find(
-        (spawn) => spawn.room === HUNTING_GROUND && spawn.kind === MonsterKind.Slime,
+        (spawn) => spawn.room === HUNTING_GROUND && spawn.kind === MonsterKind.Squirrel,
       );
-      assert.ok(spawnRow, "no slime spawn row in the real table");
+      assert.ok(spawnRow, "no squirrel spawn row in the real table");
       assert.equal(spawnRow.wanderRadiusTiles, 2, "margin math below assumes this row's real wander radius");
 
       // margin(5) - wanderRadiusTiles(2) = 3 > aggroRadiusTiles(2): wandering alone can never
@@ -264,31 +264,31 @@ describe("hunting-ground — F-4 aggro radius, against the real MONSTER_TYPES ta
         spawnRow.at,
         spawnRow.id,
         5,
-        slimeType.wanderStepIntervalMs,
+        squirrelType.wanderStepIntervalMs,
       );
 
-      await assertAggroEngagesAtTwo(room, hunter, map, spawnRow.id, slimeType.chaseStepIntervalMs);
+      await assertAggroEngagesAtTwo(room, hunter, map, spawnRow.id, squirrelType.chaseStepIntervalMs);
     },
   );
 
   it(
-    "a hunter 6 tiles from a live bat's spawn is never chased across two wander cycles, " +
+    "a hunter 6 tiles from a live rabbit's spawn is never chased across two wander cycles, " +
       "but holding at exactly 2 tiles from its live position starts a real chase",
     async () => {
       const room = await createRoom();
       const hunter = await join(room, "hunter");
       const map = await new TiledMapLoader().load("hunting-ground");
-      const batType = MONSTER_TYPES.get(MonsterKind.Bat);
-      assert.ok(batType);
+      const rabbitType = MONSTER_TYPES.get(MonsterKind.Rabbit);
+      assert.ok(rabbitType);
 
       const spawnRow = MONSTER_SPAWN_DEFINITIONS.find(
-        (spawn) => spawn.room === HUNTING_GROUND && spawn.kind === MonsterKind.Bat,
+        (spawn) => spawn.room === HUNTING_GROUND && spawn.kind === MonsterKind.Rabbit,
       );
-      assert.ok(spawnRow, "no bat spawn row in the real table");
+      assert.ok(spawnRow, "no rabbit spawn row in the real table");
       assert.equal(spawnRow.wanderRadiusTiles, 3, "margin math below assumes this row's real wander radius");
 
-      // margin(6) - wanderRadiusTiles(3) = 3 > aggroRadiusTiles(2): same reasoning as the slime
-      // case, sized for the bat's wider wander box.
+      // margin(6) - wanderRadiusTiles(3) = 3 > aggroRadiusTiles(2): same reasoning as the squirrel
+      // case, sized for the rabbit's wider wander box.
       await assertNoAggroAtMargin(
         room,
         hunter,
@@ -296,18 +296,18 @@ describe("hunting-ground — F-4 aggro radius, against the real MONSTER_TYPES ta
         spawnRow.at,
         spawnRow.id,
         6,
-        batType.wanderStepIntervalMs,
+        rabbitType.wanderStepIntervalMs,
       );
 
-      await assertAggroEngagesAtTwo(room, hunter, map, spawnRow.id, batType.chaseStepIntervalMs);
+      await assertAggroEngagesAtTwo(room, hunter, map, spawnRow.id, rabbitType.chaseStepIntervalMs);
     },
   );
 
-  it("leashRadiusTiles is unchanged (8 for slime, 10 for bat) -- F-4 touched only aggro", () => {
-    const slime = MONSTER_TYPES.get(MonsterKind.Slime);
-    const bat = MONSTER_TYPES.get(MonsterKind.Bat);
-    assert.ok(slime && bat);
-    assert.equal(slime.leashRadiusTiles, 8);
-    assert.equal(bat.leashRadiusTiles, 10);
+  it("leashRadiusTiles is unchanged (8 for squirrel, 10 for rabbit) -- F-4 touched only aggro", () => {
+    const squirrel = MONSTER_TYPES.get(MonsterKind.Squirrel);
+    const rabbit = MONSTER_TYPES.get(MonsterKind.Rabbit);
+    assert.ok(squirrel && rabbit);
+    assert.equal(squirrel.leashRadiusTiles, 8);
+    assert.equal(rabbit.leashRadiusTiles, 10);
   });
 });

@@ -33,7 +33,7 @@ describe("buildLootTableView", () => {
       assert.equal(view.name, MONSTER_DISPLAY_NAMES[view.kind as MonsterKind]);
       assert.equal(view.drops.length, type.loot.length);
       // Drop order follows the monster type's own loot array, not ITEM_DEFINITIONS' order —
-      // those two orderings differ today (slime-jelly, bat-wing, copper-coin, herb, old-dagger).
+      // those two orderings differ today (acorn, carrot, copper-coin, herb, old-dagger).
       assert.deepEqual(
         view.drops.map((drop) => drop.itemKey),
         type.loot.map((entry) => entry.itemKey),

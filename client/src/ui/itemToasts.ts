@@ -15,7 +15,7 @@ interface LiveToast {
   node: HTMLElement;
   gain: HTMLElement;
   total: HTMLElement;
-  /** Summed across repeats, so five slimes in a row read "+5" rather than five separate "+1"s. */
+  /** Summed across repeats, so five squirrels in a row read "+5" rather than five separate "+1"s. */
   gained: number;
   timer: number;
 }

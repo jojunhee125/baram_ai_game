@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   ATTACK_COOLDOWN_MS,
   COMBAT_EXIT_MS,
+  COMBAT_RECOVERY_HP_PER_TICK,
   Direction,
   MONSTER_TICK_MS,
   PLAYER_ATTACK_DAMAGE,
@@ -62,9 +63,9 @@ const OPEN_CENTRE: TilePosition = { tileX: 78, tileY: 70 };
 
 const FIXTURE_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
   [
-    MonsterKind.Slime,
+    MonsterKind.Squirrel,
     {
-      kind: MonsterKind.Slime,
+      kind: MonsterKind.Squirrel,
       maxHp: 8,
       damage: 3,
       attackCooldownMs: MONSTER_TICK_MS,
@@ -74,17 +75,17 @@ const FIXTURE_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       leashRadiusTiles: 10,
       respawnDelayMs: MONSTER_TICK_MS * 5,
       loot: [
-        { itemKey: "slime-jelly", chance: 1, quantity: 2 },
+        { itemKey: "acorn", chance: 1, quantity: 2 },
         { itemKey: "herb", chance: 0.0001, quantity: 1 },
       ],
     },
   ],
   [
-    // A second kind, distinct from Slime, whose loot rows are *both* certain hits — needed to
+    // A second kind, distinct from Squirrel, whose loot rows are *both* certain hits — needed to
     // exercise "one grant throws, the other still lands" (a single-loot-row fixture cannot).
-    MonsterKind.Bat,
+    MonsterKind.Rabbit,
     {
-      kind: MonsterKind.Bat,
+      kind: MonsterKind.Rabbit,
       maxHp: 8,
       damage: 3,
       attackCooldownMs: MONSTER_TICK_MS,
@@ -94,7 +95,7 @@ const FIXTURE_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       leashRadiusTiles: 10,
       respawnDelayMs: MONSTER_TICK_MS * 5,
       loot: [
-        { itemKey: "slime-jelly", chance: 1, quantity: 1 },
+        { itemKey: "acorn", chance: 1, quantity: 1 },
         { itemKey: "herb", chance: 1, quantity: 1 },
       ],
     },
@@ -135,11 +136,11 @@ const ROOM_OPTIONS: RoomCreateOptions = {
 };
 
 function spawnAt(id: string, at: TilePosition): MonsterSpawnDefinition {
-  return { id, room: ROOM_OPTIONS.roomType, kind: MonsterKind.Slime, at, wanderRadiusTiles: 0 };
+  return { id, room: ROOM_OPTIONS.roomType, kind: MonsterKind.Squirrel, at, wanderRadiusTiles: 0 };
 }
 
-function spawnBatAt(id: string, at: TilePosition): MonsterSpawnDefinition {
-  return { id, room: ROOM_OPTIONS.roomType, kind: MonsterKind.Bat, at, wanderRadiusTiles: 0 };
+function spawnRabbitAt(id: string, at: TilePosition): MonsterSpawnDefinition {
+  return { id, room: ROOM_OPTIONS.roomType, kind: MonsterKind.Rabbit, at, wanderRadiusTiles: 0 };
 }
 
 async function createRoom(
@@ -417,13 +418,13 @@ describe("VERIFY handleAttack", () => {
       const granted = sentOfType<ItemGranted>(attacker, ServerMessage.ItemGranted);
       assert.equal(granted.length, 1, "the 1.0 row dropped, the 0.0001 row did not");
       assert.deepEqual(granted[0], {
-        itemKey: "slime-jelly",
-        name: "슬라임 젤리",
-        icon: "slime-jelly",
+        itemKey: "acorn",
+        name: "도토리",
+        icon: "acorn",
         quantity: 2,
         total: 2,
       });
-      assert.deepEqual(await store.list("sso-user-1"), [{ itemKey: "slime-jelly", quantity: 2 }]);
+      assert.deepEqual(await store.list("sso-user-1"), [{ itemKey: "acorn", quantity: 2 }]);
       assert.deepEqual(await store.list("attacker"), [], "credited to the account, not the session");
     } finally {
       dispose(room);
@@ -444,7 +445,7 @@ describe("VERIFY handleAttack", () => {
       room.onLeave(asRoomClient(attacker));
       await flush();
 
-      assert.deepEqual(await store.list("sso-user-2"), [{ itemKey: "slime-jelly", quantity: 2 }]);
+      assert.deepEqual(await store.list("sso-user-2"), [{ itemKey: "acorn", quantity: 2 }]);
       assert.equal(
         sentOfType<ItemGranted>(attacker, ServerMessage.ItemGranted).length,
         0,
@@ -466,7 +467,7 @@ describe("VERIFY handleAttack", () => {
       attack(room, attacker, 0);
       attack(room, attacker, 0);
       await flush();
-      assert.deepEqual(await store.list("attacker"), [{ itemKey: "slime-jelly", quantity: 2 }]);
+      assert.deepEqual(await store.list("attacker"), [{ itemKey: "acorn", quantity: 2 }]);
     } finally {
       dispose(room);
     }
@@ -563,14 +564,22 @@ describe("VERIFY monster damage, death and recovery", () => {
       place(room, "hurt", OPEN_CENTRE);
       place(room, "whole", { tileX: OPEN_CENTRE.tileX + 2, tileY: OPEN_CENTRE.tileY });
       assert.ok(hurt.userData && whole.userData);
-      hurt.userData.hp = PLAYER_MAX_HP - 2;
+      hurt.userData.hp = PLAYER_MAX_HP - COMBAT_RECOVERY_HP_PER_TICK * 2;
       hurt.userData.lastDamagedAt = 1000;
 
       room["tick"](1000 + COMBAT_EXIT_MS - 1);
-      assert.equal(hurt.userData.hp, PLAYER_MAX_HP - 2, "one millisecond early is still in combat");
+      assert.equal(
+        hurt.userData.hp,
+        PLAYER_MAX_HP - COMBAT_RECOVERY_HP_PER_TICK * 2,
+        "one millisecond early is still in combat",
+      );
 
       room["tick"](1000 + COMBAT_EXIT_MS);
-      assert.equal(hurt.userData.hp, PLAYER_MAX_HP - 1, "exactly on the boundary it starts coming back");
+      assert.equal(
+        hurt.userData.hp,
+        PLAYER_MAX_HP - COMBAT_RECOVERY_HP_PER_TICK,
+        "exactly on the boundary it starts coming back",
+      );
       room["tick"](1000 + COMBAT_EXIT_MS + MONSTER_TICK_MS);
       assert.equal(hurt.userData.hp, PLAYER_MAX_HP);
       room["tick"](1000 + COMBAT_EXIT_MS + MONSTER_TICK_MS * 2);
@@ -652,7 +661,7 @@ describe("VERIFY last-hit changes hands between two different attackers", () => 
       );
       const granted = sentOfType<ItemGranted>(second, ServerMessage.ItemGranted);
       assert.equal(granted.length, 1, "the killer is told");
-      assert.deepEqual(await store.list("sso-user-second"), [{ itemKey: "slime-jelly", quantity: 2 }]);
+      assert.deepEqual(await store.list("sso-user-second"), [{ itemKey: "acorn", quantity: 2 }]);
       assert.deepEqual(
         await store.list("sso-user-first"),
         [],
@@ -728,7 +737,7 @@ describe("VERIFY a store that actually throws (not just a full bag)", () => {
 
     add(_ownerKey: string, itemKey: string, quantity: number): Promise<number | null> {
       this.addCalls.push(itemKey);
-      if (itemKey === "slime-jelly") {
+      if (itemKey === "acorn") {
         return Promise.reject(new Error("connection reset"));
       }
       const total = (this.bag.get(itemKey) ?? 0) + quantity;
@@ -740,7 +749,7 @@ describe("VERIFY a store that actually throws (not just a full bag)", () => {
   it("drops the failed grant in silence, still credits and announces the other, and never throws unhandled", async () => {
     const faced = { tileX: OPEN_CENTRE.tileX + 1, tileY: OPEN_CENTRE.tileY };
     const store = new FailingFirstGrantStore();
-    const room = await createRoom([spawnBatAt("m", faced)], store);
+    const room = await createRoom([spawnRabbitAt("m", faced)], store);
     const warnings: unknown[][] = [];
     const originalWarn = console.warn;
     const unhandled: unknown[] = [];
@@ -761,7 +770,7 @@ describe("VERIFY a store that actually throws (not just a full bag)", () => {
       assert.equal(room.state.monsters.has("m"), false, "the kill resolves regardless of the store's health");
       assert.deepEqual(
         store.addCalls,
-        ["slime-jelly", "herb"],
+        ["acorn", "herb"],
         "both independent rows were attempted, in declared order",
       );
       const granted = sentOfType<ItemGranted>(attacker, ServerMessage.ItemGranted);

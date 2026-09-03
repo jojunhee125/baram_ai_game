@@ -81,23 +81,26 @@ function mirror(rows) {
   return rows.map((row) => [...row].reverse().join(""));
 }
 
-/* -------------------------------------------------------------- slime ---- */
+/* ----------------------------------------------------------- squirrel ---- */
 
-const SLIME_PALETTE = {
+const SQUIRREL_PALETTE = {
   ".": null,
-  o: hex("#1c3a24"),
-  g: hex("#58b95c"),
-  G: hex("#3d8a45"),
-  l: hex("#93dd8e"),
-  e: hex("#17281a"),
-  w: hex("#eefaec"),
+  o: hex("#2b1810"),
+  t: hex("#c97c3f"),
+  T: hex("#9c5a2c"),
+  c: hex("#f6e2b8"),
+  e: hex("#1c1008"),
 };
 
 /**
- * Squash / neutral / stretch. A slime has no legs to alternate, so the walk cycle is the blob
- * flattening and rebounding; at MONSTER_WALK_FRAME_RATE that reads as hopping between tiles.
+ * Crouch / stand / hop. Ground-type, unlike the bird's-eye bat this replaces: every pose sits
+ * flush on the cell floor (row 15 is always opaque), and the big curled tail is what draws the
+ * eye upward instead. `idle` carries the tail fully curled over the back; `stepA` droops it low
+ * as the body crouches, `stepB` flares it higher as the hop stretches the body upward — the same
+ * squash/neutral/stretch rhythm the torso underneath still uses, recolored from this file's
+ * previous slime.
  */
-const SLIME_BODIES = {
+const SQUIRREL_BODIES = {
   stepA: [
     "................",
     "................",
@@ -105,193 +108,194 @@ const SLIME_BODIES = {
     "................",
     "................",
     "................",
-    "................",
-    "................",
+    "..oo.oo..ottttto",
+    "..tt.tt..ottttto",
     "....oooooooo....",
-    "..olllgggggggo..",
-    ".ollggggggggggo.",
-    "olgggggggggggggo",
-    "oggggggggggggggo",
-    "oggggggggggggggo",
-    "oGGGGGGGGGGGGGGo",
+    "..occcttttttto..",
+    ".occtttttttttto.",
+    "octtttttttttttto",
+    "otttttttttttttto",
+    "otttttttttttttto",
+    "oTTTTTTTTTTTTTTo",
     "oooooooooooooooo",
   ],
   idle: [
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
+    "...........oto..",
+    "..........ottto.",
+    "..oo.oo..ottttto",
+    "..tt.tt..ottttto",
+    "..ottttto.otttto",
+    "..ottttto.otttto",
     ".....oooooo.....",
-    "...oollllggoo...",
-    "..olllgggggggo..",
-    ".ollggggggggggo.",
-    ".olgggggggggggo.",
-    "oggggggggggggggo",
-    "oggggggggggggggo",
-    "oggggggggggGGGGo",
-    "oGGGGGGGGGGGGGGo",
+    "...ooccccttoo...",
+    "..occcttttttto..",
+    ".occtttttttttto.",
+    ".octtttttttttto.",
+    "octtttttttttttto",
+    "otttttttttttttto",
+    "ottttttttttTTTTo",
+    "oTTTTTTTTTTTTTTo",
     ".oooooooooooooo.",
   ],
   stepB: [
-    "................",
-    "................",
-    "................",
+    "......otttto....",
+    "..oo..otttttto..",
+    "..tt..otttttto..",
     "......oooo......",
-    "....oollggoo....",
-    "...olllgggggo...",
-    "...ollggggggo...",
-    "..ollggggggggo..",
-    "..olgggggggggo..",
-    "..oggggggggggo..",
-    ".oggggggggggggo.",
-    ".oggggggggggggo.",
-    ".oggggggggggggo.",
-    ".ogggggggggGGGo.",
-    ".oGGGGGGGGGGGGo.",
+    "....ooccttoo....",
+    "...occcttttto...",
+    "...occtttttto...",
+    "..occtttttttto..",
+    "..octtttttttto..",
+    "..otttttttttto..",
+    ".otttttttttttto.",
+    ".otttttttttttto.",
+    ".otttttttttttto.",
+    ".otttttttttTTTo.",
+    ".oTTTTTTTTTTTTo.",
     "..oooooooooooo..",
   ],
 };
 
-const SLIME_FACE_WIDTH = 8;
-const SLIME_FACE_X = 4;
-/** Where the eyes sit in each pose — the blob's top edge moves, so the face has to move with it. */
-const SLIME_FACE_Y = { stepA: 10, idle: 9, stepB: 7 };
+const SQUIRREL_FACE_WIDTH = 6;
+const SQUIRREL_FACE_X = 5;
+/**
+ * Rows 9-12 are fur in all three poses regardless of how the ears/tail/torso above them move
+ * (checked by eye against every SQUIRREL_BODIES row above), so unlike the bat this face needs no
+ * per-pose offset — one fixed band works for the whole walk cycle.
+ */
+const SQUIRREL_FACE_Y = () => 9;
 
-const SLIME_FACE_LEFT = ["we.we...", "ee.ee...", "........", ".ooo...."];
+const SQUIRREL_FACE_LEFT = ["e.....", "e.....", "......", "oo...."];
 
 /**
- * Up is the only facing with no eyes at all: a slime turned away is a plain blob with two dimples,
- * which is what makes the four rows of a kind visibly different rather than four copies with the
- * highlight nudged (the check at the bottom of this file refuses the latter).
+ * Up is the only facing with no eyes at all: a squirrel turned away is a bare patch of fur with
+ * two shaded dimples, which is what makes the four rows of a kind visibly different rather than
+ * four copies with the highlight nudged (the check at the bottom of this file refuses the latter).
  */
-const SLIME_FACES = {
-  down: [".we..we.", ".ee..ee.", "........", "..oooo.."],
-  left: SLIME_FACE_LEFT,
-  right: mirror(SLIME_FACE_LEFT),
-  up: ["........", ".GG..GG.", "..G..G..", "........"],
+const SQUIRREL_FACES = {
+  down: [".e..e.", ".e..e.", "......", "..oo.."],
+  left: SQUIRREL_FACE_LEFT,
+  right: mirror(SQUIRREL_FACE_LEFT),
+  up: ["......", ".T..T.", "..TT..", "......"],
 };
 
-/* ---------------------------------------------------------------- bat ---- */
+/* ------------------------------------------------------------- rabbit ---- */
 
-const BAT_PALETTE = {
+const RABBIT_PALETTE = {
   ".": null,
-  o: hex("#221b30"),
-  b: hex("#7d6ba3"),
-  B: hex("#574a78"),
-  m: hex("#a695cc"),
-  e: hex("#f2c05b"),
-  f: hex("#f6f2fb"),
+  o: hex("#2e2422"),
+  w: hex("#f5f0e6"),
+  d: hex("#cfc7ba"),
+  p: hex("#e8a6b8"),
+  e: hex("#1c1008"),
 };
 
 /**
- * Wings up / spread / down. The body is a narrow four-pixel column so the wings own most of the
- * silhouette — a wide body reads as an owl, and the whole point of these two kinds is that
- * neither can be mistaken for a person at 32px (design D-1).
- *
- * Every pose keeps the head interior at cols 6-9, rows 7-10, so one face offset serves all three.
- * The body stops short of the cell floor: the sprite origin is (0.5, 1) like the avatar's, so that
- * gap is the bat hovering over its tile rather than standing on it.
- *
- * The raised pose drops the ears — they are behind the wings — which is also what makes the
- * tallest and the widest frames of the cycle unmistakable from each other.
+ * Crouch / stand / hop, ground-type like the squirrel above (row 15 is always opaque). The long
+ * straight ears are the silhouette's whole job here, in deliberate contrast to the squirrel's
+ * small round ones: `stepA` leans them back over the crouch, `idle` holds them fully erect, and
+ * `stepB` flares them at the hop's peak. The tail is the opposite trade — just a two-pixel round
+ * nub tucked into the torso's back corner, "just a little" rather than the squirrel's dominant
+ * curl.
  */
-const BAT_BODIES = {
+const RABBIT_BODIES = {
   stepA: [
     "................",
-    "oo............oo",
-    "ommo........ommo",
-    "ommmo......ommmo",
-    "ommmmo....ommmmo",
-    ".ommmo....ommmo.",
-    "..omooooooooomo.",
-    ".....obbbbo.....",
-    ".....obbbbo.....",
-    ".....obbbbo.....",
-    ".....obbbbo.....",
-    ".....oBBBBo.....",
-    "......oooo......",
     "................",
     "................",
-    "................",
+    "....oo...oo.....",
+    "....ww...ww.....",
+    ".....wp..wp.....",
+    ".....wp..wp.....",
+    "....ww...ww.....",
+    "....oooooooo....",
+    "..owwwwwwwwwwo.o",
+    ".owwwwwwwwwwwwod",
+    "owwwwwwwwwwwwwwo",
+    "owwwwwwwwwwwwwwo",
+    "owwwwwwwwwwwwwwo",
+    "oddddddddddddddo",
+    "oooooooooooooooo",
   ],
   idle: [
-    "................",
-    "................",
-    "................",
-    "................",
-    "......o..o......",
-    ".....ob..bo.....",
-    "..oo.oooooo.oo..",
-    ".omo.obbbbo.omo.",
-    "ommmoobbbboommmo",
-    "ommmmobbbbommmmo",
-    "ommmmobbbbommmmo",
-    "ooooooBBBBoooooo",
-    "......oooo......",
-    "................",
-    "................",
-    "................",
+    "....oo...oo.....",
+    "....ww...ww.....",
+    "....wp...wp.....",
+    "....wp...wp.....",
+    "....wp...wp.....",
+    "....ww...ww.....",
+    ".....oooooo.....",
+    "...oowwwwwwoo...",
+    "..owwwwwwwwwwo.o",
+    ".owwwwwwwwwwwwod",
+    ".owwwwwwwwwwwwo.",
+    "owwwwwwwwwwwwwwo",
+    "owwwwwwwwwwwwwwo",
+    "owwwwwwwwwwddddo",
+    "oddddddddddddddo",
+    ".oooooooooooooo.",
   ],
   stepB: [
-    "................",
-    "................",
-    "................",
-    "................",
-    "......o..o......",
-    ".....ob..bo.....",
-    ".....oooooo.....",
-    ".....obbbbo.....",
-    "....oobbbboo....",
-    "...omobbbbomo...",
-    "..ommobbbbommo..",
-    ".ommmoBBBBommmo.",
-    "ommmo.oooo.ommmo",
-    ".oooo......oooo.",
-    "................",
-    "................",
+    "...oo.....oo....",
+    "....ww...ww.....",
+    "....wp...wp.....",
+    "......oooo......",
+    "....oowwwwoo....",
+    "...owwwwwwwwo...",
+    "...owwwwwwwwo...",
+    "..owwwwwwwwwwo..",
+    "..owwwwwwwwwwo.o",
+    "..owwwwwwwwwwo.d",
+    ".owwwwwwwwwwwwo.",
+    ".owwwwwwwwwwwwo.",
+    ".owwwwwwwwwwwwo.",
+    ".owwwwwwwwwdddo.",
+    ".oddddddddddddo.",
+    "..oooooooooooo..",
   ],
 };
 
-const BAT_FACE_WIDTH = 4;
-const BAT_FACE_X = 6;
-const BAT_FACE_Y = 7;
+const RABBIT_FACE_WIDTH = 6;
+const RABBIT_FACE_X = 4;
+/** Same reasoning as SQUIRREL_FACE_Y: rows 9-12 are fur in all three poses here too. */
+const RABBIT_FACE_Y = () => 9;
 
-const BAT_FACE_LEFT = ["ee..", "....", "oo..", ".f.."];
+const RABBIT_FACE_LEFT = ["e.....", "e.....", "......", "oo...."];
 
-const BAT_FACES = {
-  down: ["e..e", "....", "oooo", ".ff."],
-  left: BAT_FACE_LEFT,
-  right: mirror(BAT_FACE_LEFT),
-  up: ["....", ".BB.", ".BB.", "...."],
+/** Up has no eyes, same convention as the squirrel's — a rabbit turned away shows ears, not a face. */
+const RABBIT_FACES = {
+  down: [".e..e.", ".e..e.", "......", "..oo.."],
+  left: RABBIT_FACE_LEFT,
+  right: mirror(RABBIT_FACE_LEFT),
+  up: ["......", ".d..d.", "..dd..", "......"],
 };
 
 /* -------------------------------------------------------------- kinds ---- */
 
 /**
  * Index is the kindIndex baked into the sheet, so **reordering this renames every monster**:
- * a slime would draw bat frames. Checked against MONSTER_SPRITE_ORDER in monsterSprites.ts
+ * a squirrel would draw rabbit frames. Checked against MONSTER_SPRITE_ORDER in monsterSprites.ts
  * below, the same discipline import-avatar.mjs applies to AVATAR_SKIN_COUNT.
  */
 const KINDS = [
   {
-    kind: "slime",
-    palette: SLIME_PALETTE,
-    bodies: SLIME_BODIES,
-    faces: SLIME_FACES,
-    faceWidth: SLIME_FACE_WIDTH,
-    faceX: SLIME_FACE_X,
-    faceY: (step) => SLIME_FACE_Y[step],
+    kind: "squirrel",
+    palette: SQUIRREL_PALETTE,
+    bodies: SQUIRREL_BODIES,
+    faces: SQUIRREL_FACES,
+    faceWidth: SQUIRREL_FACE_WIDTH,
+    faceX: SQUIRREL_FACE_X,
+    faceY: SQUIRREL_FACE_Y,
   },
   {
-    kind: "bat",
-    palette: BAT_PALETTE,
-    bodies: BAT_BODIES,
-    faces: BAT_FACES,
-    faceWidth: BAT_FACE_WIDTH,
-    faceX: BAT_FACE_X,
-    faceY: () => BAT_FACE_Y,
+    kind: "rabbit",
+    palette: RABBIT_PALETTE,
+    bodies: RABBIT_BODIES,
+    faces: RABBIT_FACES,
+    faceWidth: RABBIT_FACE_WIDTH,
+    faceX: RABBIT_FACE_X,
+    faceY: RABBIT_FACE_Y,
   },
 ];
 
@@ -332,11 +336,9 @@ function buildMonsterSheet() {
 const ITEM_PALETTE = {
   ".": null,
   o: hex("#2b2433"),
-  g: hex("#58b95c"),
-  G: hex("#3d8a45"),
-  l: hex("#93dd8e"),
-  m: hex("#a695cc"),
-  P: hex("#574a78"),
+  /** Carrot's root — repurposed from the two colours slime-jelly's green fill used to own. */
+  g: hex("#e8821f"),
+  G: hex("#b5620f"),
   c: hex("#c9873f"),
   C: hex("#a2662b"),
   y: hex("#efc06a"),
@@ -356,43 +358,43 @@ const ITEM_PALETTE = {
  */
 const ITEMS = [
   {
-    icon: "slime-jelly",
+    icon: "acorn",
     rows: [
       "................",
-      "................",
-      "................",
+      ".......oo.......",
       ".....oooooo.....",
-      "...oollllggoo...",
-      "..olllggggggo...",
-      ".ollgggggggggo..",
-      ".olggggggggggo..",
-      ".oggggggggggggo.",
-      ".oggggggggggggo.",
-      ".oggggggggggggo.",
-      ".ogggggggggGGGo.",
-      ".oGGGGGGGGGGGGo.",
-      "..oooooooooooo..",
+      "....okkkkkko....",
+      "...okkkkkkkko...",
+      "...oKKKKKKKKo...",
+      "....oyyyyyyo....",
+      "...oyyyyyyyyo...",
+      "...oyyyccyyyo...",
+      "...oyyyccyyyo...",
+      "....occcccco....",
+      ".....occcco.....",
+      "......occo......",
+      ".......oo.......",
       "................",
       "................",
     ],
   },
   {
-    icon: "bat-wing",
+    icon: "carrot",
     rows: [
+      "......H..H......",
+      ".....hh..hh.....",
+      "......hHHh......",
+      ".....oooooo.....",
+      "....oggGGggo....",
+      "...ogggGGgggo...",
+      "...ogggGGgggo...",
+      "....oggggggo....",
+      ".....oggggo.....",
+      ".....oGGGGo.....",
+      "......oGGo......",
+      "......oggo......",
+      ".......oo.......",
       "................",
-      "..oo............",
-      "..omo...........",
-      "..ommo..........",
-      "..ommmo.........",
-      "..ommmmoo.......",
-      "..ommmmmmo......",
-      "..ommmmmmmoo....",
-      "..ommmmmmmmmo...",
-      "..oPmmmmmmmmmo..",
-      "..oPPmmmmmmmmmo.",
-      "..oPPPmmmmmmmmo.",
-      "..ooPPPmmmmmmoo.",
-      "...ooooooooooo..",
       "................",
       "................",
     ],

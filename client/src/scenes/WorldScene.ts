@@ -30,6 +30,7 @@ import { MonsterHealthBars } from "../world/monsterHealthBars";
 import {
   MONSTER_TEXTURE,
   MonsterSprites,
+  monsterDisplayName,
   registerMonsterAnimations,
 } from "../world/monsterSprites";
 import { NameTags } from "../world/nameTags";
@@ -89,6 +90,7 @@ export class WorldScene extends Phaser.Scene {
   private effects!: CombatEffects;
   private bubbles!: ChatBubbles;
   private nameTags!: NameTags;
+  private monsterNames!: NameTags;
   private connection!: RoomConnection;
   private mapKey!: string;
   private world: BuiltWorld | null = null;
@@ -177,6 +179,7 @@ export class WorldScene extends Phaser.Scene {
       this.effects = new CombatEffects(this);
       this.bubbles = new ChatBubbles(this);
       this.nameTags = new NameTags(this);
+      this.monsterNames = new NameTags(this);
       this.weapon = new WeaponVisualState();
     } catch (error) {
       console.error(error);
@@ -202,14 +205,16 @@ export class WorldScene extends Phaser.Scene {
         this.players.remove(sessionId);
       },
       onMonsterAdd: (monsterId, snapshot) => {
-        this.monsters.add(monsterId, snapshot);
+        const sprite = this.monsters.add(monsterId, snapshot);
         // A respawn reuses the id, and whatever stands there now has not been hit yet.
         this.monsterHealth.remove(monsterId);
+        this.monsterNames.add(monsterId, sprite, monsterDisplayName(snapshot.kind));
       },
       onMonsterChange: (monsterId, snapshot) => this.monsters.update(monsterId, snapshot),
       onMonsterRemove: (monsterId) => {
         this.monsters.remove(monsterId);
         this.monsterHealth.remove(monsterId);
+        this.monsterNames.remove(monsterId);
       },
       onMonsterHit: (event) => this.showMonsterHit(event),
       onPlayerHit: (event) => this.showPlayerHit(event),
@@ -273,6 +278,7 @@ export class WorldScene extends Phaser.Scene {
   override update(time: number): void {
     this.bubbles.update(time);
     this.nameTags.update();
+    this.monsterNames.update();
     this.monsterHealth.update();
     // Out-of-combat recovery is drawn, never messaged (design §6.3), so it ticks here.
     this.vitals?.update();

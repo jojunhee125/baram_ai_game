@@ -821,9 +821,9 @@ describe("MetaverseRoom — arriveAtHome placement", () => {
  */
 const FIXTURE_MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
   [
-    MonsterKind.Slime,
+    MonsterKind.Squirrel,
     {
-      kind: MonsterKind.Slime,
+      kind: MonsterKind.Squirrel,
       maxHp: 12,
       damage: 2,
       attackCooldownMs: MONSTER_TICK_MS,
@@ -912,7 +912,7 @@ function monsterSpawn(
   wanderRadiusTiles = 0,
 ): MonsterSpawnDefinition {
   // `room` is ignored: MonsterCountingRoom returns the fixture table without filtering it.
-  return { id, room: MONSTER_ROOM.roomType, kind: MonsterKind.Slime, at, wanderRadiusTiles };
+  return { id, room: MONSTER_ROOM.roomType, kind: MonsterKind.Squirrel, at, wanderRadiusTiles };
 }
 
 async function createMonsterRoom(
