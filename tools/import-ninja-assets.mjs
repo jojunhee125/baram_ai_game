@@ -139,7 +139,12 @@ function buildTileset(sources) {
 const GID_TILE_MASK = 0x1fffffff;
 
 /** Every map that depends on this tileset; each is re-verified and re-emitted unchanged. */
-const MAP_FILES = ["maps/plaza.json", "maps/grand-plaza.json", "maps/hunting-ground.json"];
+const MAP_FILES = [
+  "maps/plaza.json",
+  "maps/grand-plaza.json",
+  "maps/hunting-ground.json",
+  "maps/hunting-den.json",
+];
 
 /**
  * The maps are authored art-independently: only the PNG changes on a reskin. Rather than

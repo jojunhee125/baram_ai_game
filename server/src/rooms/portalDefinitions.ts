@@ -58,4 +58,28 @@ export const PORTAL_DEFINITIONS: readonly PortalDefinition[] = [
     },
     to: { room: "plaza", arrival: { tileX: 31, tileY: 9, spreadRadiusInTiles: 0 } },
   },
+  {
+    id: "hunting-ground-north-door",
+    from: {
+      room: "hunting-ground",
+      // The trail's north end, already dirtPath before this door existed
+      // (`docs/design-phase-e-second-hunting-ground.md` §2.2) - no new terrain, just a threshold.
+      tiles: [
+        { tileX: 35, tileY: 8 },
+        { tileX: 36, tileY: 8 },
+      ],
+    },
+    to: { room: "hunting-den", arrival: { tileX: 31, tileY: 26, spreadRadiusInTiles: 0 } },
+  },
+  {
+    id: "hunting-den-south-door",
+    from: {
+      room: "hunting-den",
+      tiles: [
+        { tileX: 31, tileY: 27 },
+        { tileX: 32, tileY: 27 },
+      ],
+    },
+    to: { room: "hunting-ground", arrival: { tileX: 35, tileY: 9, spreadRadiusInTiles: 0 } },
+  },
 ];

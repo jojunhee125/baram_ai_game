@@ -65,6 +65,16 @@ node tools/generate-hunting-ground.mjs                                  # cwd = 
 
 **폭 1칸 통로 금지는 스타일이 아니라 제약이다.** 몬스터가 그리디 스텝으로 이동하므로(로드맵 항목7 §7) 폭 1칸 막다른 길에 들어가면 영원히 진동한다. 검증 구현은 "모든 통행 가능 칸은 완전 통행 가능한 2×2 블록에 최소 하나 속한다".
 
+### hunting-den 맵 (비파괴, 손 배치 + 절차적 테두리)
+
+```
+node tools/generate-hunting-den.mjs                                     # cwd = code/
+```
+
+`generate-hunting-ground.mjs`와 완전히 같은 구조·검증(8종 + 자기 남문 문턱 검증)이다(Phase E, `docs/design-phase-e-second-hunting-ground.md` §3.2). 내부 walkable(32×20)은 손으로 배치하고 테두리 밴드는 절차적(성벽 2링 → 숲 → 해변 → 물 4층). 난수 없음. 타일셋 블록은 `plaza.json`에서 읽어 그대로 복사한다.
+
+hunting-ground와의 유일한 구조적 차이: 문이 남문 하나뿐이다 — 이 방은 hunting-ground의 오솔길 북쪽 끝(북문)에서만 들어올 수 있고, 그 남문이 들어올 때의 도착 지점(hunting-ground-north-door)과 나갈 때의 트리거(hunting-den-south-door)를 동시에 겸한다.
+
 ### grand-plaza 맵 (재생성, 크기/좌표 재설정)
 
 ```
@@ -177,7 +187,7 @@ Go/No-go PoC #2(500 CCU broadcast 측정) 전용 맵. 설계 근거와 수치 �
 
 - **72 x 41 tiles**, 내부 walkable **40 x 24**(x16–55, y8–31), 통행 가능 **860칸** / 통행 불가 2,092칸
 - `plaza.json`과 **완전히 동일한 포맷·동일한 embedded 타일셋**(아트 신규 제작 0)
-- spawn 중심 `{ tileX: 35, tileY: 29 }`, `spreadRadiusInTiles: 2` (남문 안쪽 길목, 포탈 도착보다 한 칸 북쪽)
+- spawn 중심 `{ tileX: 35, tileY: 27 }`, `spreadRadiusInTiles: 2` (남문 트리거(y=31)와 최소 2칸 거리 — 2026-09-03 spawn이 포탈 트리거와 겹쳐 의도치 않게 순간이동되는 버그가 발견돼 `tileY: 29`에서 조정됨)
 - 뷰포트(32×18)보다 넓어 한 화면에 다 들어오지 않는다 — 사냥터는 돌아다니는 곳이다
 
 | 영역 | 범위 | 내용 |
@@ -194,8 +204,36 @@ Go/No-go PoC #2(500 CCU broadcast 측정) 전용 맵. 설계 근거와 수치 �
 |---|---|---|
 | 트리거 (남쪽 문) | `{35,31}` `{36,31}` | `hunting-ground-south-door` → `plaza` |
 | 도착 | `{35,30}` | `plaza-north-door` 로 들어올 때 |
+| 트리거 (북쪽 문) | `{35,8}` `{36,8}` | `hunting-ground-north-door` → `hunting-den` (Phase E) |
+| 도착 | `{35,9}` | `hunting-den-south-door` 로 들어올 때 |
 
-트리거는 walkable 최남단 행(row 31)이고 도착은 그 북쪽 칸, spawn은 다시 그 북쪽 칸이다. 트리거 2칸은 **나무 바닥(tile id 3)** 으로 그려 문턱임을 보이며(plaza 남문과 같은 규약), 생성기가 그 일치를 검증한다.
+남문 트리거는 walkable 최남단 행(row 31)이고 도착은 그 북쪽 칸, spawn은 다시 그 북쪽 칸이다. 북문은 오솔길(interior col 19-20, map x35-36)의 북쪽 종점으로, 남문의 정확한 대칭이다. 두 문의 트리거 전부 **나무 바닥(tile id 3)** 으로 그려 문턱임을 보이며(plaza 남문과 같은 규약), 생성기가 그 일치를 검증한다.
+
+## maps/hunting-den.json
+
+로드맵 Phase E("사냥터 2번째 방")의 맵. 설계 근거는 `docs/design-phase-e-second-hunting-ground.md` §3. hunting-ground의 오솔길 북쪽 끝(북문)을 통해서만 들어올 수 있고, plaza에서는 보이지 않는다.
+
+- **64 x 37 tiles**, 내부 walkable **32 x 20**(x16–47, y8–27), 통행 가능 **592칸** / 통행 불가 1,776칸
+- `plaza.json`과 **완전히 동일한 포맷·동일한 embedded 타일셋**(아트 신규 제작 0)
+- spawn 중심 `{ tileX: 31, tileY: 24 }`, `spreadRadiusInTiles: 1` (남문 트리거(y=27)와 최소 2칸 거리 — 원래 `tileY: 25`/radius 2였으나 hunting-ground와 같은 spawn/포탈 겹침 버그가 발견돼 조정, radius 1인 이유는 2였다면 hd-rabbit-07 배회 범위와도 겹쳤기 때문)
+- 뷰포트(32×18)보다 살짝 크다 — hunting-ground보다는 뚜렷이 작아, 몬스터 10마리 대비 밀도가 hunting-ground와 비슷한 자릿수가 되도록 역산된 크기(설계 §3.1)
+
+| 영역 | 범위 | 내용 |
+|---|---|---|
+| 경계 밴드 | 좌우 16열, 상 8행, 하 9행 | 전부 통행 불가. 안쪽 2링은 벽돌 성벽, 그 바깥은 숲 → 해변 → 물 |
+| 내부 | 32 x 20 | 개활지 + 2칸 깊이 장애물 덩어리(바위·그루터기·수풀)와 연못 1개 |
+| 오솔길 | `x 31–32` 세로 전 구간 | 남문(이 방의 유일한 문)에서 북쪽 끝까지 이어지는 흙길. hunting-ground의 오솔길이 북문을 지나 그대로 이어진다는 서사 |
+
+**장애물 덩어리는 서로, 오솔길, 그리고 성벽과 최소 2칸 떨어져 있다.** hunting-ground와 같은 이유(폭 1칸 통로 금지), 생성기가 검증한다(위 "hunting-den 맵" 항목).
+
+### hunting-den 포탈 타일
+
+| 역할 | 타일 | 포탈 |
+|---|---|---|
+| 트리거 (남쪽 문, 이 방의 유일한 문) | `{31,27}` `{32,27}` | `hunting-den-south-door` → `hunting-ground` |
+| 도착 | `{31,26}` | `hunting-ground-north-door` 로 들어올 때 |
+
+트리거는 walkable 최남단 행(row 27)이고 도착은 그 북쪽 칸, spawn은 다시 그 북쪽 칸 — hunting-ground의 남문과 완전히 같은 관례다. 트리거 2칸은 **나무 바닥(tile id 3)** 으로 그려 문턱임을 보이며, 생성기가 그 일치를 검증한다.
 
 ## tilesets/plaza-tiles.png
 

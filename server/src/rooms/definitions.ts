@@ -31,7 +31,38 @@ export const ROOM_DEFINITIONS: readonly RoomDefinition[] = [
      * size (`docs/design-hunting-inventory.md` §4.2). Conservative until PoC #3 measures one.
      */
     maxClients: 40,
-    /** The trailhead inside the south door, one tile north of the portal arrival. */
-    spawn: { tileX: 35, tileY: 29, spreadRadiusInTiles: 2 },
+    /**
+     * Two tiles further north than the door itself: at tileY 29 with radius 2 this square's
+     * southern edge (y 31) landed exactly on the south door's own trigger row (`hunting-ground-south-door`,
+     * `portalDefinitions.ts`), so ~20% of joins spawned a player standing on the door's row and a
+     * single sideways step could walk them straight onto the trigger tile and fire it unasked
+     * (tester-reproduced, Phase E review). y 27 keeps a full clear row (y 30) between the spread's
+     * max (29) and the trigger (31). Confirmed against `assets/maps/hunting-ground.json`: x 33-37 /
+     * y 25-29 is open ground (no collides tiles) and clear of every monster's spawn-plus-wander box.
+     */
+    spawn: { tileX: 35, tileY: 27, spreadRadiusInTiles: 2 },
+  },
+  {
+    name: "hunting-den",
+    roomType: "hunting-den",
+    mapKey: "hunting-den",
+    /**
+     * Sized narratively rather than off a load measurement: this room is one layer deeper than
+     * hunting-ground and reached only by walking through it, so fewer hunters are expected here
+     * at once (`docs/design-phase-e-second-hunting-ground.md` §5).
+     */
+    maxClients: 20,
+    /**
+     * Mirrored hunting-ground's own spawn placement closely enough to copy its bug: at tileY 25
+     * with radius 2 this square's southern edge (y 27) landed exactly on `hunting-den-south-door`'s
+     * trigger row (`portalDefinitions.ts`), the same ~20%-of-joins/one-step-fires-the-door failure
+     * mode (tester-reproduced, Phase E review). tileY 24 keeps a clear row (y 26) between the
+     * spread's max (25) and the trigger (27); the radius also drops from 2 to 1 because a radius-2
+     * square here (x 29-33) clips hd-rabbit-07's wander box (`monsterDefinitions.ts`, spawn (26,20)
+     * radius 3 -> x 23-29/y 17-23) at its x=29 edge, and hd-rabbit-08's at its x=32/y=21 corner.
+     * Confirmed against `assets/maps/hunting-den.json`: x 30-32 / y 23-25 is open ground and clear
+     * of every monster's spawn-plus-wander box.
+     */
+    spawn: { tileX: 31, tileY: 24, spreadRadiusInTiles: 1 },
   },
 ];

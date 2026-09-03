@@ -1,13 +1,13 @@
-// Builds the hunting ground map - the room behind plaza's north door - into
-// assets/maps/hunting-ground.json.
+// Builds the hunting den map - the room behind hunting-ground's north door - into
+// assets/maps/hunting-den.json.
 //
-//   node tools/generate-hunting-ground.mjs        (cwd = code/)
+//   node tools/generate-hunting-den.mjs        (cwd = code/)
 //
-// Structured after tools/generate-plaza.mjs, and for its reasons: the walkable interior is
-// hand-authored ASCII art (GROUND_ROWS / COLLISION_ROWS) so a layout change stays a reviewable
-// diff, while the border band around it - scenery nobody can ever stand on, outnumbering the
-// interior two to one - is procedural. Nothing is random, every cell is a pure function of its
-// coordinates, so the same source always produces the same bytes.
+// A straight copy of tools/generate-hunting-ground.mjs's structure and reasons (see that file's
+// header) with one difference: this room has a single door, its own south door, which is both
+// where a player leaves towards hunting-ground and where a player arrives coming from
+// hunting-ground's north door. Both directions share one physical doorway, so PORTAL below bundles
+// trigger and arrival together the same way the other generator's south door does.
 //
 // No art is authored here either: the tileset block is copied out of assets/maps/plaza.json, so a
 // reskin of plaza-tiles.png carries over without this script being touched.
@@ -20,10 +20,10 @@ import { VIEWPORT_HEIGHT_TILES, VIEWPORT_WIDTH_TILES, cameraBorderTiles } from "
 const CODE_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
 /** Read for its tileset block, never written. */
 const TEMPLATE_MAP = "assets/maps/plaza.json";
-const MAP_FILE = "assets/maps/hunting-ground.json";
+const MAP_FILE = "assets/maps/hunting-den.json";
 
 function fail(message) {
-  console.error(`generate-hunting-ground: ${message}`);
+  console.error(`generate-hunting-den: ${message}`);
   process.exit(1);
 }
 
@@ -84,76 +84,67 @@ const BLANK = ".";
 /* ------------------------------------------------------------ interior ---- */
 
 /**
- * The walkable area: 40x24, wider and taller than one screenful (32x18) on purpose, because a
- * hunting ground has to be walked around rather than surveyed from the entrance.
+ * The walkable area: 32x20, smaller than hunting-ground (40x24) on purpose - this room is one
+ * layer deeper, found only by walking hunting-ground's own trail to its north end
+ * (`docs/design-phase-e-second-hunting-ground.md` §3.1). Still wider and taller than one
+ * screenful (32x18): a hunting ground is walked around rather than surveyed from the entrance.
  *
- * A clearing, not a maze. Rocks, stumps, bushes and one pond sit in isolated clumps two tiles
- * deep, with at least two open tiles between any two of them and between any clump and the
- * enclosing wall. That spacing is a constraint, not a style: the monsters of the next pass step
- * greedily towards their target, and a greedy walker oscillates forever in a one-tile dead end.
- * `narrowPassages` below is that rule, executed - it fails the build rather than trusting the eye.
+ * A clearing, not a maze, exactly like hunting-ground: rocks, stumps, bushes and one pond sit in
+ * isolated 2-tile-deep clumps, with at least two open tiles between any two of them, between a
+ * clump and the trail, and between a clump and the enclosing wall. `narrowPassages` below is that
+ * spacing rule enforced, not trusted by eye.
  *
- * A two-tile dirt trail runs the full height at interior cols 19-20 (map x 35-36) from the south
- * door up to the north door (Phase E, `docs/design-phase-e-second-hunting-ground.md` §2.2), widening
- * into a trailhead around the spawn at the south end. The two blocks are read together cell by
- * cell, so a row that drifts out of alignment with the other block moves an obstacle off its
- * ground rather than failing - hence the checks further down.
+ * A two-tile dirt trail runs the full height at interior cols 15-16 (map x 31-32), continuing the
+ * line of hunting-ground's own trail through its north door. It widens into the doorway threshold
+ * on the last row, which is this room's only exit.
  */
-const INTERIOR_WIDTH = 40;
-const INTERIOR_HEIGHT = 24;
+const INTERIOR_WIDTH = 32;
+const INTERIOR_HEIGHT = 20;
 
 const GROUND_ROWS = [
-  "gggfgggggggggggggggwwggggggggggggfgggggg",
-  "gggggggggggggggggggddggggggggggggggggggg",
-  "gggggggfgggggggggggddgggggfggggggggggggg",
-  "ggggggggggggggfggggddggggggggggggggggfgg",
-  "gggggggggggggggggggddggggggggggggggggggg",
-  "gfgggggggggggggggggddggggggggggfgggggggg",
-  "gggggggggggggggggggddgggfggggggggggggggg",
-  "gggggggggggfgggggggddggggggggggggggfgggg",
-  "gggggggggggggggggggddggggggggggggggggggg",
-  "gggggfgggggggggggggddgggggggfggggggggggg",
-  "gggggggggggggggggfgddggggggggggggfgggggg",
-  "gggggggggggggggggggddggggggggggggggggggg",
-  "ggggggggsssssggggggddggggggggggggggggggg",
-  "ggggggggsssssggggggddggggggggggggggggggg",
-  "ggggggggsssssggggggddggggggggggggggggggg",
-  "ggggggggsssssggggggddgggggggggfggggggggg",
-  "gggfgggggggggggggggddgggggfggggggggggggg",
-  "gggggggggggggggggggddggggggggggggggggggg",
-  "gggggggggggggggggggddgfgggggggggggggggfg",
-  "gggggggggggggggggggddggggggggggggggggggg",
-  "gggggggggggggggggddddddggggggggggggggggg",
-  "gggggggfgggggggggddddddggggggggggggggggg",
-  "gggggggggggggggggddddddgggggggggggfggggg",
-  "gggggggggggggggggddwwddggggggggggggggggg",
+  "gggggfgggggggggddggggggggggggggg",
+  "gggggggggggggggddggggggggggggggg",
+  "gggggggggggggggddgggggggfggggggg",
+  "gggggggggggggggddggggggggggggggg",
+  "ggggggggggggfggddggggggggggggggg",
+  "gggggggggggggggddggggggggggggggg",
+  "gggggggggggggggddgggggggggggfggg",
+  "gggggggggggggggddggggggggggggggg",
+  "gggfgggggggggggddggggggggggggggg",
+  "gggggggggggggggddggggggggggggggg",
+  "gggggggggggggggddggfgggggggggggg",
+  "gggggggggggggggddggggggggggggggg",
+  "gggggggggfgggggddggggggggggggggg",
+  "gggggggggggggggddggggggggggggggg",
+  "gggggggggggggggddggggggggggfgggg",
+  "gggggggggggggggddggggggggggggggg",
+  "ggggggggggggggfddggggggggggggggg",
+  "gggggggggggggggddggggggggggggggg",
+  "gggggggggggggggddgggggggggggggfg",
+  "gggggggggggggddwwddggggggggggggg",
 ];
 
 const COLLISION_ROWS = [
-  "........................................",
-  "........................................",
-  "........................................",
-  "...NN....PPP....HH....NN....PPP...HH....",
-  "...NN....PPP....HH....NN....PPP...HH....",
-  "........................................",
-  "........................................",
-  "........................................",
-  "......HH....NN.........PPP....NN....HH..",
-  "......HH....NN.........PPP....NN....HH..",
-  "........................................",
-  "........................................",
-  "........................................",
-  "...NN....~~~....PP...HHH.....NN....PP...",
-  "...NN....~~~....PP...HHH.....NN....PP...",
-  "........................................",
-  "........................................",
-  "........................................",
-  "......PP....NNN..........HH....PP...NN..",
-  "......PP....NNN..........HH....PP...NN..",
-  "........................................",
-  "........................................",
-  "........................................",
-  "........................................",
+  "................................",
+  "................................",
+  "................................",
+  "..NN....PP..........HH....NN....",
+  "..NN....PP..........HH....NN....",
+  "................................",
+  "................................",
+  "................................",
+  ".....HH....NN......PP....HH.....",
+  ".....HH....NN......PP....HH.....",
+  "................................",
+  "................................",
+  "................................",
+  "...PP....~~..........NN....HH...",
+  "...PP....~~..........NN....HH...",
+  "................................",
+  "................................",
+  "................................",
+  "................................",
+  "................................",
 ];
 
 /* ------------------------------------------------------------ scenery ---- */
@@ -162,7 +153,8 @@ const COLLISION_ROWS = [
  * Fraction of the way out through the band at which each scenery layer ends, so every side shows
  * the same sequence even though the band is 16 tiles deep left and right but only 8 above and 9
  * below. Reading outwards: the rampart that encloses the ground, the forest it was cut out of, a
- * sandy shore and open water - the same coast plaza sits on, seen from further north.
+ * sandy shore and open water - identical to hunting-ground and plaza, since this is the same
+ * coastline seen from further inland.
  */
 const BAND = { forest: 0.72, shore: 0.86 };
 
@@ -246,32 +238,23 @@ const MAP = {
 };
 
 /**
- * Recorded here because the layout is built around them: the room spawn sits on the trailhead
- * inside the south door, and the door itself is the foot of the trail. The authoritative copies
+ * Recorded here because the layout is built around them: the room spawn sits one tile north of
+ * the door's arrival tile, and the door itself is the room's only exit. The authoritative copies
  * live in server/src/rooms/definitions.ts and portalDefinitions.ts - the checks below only prove
  * this map can carry them.
+ *
+ * Unlike hunting-ground's PORTAL, which describes its south door's two directions of travel
+ * (trigger = leaving south, arrival = landing when entering from plaza), this room's PORTAL
+ * describes its *only* door the same way: `triggers` fire hunting-den-south-door towards
+ * hunting-ground, and `arrival` is where hunting-ground-north-door lands a player coming in.
  */
-const SPAWN = { tileX: 35, tileY: 27 };
+const SPAWN = { tileX: 31, tileY: 24 };
 const PORTAL = {
   triggers: [
-    { tileX: 35, tileY: 31 },
-    { tileX: 36, tileY: 31 },
+    { tileX: 31, tileY: 27 },
+    { tileX: 32, tileY: 27 },
   ],
-  arrival: { tileX: 35, tileY: 30 },
-};
-
-/**
- * Phase E's second door, at the trail's north end - the same trigger/arrival bundling as PORTAL
- * above, just for the opposite end of the trail: `triggers` fire hunting-ground-north-door towards
- * hunting-den, and `arrival` is where hunting-den-south-door lands a player coming back.
- * (`docs/design-phase-e-second-hunting-ground.md` §2.2)
- */
-const NORTH_DOOR = {
-  triggers: [
-    { tileX: 35, tileY: 8 },
-    { tileX: 36, tileY: 8 },
-  ],
-  arrival: { tileX: 35, tileY: 9 },
+  arrival: { tileX: 31, tileY: 26 },
 };
 
 /** `collision: null` means an empty cell (gid 0), i.e. walkable. */
@@ -468,7 +451,7 @@ function narrowPassages(walkable) {
  * Runs before a single byte is written: a generator bug that shipped a half-valid map would be
  * committed as an asset and only surface as a stranded region, a clamping camera or a door that
  * cannot be reached. Precedent and rationale: tools/generate-plaza.mjs,
- * tools/generate-load-map.mjs, docs/decisions.md 2026-08-26.
+ * tools/generate-hunting-ground.mjs, tools/generate-load-map.mjs, docs/decisions.md 2026-08-26.
  */
 function selfCheck(layers, firstgid, tileset, blockedTileIds) {
   const failures = [];
@@ -599,10 +582,8 @@ function selfCheck(layers, firstgid, tileset, blockedTileIds) {
   }
 
   const doorway = [
-    ...PORTAL.triggers.map((tile) => ({ tile, role: "south trigger" })),
-    { tile: PORTAL.arrival, role: "south arrival" },
-    ...NORTH_DOOR.triggers.map((tile) => ({ tile, role: "north trigger" })),
-    { tile: NORTH_DOOR.arrival, role: "north arrival" },
+    ...PORTAL.triggers.map((tile) => ({ tile, role: "trigger" })),
+    { tile: PORTAL.arrival, role: "arrival" },
   ];
   for (const { tile, role } of doorway) {
     if (walkable[tile.tileY * MAP.width + tile.tileX] !== 1) {
@@ -610,9 +591,9 @@ function selfCheck(layers, firstgid, tileset, blockedTileIds) {
     }
   }
   // Nothing outside this script can check that a trigger sits on the tile the art draws a door
-  // on, so it is checked here while both are constants in the same file. Both doors share the
-  // same threshold convention (woodDeck), so the same check applies to each.
-  for (const tile of [...PORTAL.triggers, ...NORTH_DOOR.triggers]) {
+  // on, so it is checked here while both are constants in the same file. This room's own south
+  // door, unlike hunting-ground's, is the room's only doorway - there is no second door to check.
+  for (const tile of PORTAL.triggers) {
     const gid = layers.ground[tile.tileY * MAP.width + tile.tileX];
     if (gid !== firstgid + TILE.woodDeck) {
       failures.push(
@@ -640,7 +621,7 @@ const { failures, walkableCells, blockingCells } = selfCheck(
   blockedTileIds,
 );
 if (failures.length > 0) {
-  console.error(`generate-hunting-ground: ${failures.length} check(s) failed, nothing written:`);
+  console.error(`generate-hunting-den: ${failures.length} check(s) failed, nothing written:`);
   for (const failure of failures) console.error(`  ${failure}`);
   process.exit(1);
 }
@@ -671,8 +652,4 @@ console.log(`  spawn (${SPAWN.tileX}, ${SPAWN.tileY})`);
 console.log(
   `  south door triggers ${PORTAL.triggers.map((t) => `(${t.tileX}, ${t.tileY})`).join(" ")}, ` +
     `arrival (${PORTAL.arrival.tileX}, ${PORTAL.arrival.tileY})`,
-);
-console.log(
-  `  north door triggers ${NORTH_DOOR.triggers.map((t) => `(${t.tileX}, ${t.tileY})`).join(" ")}, ` +
-    `arrival (${NORTH_DOOR.arrival.tileX}, ${NORTH_DOOR.arrival.tileY})`,
 );

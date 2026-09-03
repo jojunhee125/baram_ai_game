@@ -150,16 +150,19 @@ export interface MonsterSpawnDefinition {
 }
 
 /**
- * hunting-ground's monster placement. 20 rows = 20 monsters, and that is the whole population.
+ * Every hunting room's monster placement, one contiguous table across both rooms. hunting-ground
+ * holds 20 rows, hunting-den (Phase E) holds 10 more - 30 total, the PoC #3 population cap.
  *
- * Nothing spawns at y >= 25. Someone coming through the south door must not arrive into a fight
- * already in progress, and with the wander radii added no monster's resting range reaches y = 26.
- * That is a property of this table rather than of a boot check, so keep it when adding rows.
- * A monster dragged down to the door by a player is inside its leash and is working as intended.
+ * Nothing spawns at y >= 25 in hunting-ground or y >= 24 in hunting-den. Someone coming through a
+ * room's entrance door must not arrive into a fight already in progress, and with the wander
+ * radii added no monster's resting range reaches the entrance either. That is a property of this
+ * table rather than of a boot check, so keep it when adding rows. A monster dragged to a door by
+ * a player is inside its leash and is working as intended.
  *
- * Difficulty runs south to north: squirrels at the y23-24 entrance band, rabbits at the y10 far
- * edge. Coordinates were checked against `assets/maps/hunting-ground.json` (walkable, inside the
- * interior, clear of the portal tiles, and at least 6 tiles from the arrival and player spawn).
+ * hunting-ground's difficulty runs south to north: squirrels at the y23-24 entrance band, rabbits
+ * at the y10 far edge. hunting-den is rabbits only (`docs/design-phase-e-second-hunting-ground.md`
+ * §4). Coordinates were checked against the actual map file of their own room (walkable, inside
+ * the interior, clear of the portal tiles, and at least 6 tiles from the arrival and player spawn).
  */
 export const MONSTER_SPAWN_DEFINITIONS: readonly MonsterSpawnDefinition[] = [
   // -- Southern band, nearest the entrance; all squirrels --
@@ -187,6 +190,26 @@ export const MONSTER_SPAWN_DEFINITIONS: readonly MonsterSpawnDefinition[] = [
   { id: "hg-rabbit-04", room: "hunting-ground", kind: MonsterKind.Rabbit, at: { tileX: 22, tileY: 10 }, wanderRadiusTiles: 3 },
   { id: "hg-rabbit-05", room: "hunting-ground", kind: MonsterKind.Rabbit, at: { tileX: 35, tileY: 10 }, wanderRadiusTiles: 3 },
   { id: "hg-rabbit-06", room: "hunting-ground", kind: MonsterKind.Rabbit, at: { tileX: 49, tileY: 10 }, wanderRadiusTiles: 3 },
+  // -- hunting-den, Phase E's second room: rabbits only (`docs/design-phase-e-second-hunting-ground.md`
+  // §4). 20 + 10 = 30, the PoC #3 population cap, reached exactly.
+  //
+  // Nothing spawns at y >= 24, for hunting-ground's own reason: a player arriving through the
+  // south door must not land in a fight already in progress. Coordinates were checked against
+  // the actual `assets/maps/hunting-den.json` (walkable, inside the interior, clear of the
+  // portal tiles). hd-rabbit-08 was moved from the design's placeholder (32, 18) to (35, 18):
+  // the placeholder sat on the trail (map x 31-32, the full-height dirt path connecting both
+  // doors), which the design flagged as a coder judgement call rather than something the boot
+  // validator would catch.
+  { id: "hd-rabbit-01", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 21, tileY: 12 }, wanderRadiusTiles: 3 },
+  { id: "hd-rabbit-02", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 27, tileY: 11 }, wanderRadiusTiles: 3 },
+  { id: "hd-rabbit-03", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 33, tileY: 13 }, wanderRadiusTiles: 3 },
+  { id: "hd-rabbit-04", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 39, tileY: 11 }, wanderRadiusTiles: 3 },
+  { id: "hd-rabbit-05", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 44, tileY: 13 }, wanderRadiusTiles: 3 },
+  { id: "hd-rabbit-06", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 20, tileY: 19 }, wanderRadiusTiles: 3 },
+  { id: "hd-rabbit-07", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 26, tileY: 20 }, wanderRadiusTiles: 3 },
+  { id: "hd-rabbit-08", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 35, tileY: 18 }, wanderRadiusTiles: 3 },
+  { id: "hd-rabbit-09", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 38, tileY: 20 }, wanderRadiusTiles: 3 },
+  { id: "hd-rabbit-10", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 43, tileY: 19 }, wanderRadiusTiles: 3 },
 ];
 
 /** Boot-validation outcome. Every error refuses boot; warnings are authoring smells only. */

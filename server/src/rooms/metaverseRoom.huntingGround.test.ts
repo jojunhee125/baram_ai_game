@@ -52,6 +52,11 @@ const plaza = roomDefinition(PLAZA);
 const huntingGround = roomDefinition(HUNTING_GROUND);
 const outbound = portalDefinition("plaza-north-door");
 const inbound = portalDefinition("hunting-ground-south-door");
+// Phase E gave hunting-ground a second door, at the opposite end of the same trail
+// (`docs/design-phase-e-second-hunting-ground.md` §2.2). Not exercised by a round trip in this
+// file — `metaverseRoom.huntingDen.test.ts` owns that — but its trigger tiles are still this
+// room's own, so the portal-marker test below has to count them.
+const northDoor = portalDefinition("hunting-ground-north-door");
 
 /**
  * Hand-checked against plaza.json rather than searched: right along the open spawn row to a
@@ -232,9 +237,11 @@ describe("hunting-ground — the room itself", () => {
     assert.ok(map.isWalkable(player.tileX, player.tileY), "a spawn inside a wall strands the client");
   });
 
-  it("publishes both of its own door's trigger tiles as portal markers and no others", async () => {
+  it("publishes both of its doors' trigger tiles as portal markers and no others", async () => {
     const room = await createRoom(HUNTING_GROUND);
-    const declared = inbound.from.tiles.map((tile) => `${tile.tileX},${tile.tileY}`).sort();
+    const declared = [...inbound.from.tiles, ...northDoor.from.tiles]
+      .map((tile) => `${tile.tileX},${tile.tileY}`)
+      .sort();
     const published = [...room.state.portalMarkers].map((marker) => `${marker.tileX},${marker.tileY}`).sort();
     assert.deepEqual(published, declared);
   });
@@ -473,8 +480,9 @@ describe("hunting-ground — monsters over the wire", () => {
     const atSpawn = await expectDecodedMonstersToMatch(room, hunter, "the arrival view");
 
     // Down to the bottom row before turning east, and a snapshot of the start rather than the
-    // live Player. The spawn spreads by 2, so the walker can begin on row 27 — which carries a
-    // pillar at x41 — while row 31 is clear from x16 to x55 for every column it can start in.
+    // live Player. The spawn spreads by 2, so the walker can begin anywhere from row 25 to row
+    // 29 in columns 33-37, all open ground, while row 31 is clear from x16 to x55 for every
+    // column it can start in.
     const start = serverPlayer(room, hunter.sessionId);
     const from = { tileX: start.tileX, tileY: start.tileY };
     await stepMany(hunter, Direction.Down, FAR_CORNER.tileY - from.tileY);
