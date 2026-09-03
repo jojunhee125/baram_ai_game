@@ -93,9 +93,9 @@ export class InventoryPanel {
   /**
    * Read off the module flag, which is the part shared between instances.
    *
-   * Pass E reads this to swallow the Attack input while the bag is up: a click or a keypress
-   * aimed at a row must not also swing at whatever is standing next to you. That is the *only*
-   * input this window is allowed to take — movement stays live (§3.4).
+   * Used to gate `WorldScene.swing()`'s Attack input while the bag was up; that gate is gone
+   * (2026-09-03, §3.4) — attack is always available regardless of what is open. Nothing currently
+   * reads this, but it stays as the panel's open/closed accessor.
    */
   get isOpen(): boolean {
     return panelOpen;

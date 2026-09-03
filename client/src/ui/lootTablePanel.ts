@@ -19,8 +19,9 @@ let panelOpen = false;
  * on every portal hop, passing the new `roomName`), which is the whole mechanism behind "the table
  * shown always matches the room you are standing in" — there is no room-switch logic here at all.
  *
- * Like the bag, this window does not stop the player moving — only `WorldScene.swing()`'s gate
- * reads `isOpen`, exactly as it already does for `InventoryPanel`.
+ * Like the bag, this window does not stop the player moving. It used to gate `WorldScene.swing()`'s
+ * Attack input too, the same way `InventoryPanel` did, but that gate is gone (2026-09-03, design
+ * §3.4) — attack is always available, open panel or not.
  *
  * Unlike the bag, a successful read is cached for the lifetime of this instance: the table is
  * static per-room content (no consumption, no trade), so reopening never re-queries. A failed
@@ -60,8 +61,9 @@ export class LootTablePanel {
   /**
    * Read off the module flag, which is the part shared between instances.
    *
-   * `WorldScene.swing()` reads this to swallow the Attack input while the table is up, the same
-   * way it already does for `InventoryPanel.isOpen` — movement stays live.
+   * Used to gate `WorldScene.swing()`'s Attack input while the table was up; that gate is gone
+   * (2026-09-03, design §3.4). Nothing currently reads this, but it stays as the panel's
+   * open/closed accessor — movement was never gated on it either way.
    */
   get isOpen(): boolean {
     return panelOpen;

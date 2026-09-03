@@ -293,10 +293,11 @@ export class WorldScene extends Phaser.Scene {
     // stops moving because this stops sending, which is also why the panel cannot strand anyone —
     // whatever kills the panel gives movement straight back.
     //
-    // The bag is deliberately *not* gated here. It is the one panel that opens over a live fight,
-    // and locking movement behind it would mean checking your bag is what gets you killed
-    // (docs/design-hunting-inventory.md §3.4). Pass E's Attack input is the one thing it does
-    // swallow, and reads `inventoryPanel.isOpen` from wherever that input lands.
+    // The bag and the drop-table window are deliberately *not* gated here. They are the two panels
+    // that open over a live fight, and locking movement behind either would mean checking your gear
+    // or drop odds is what gets you killed (docs/design-hunting-inventory.md §3.4). Attack used to
+    // be swallowed while either was open; that gate is gone too (2026-09-03) — a fight in progress
+    // should not stop just because a panel is up.
     if (this.objectPanel?.isOpen === true) {
       return;
     }
@@ -330,21 +331,14 @@ export class WorldScene extends Phaser.Scene {
    * One swing, if the world is in a state to take one. Returns whether it was taken, which is
    * what starts the input's cooldown mirror.
    *
-   * Gated on the same two things {@link returnHome} is, plus the bag and the drop-table window.
-   * Neither ever blocks movement — being pinned in place while something chews on you is exactly
-   * what that decision avoids (`docs/design-hunting-inventory.md` §3.4) — but both swallow this,
-   * because a keystroke aimed at a row in either panel must not also hit whatever is standing
-   * next to you.
+   * Gated on the same two things {@link returnHome} is: mid-transition, or no local player yet.
+   * No open panel blocks this (2026-09-03) — the object panel, the bag, and the drop-table window
+   * used to swallow Attack so a keystroke aimed at a row would not also hit whatever was standing
+   * next to you, but real usage showed a panel blocking a swing mid-fight was worse than the
+   * mis-click it guarded against, so that gate was dropped for all three.
    */
   private swing(): boolean {
     if (this.transitioning || !this.localPlayer) {
-      return false;
-    }
-    if (
-      this.objectPanel?.isOpen === true ||
-      this.inventoryPanel?.isOpen === true ||
-      this.lootTablePanel?.isOpen === true
-    ) {
       return false;
     }
     this.connection.sendAttack();
