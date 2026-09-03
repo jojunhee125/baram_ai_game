@@ -271,6 +271,103 @@ const RABBIT_FACES = {
   up: ["......", ".d..d.", "..dd..", "......"],
 };
 
+/* --------------------------------------------------------------- deer ---- */
+
+const DEER_PALETTE = {
+  ".": null,
+  o: hex("#241a14"),
+  t: hex("#8a5a34"),
+  T: hex("#5f3d22"),
+  c: hex("#ddc99e"),
+  a: hex("#4a3626"),
+  e: hex("#1c1008"),
+};
+
+/**
+ * Graze / stand / hop, ground-type like the other two (a floor line is present in every pose).
+ * The forked antlers are the silhouette's whole job here — the dominant top feature, unlike the
+ * squirrel's small round ears or the rabbit's long straight ones — and the torso is taller and
+ * narrower than either (max fill width 10-12px against the rabbit's full-width 14-16px). `idle`
+ * holds the antlers fully erect and the body at its tallest; `stepA` lays the antlers back and
+ * drops the whole silhouette down (a flush, full-width floor line, i.e. a crouch/graze); `stepB`
+ * flares the antlers wider and stretches the body narrower and taller at the hop's peak, with the
+ * narrowest floor line of the three (most lifted off the ground).
+ */
+const DEER_BODIES = {
+  stepA: [
+    "................",
+    "................",
+    "..a.a......a.a..",
+    "...a........a...",
+    "..oo........oo..",
+    "....oooooooo....",
+    "....otttttto....",
+    "...otttttttto...",
+    "..otttttttttto..",
+    "..otttttttttto..",
+    "..otttttttttto..",
+    "..otttttttttto..",
+    "..otttttttttto..",
+    "..otccccccccto..",
+    "oTTTTTTTTTTTTTTo",
+    "oooooooooooooooo",
+  ],
+  idle: [
+    "..a.a......a.a..",
+    "...a........a...",
+    "..oo........oo..",
+    "....oooooooo....",
+    "....otttttto....",
+    "....otttttto....",
+    "...otttttttto...",
+    "...otttttttto...",
+    "..otttttttttto..",
+    "..otttttttttto..",
+    "..otttttttttto..",
+    "..otttttttttto..",
+    "..otttttttttto..",
+    "..otccccccccto..",
+    "oTTTTTTTTTTTTTTo",
+    ".oooooooooooooo.",
+  ],
+  stepB: [
+    ".a.a........a.a.",
+    "..a..........a..",
+    "..oo........oo..",
+    ".....oooooo.....",
+    ".....otttto.....",
+    ".....otttto.....",
+    "....otttttto....",
+    "...otttttttto...",
+    "...otttttttto...",
+    "...otttttttto...",
+    "...otttttttto...",
+    "...otttttttto...",
+    "...otttttttto...",
+    "...otccccccto...",
+    "..oTTTTTTTTTTo..",
+    "...oooooooooo...",
+  ],
+};
+
+const DEER_FACE_WIDTH = 6;
+const DEER_FACE_X = 5;
+/** Same reasoning as SQUIRREL_FACE_Y: rows 9-12 are fur in all three poses here too. */
+const DEER_FACE_Y = () => 9;
+
+const DEER_FACE_LEFT = ["e.....", "e.....", "......", "oo...."];
+
+/**
+ * Up has no eyes, same convention as the other two kinds — but shows the antler bases instead of
+ * an ear-back shade, since the antlers (not ears) are this kind's silhouette feature.
+ */
+const DEER_FACES = {
+  down: [".e..e.", ".e..e.", "......", "..oo.."],
+  left: DEER_FACE_LEFT,
+  right: mirror(DEER_FACE_LEFT),
+  up: ["......", ".a..a.", "..aa..", "......"],
+};
+
 /* -------------------------------------------------------------- kinds ---- */
 
 /**
@@ -296,6 +393,15 @@ const KINDS = [
     faceWidth: RABBIT_FACE_WIDTH,
     faceX: RABBIT_FACE_X,
     faceY: RABBIT_FACE_Y,
+  },
+  {
+    kind: "deer",
+    palette: DEER_PALETTE,
+    bodies: DEER_BODIES,
+    faces: DEER_FACES,
+    faceWidth: DEER_FACE_WIDTH,
+    faceX: DEER_FACE_X,
+    faceY: DEER_FACE_Y,
   },
 ];
 

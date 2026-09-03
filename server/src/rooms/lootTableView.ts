@@ -9,6 +9,7 @@ import { ITEM_DEFINITIONS } from "./itemDefinitions";
 export const MONSTER_DISPLAY_NAMES: Readonly<Record<MonsterKind, string>> = {
   squirrel: "다람쥐",
   rabbit: "토끼",
+  deer: "사슴",
 };
 
 export interface LootTableDropView {

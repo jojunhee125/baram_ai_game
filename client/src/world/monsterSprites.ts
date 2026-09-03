@@ -13,7 +13,7 @@ const DIRECTIONS_PER_KIND = 4;
  * reads this array, compares it against its own KINDS table and refuses to bake the sheet if they
  * have drifted, the same guard import-avatar.mjs puts on AVATAR_SKIN_COUNT.
  */
-export const MONSTER_SPRITE_ORDER = ["squirrel", "rabbit"] as const;
+export const MONSTER_SPRITE_ORDER = ["squirrel", "rabbit", "deer"] as const;
 
 /**
  * One tile of monster movement. Sized like STEP_TWEEN_MS — the shortest step interval any kind
@@ -59,6 +59,7 @@ function kindIndexOf(kind: string): number {
 const MONSTER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   squirrel: "다람쥐",
   rabbit: "토끼",
+  deer: "사슴",
 };
 
 /**
