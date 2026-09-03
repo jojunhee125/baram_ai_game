@@ -71,14 +71,17 @@ export interface MonsterType {
  *  - the viewport shows 8 tiles above the player, so aggro must stay <= 8 or monsters charge in
  *    from off screen
  *
- * `damage` was retuned in Phase A (2026-09-03, from 2/3 to 7/10) alongside PLAYER_MAX_HP's
- * 30->100 and COMBAT_EXIT_MS's 5000->2000, so that a solo kill still takes the same 18s/8s it
- * always did — the fix for "recovery is structurally 0" is the shorter exit window (reachable
- * during normal hunting-ground density) and the bigger HP buffer against burst/multi-aggro, not a
- * cheaper monster.
+ * `damage` was retuned twice. Phase A (2026-09-03, from 2/3 to 7/10) paired the bump with
+ * PLAYER_MAX_HP's 30->100 and COMBAT_EXIT_MS's 5000->2000, fixing "recovery is structurally 0"
+ * without leaning on a cheaper monster. Later the same day, live play at hunting-ground (the
+ * "왕초보 사냥터") reported that result as too punishing regardless — rabbit's 800ms cooldown sits
+ * close enough to the player's own 600ms that every exchange read as a race the player was
+ * already losing — so damage was nerfed again, 7/10 -> 5/7 (squirrel/rabbit), roughly -30% DPS
+ * on both kinds. Cooldowns and HP are unchanged; only the per-hit number moved.
  *
- * The result: one monster can never kill a player (18s and 8s to do 100 damage, against a 2s
- * out-of-combat recovery), three at once can. That is the difficulty a starter field wants.
+ * The result: solo TTK against a player is now ~24s (squirrel) / ~11.4s (rabbit) — softer than
+ * Phase A's 18s/8s — against a 2s out-of-combat recovery. One monster still can never kill a
+ * player alone; several at once can. That is the difficulty a starter field wants.
  */
 export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
   [
@@ -87,7 +90,8 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       kind: MonsterKind.Squirrel,
       /** Exactly three hits (4x3). The beginner monster has to be countable. */
       maxHp: 12,
-      damage: 7,
+      /** Nerfed from 7 (live-play feedback, 2026-09-03) — see the table's own comment above. */
+      damage: 5,
       attackCooldownMs: 1200,
       wanderStepIntervalMs: 1600,
       /** 1.67 tiles/s, a fifth of a walking player: you can always stroll away from a squirrel. */
@@ -106,9 +110,13 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
     MonsterKind.Rabbit,
     {
       kind: MonsterKind.Rabbit,
-      /** Five hits — unmistakably a different fight from the squirrel's three. */
-      maxHp: 20,
-      damage: 10,
+      /**
+       * Still five hits: 19/4 rounds up to 5, same as the clean 4x5 this was before the 2026-09-03
+       * -1 tweak — unmistakably a different fight from the squirrel's three either way.
+       */
+      maxHp: 19,
+      /** Nerfed from 10 (live-play feedback, 2026-09-03) — see the table's own comment above. */
+      damage: 7,
       attackCooldownMs: 800,
       wanderStepIntervalMs: 1200,
       /** 2.5 tiles/s. Still a third of a player's pace, so fleeing always works. */
@@ -130,11 +138,15 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       kind: MonsterKind.Deer,
       /** Seven hits (4x7) — 3 (squirrel) / 5 (rabbit) / 7 (deer) keeps the odd-hit-count sequence. */
       maxHp: 28,
-      /** Rabbit's value, reused rather than invented: the den's threat ceiling stays unchanged. */
-      damage: 10,
       /**
-       * Squirrel's cadence (DPS 8.33), not rabbit's (12.5) — a body this much tankier hitting as
-       * often as the rabbit would be a net increase in the den's danger, so the cadence stays low.
+       * Rabbit's value, reused rather than invented: the den's threat ceiling stays unchanged.
+       * Tracks Rabbit's own 10->7 live-play nerf (2026-09-03) for the same reason.
+       */
+      damage: 7,
+      /**
+       * Squirrel's cadence (DPS 5.83 post-nerf), not rabbit's (8.75) — a body this much tankier
+       * hitting as often as the rabbit would be a net increase in the den's danger, so the
+       * cadence stays low.
        */
       attackCooldownMs: 1200,
       /** Slower than either existing kind: the big-bodied grazer among two smaller, quicker ones. */
