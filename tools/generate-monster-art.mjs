@@ -568,6 +568,27 @@ const ITEMS = [
       ".....oooooo.....",
     ],
   },
+  {
+    icon: "entry-pass",
+    rows: [
+      "................",
+      "................",
+      "................",
+      ".oooooooooooooo.",
+      ".oyyyyyyyyyyyyo.",
+      ".owwwwdwwwwwwwo.",
+      ".oww.wwwwwwwwwo.",
+      ".owwwwdwwwwwwwo.",
+      ".owwwwwwwwGGwwo.",
+      ".owwwwwwwwwwwwo.",
+      ".oooooooooooooo.",
+      "................",
+      "................",
+      "................",
+      "................",
+      "................",
+    ],
+  },
 ];
 
 function buildItemSheet() {

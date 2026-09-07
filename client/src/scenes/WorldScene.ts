@@ -22,6 +22,7 @@ import { Minimap, type MinimapView } from "../ui/minimap";
 import { buildMinimapTerrain } from "../ui/minimapTerrain";
 import { ObjectPanel } from "../ui/objectPanel";
 import { PlayerVitals } from "../ui/playerVitals";
+import { PortalDenialBanner } from "../ui/portalDenialBanner";
 import { ChatBubbles } from "../world/chatBubbles";
 import { CombatEffects, type DamageTone } from "../world/combatEffects";
 import { drawInteractableMarkers } from "../world/interactableMarkers";
@@ -102,6 +103,7 @@ export class WorldScene extends Phaser.Scene {
   private lootTablePanel: LootTablePanel | null = null;
   private vitals: PlayerVitals | null = null;
   private toasts: ItemToasts | null = null;
+  private portalDenialBanner: PortalDenialBanner | null = null;
   private localPlayer: LocalPlayer | null = null;
   private movementKeys: MovementKeys | null = null;
   private attackKey: AttackKey | null = null;
@@ -129,6 +131,7 @@ export class WorldScene extends Phaser.Scene {
     this.lootTablePanel = null;
     this.vitals = null;
     this.toasts = null;
+    this.portalDenialBanner = null;
     this.localPlayer = null;
     this.movementKeys = null;
     this.attackKey = null;
@@ -232,6 +235,7 @@ export class WorldScene extends Phaser.Scene {
         kind: "portal",
         portalId: event.portalId,
       }),
+      onPortalDenied: (event) => this.portalDenialBanner?.show(event.message),
       onInteractableEntered: (event) => this.objectPanel?.open(event),
       onQuizResult: (result) => this.objectPanel?.showQuizResult(result),
       onLeave: () => {
@@ -261,6 +265,7 @@ export class WorldScene extends Phaser.Scene {
     this.inventoryPanel = new InventoryPanel();
     this.lootTablePanel = new LootTablePanel(this.connection.roomName);
     this.toasts = new ItemToasts();
+    this.portalDenialBanner = new PortalDenialBanner();
     this.attackKey = new AttackKey(() => this.swing());
     this.buildMinimap();
     // attach() replays the players already in view, so addPlayer() normally does this first.
@@ -468,6 +473,7 @@ export class WorldScene extends Phaser.Scene {
     this.lootTablePanel?.destroy();
     this.vitals?.destroy();
     this.toasts?.destroy();
+    this.portalDenialBanner?.destroy();
     this.scene.start(WorldScene.KEY, { connection: next } satisfies WorldSceneData);
   }
 

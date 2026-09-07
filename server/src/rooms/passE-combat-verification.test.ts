@@ -744,6 +744,14 @@ describe("VERIFY a store that actually throws (not just a full bag)", () => {
       this.bag.set(itemKey, total);
       return Promise.resolve(total);
     }
+
+    grantOnce(_ownerKey: string, itemKey: string): Promise<boolean> {
+      if (this.bag.has(itemKey)) {
+        return Promise.resolve(false);
+      }
+      this.bag.set(itemKey, 1);
+      return Promise.resolve(true);
+    }
   }
 
   it("drops the failed grant in silence, still credits and announces the other, and never throws unhandled", async () => {

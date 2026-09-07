@@ -70,6 +70,8 @@ export const PORTAL_DEFINITIONS: readonly PortalDefinition[] = [
       ],
     },
     to: { room: "hunting-den", arrival: { tileX: 31, tileY: 26, spreadRadiusInTiles: 0 } },
+    requiresItemKey: "entry-pass",
+    deniedMessage: "입장권은 다람쥐를 잡아서 획득하세요",
   },
   {
     id: "hunting-den-south-door",

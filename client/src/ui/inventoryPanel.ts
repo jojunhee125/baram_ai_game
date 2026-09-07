@@ -14,6 +14,7 @@ export const ITEM_ICON_ORDER = [
   "copper-coin",
   "herb",
   "old-dagger",
+  "entry-pass",
 ] as const;
 
 /** One frame of items.png at 1x. The HUD column is CSS-sized, so this is CSS pixels. */

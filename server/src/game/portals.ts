@@ -1,6 +1,7 @@
 import type { TilePosition } from "@zep-test/shared";
 import type {
   CollisionMap,
+  ItemDefinition,
   PortalDefinition,
   PortalIndex,
   SpawnArea,
@@ -18,6 +19,7 @@ export class TablePortalIndex implements PortalIndex {
   private readonly triggers = new Map<number, PortalDefinition>();
   private readonly arrivals = new Map<string, SpawnArea>();
   private readonly triggerTilePositions: TilePosition[] = [];
+  private readonly gatedItemKeys = new Set<string>();
   private readonly widthInTiles: number;
 
   /**
@@ -39,6 +41,9 @@ export class TablePortalIndex implements PortalIndex {
         for (const tile of portal.from.tiles) {
           this.triggers.set(tile.tileY * this.widthInTiles + tile.tileX, portal);
           this.triggerTilePositions.push({ tileX: tile.tileX, tileY: tile.tileY });
+        }
+        if (portal.requiresItemKey !== undefined) {
+          this.gatedItemKeys.add(portal.requiresItemKey);
         }
       }
       if (portal.to.room === roomName) {
@@ -63,6 +68,10 @@ export class TablePortalIndex implements PortalIndex {
   triggerTiles(): readonly TilePosition[] {
     return this.triggerTilePositions;
   }
+
+  requiredItemKeys(): ReadonlySet<string> {
+    return this.gatedItemKeys;
+  }
 }
 
 /** Boot-validation outcome. Every error refuses boot; warnings are authoring smells only. */
@@ -79,16 +88,22 @@ export interface PortalValidation {
  * `mapsByRoom` is keyed by matchmaking room name, so a room missing from it is an
  * unregistered room name — the check that `ROOM_DEFINITIONS` and this table agree.
  *
+ * `items` is what `requiresItemKey` is checked against, for the reason `validateMonsterSpawnDefinitions`
+ * takes the item table too: a gate naming a key that is not in the catalogue can only be found
+ * out about when someone is denied at that door.
+ *
  * Every issue is collected rather than thrown at the first one: a boot failure that reveals
  * one typo per restart is a bad way to fix a table.
  */
 export function validatePortalDefinitions(
   portals: readonly PortalDefinition[],
   mapsByRoom: ReadonlyMap<string, CollisionMap>,
+  items: readonly ItemDefinition[],
 ): PortalValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
   const seenIds = new Set<string>();
+  const itemKeys = new Set(items.map((item) => item.key));
   // String keys are fine here, unlike in the index above: this runs once, at boot.
   const triggerTilesByRoom = new Map<string, Set<string>>();
 
@@ -111,6 +126,21 @@ export function validatePortalDefinitions(
       errors.push(`${label} is declared more than once`);
     } else {
       seenIds.add(portal.id);
+    }
+
+    if (portal.requiresItemKey !== undefined || portal.deniedMessage !== undefined) {
+      if (portal.requiresItemKey === undefined || portal.deniedMessage === undefined) {
+        errors.push(`${label} sets only one of requiresItemKey/deniedMessage; both or neither`);
+      } else {
+        if (!itemKeys.has(portal.requiresItemKey)) {
+          errors.push(
+            `${label} requires item "${portal.requiresItemKey}", which is not in the item catalogue`,
+          );
+        }
+        if (portal.deniedMessage.length === 0) {
+          errors.push(`${label} has an empty deniedMessage`);
+        }
+      }
     }
 
     const fromMap = mapsByRoom.get(portal.from.room);

@@ -35,6 +35,7 @@ import {
   type MoveRejected,
   type MoveRequest,
   type PlayerHit,
+  type PortalDenied,
   type PortalEntered,
   type QuizAnswerRequest,
   type QuizResult,
@@ -61,6 +62,7 @@ import type {
   InteractableDefinition,
   InteractableIndex,
   MetaverseRoomOptions,
+  PlayerSession,
   PortalIndex,
   ProximityIndex,
   RoomCreateOptions,
@@ -202,6 +204,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   private collisionMap!: CollisionMap;
   private proximityIndex!: ProximityIndex;
   private portalIndex!: PortalIndex;
+  /** {@link PortalIndex.requiredItemKeys} of this room, read once at `onCreate` and never rebuilt. */
+  private gatedItemKeys!: ReadonlySet<string>;
   private interactableIndex!: InteractableIndex;
   private spawn!: SpawnArea;
   /**
@@ -227,6 +231,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.collisionMap = await this.mapLoader.load(options.mapKey);
     this.proximityIndex = this.createProximityIndex(this.collisionMap);
     this.portalIndex = this.createPortalIndex(this.collisionMap);
+    this.gatedItemKeys = this.portalIndex.requiredItemKeys();
     this.interactableIndex = this.createInteractableIndex(this.collisionMap);
     // Static for the room's lifetime — populated once here, never touched again. This is the
     // only reason the client learns a portal's position at all (never its id or destination).
@@ -398,6 +403,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       hp: PLAYER_MAX_HP,
       lastDamagedAt: 0,
       ownerKey: client.auth?.ssoUserId ?? null,
+      ownedPossessionKeys: new Set(),
+      confirmedPossessionKeys: new Set(),
+      pendingPossessionGrants: new Map(),
     };
     client.view = new StateView();
     this.viewedBySession.set(client.sessionId, new Set());
@@ -407,6 +415,42 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     if (this.hasMonsters) {
       this.monstersViewedBySession.set(client.sessionId, new Set());
       this.refreshMonsterViewFor(client.sessionId);
+    }
+
+    // Fire-and-forget, and only where a portal could even ask: a room with no gated door never
+    // touches the store on join, which is every room but hunting-ground today.
+    const ownerKey = client.userData.ownerKey ?? client.sessionId;
+    if (this.gatedItemKeys.size > 0 && this.inventoryStore !== null) {
+      void this.hydratePossessionCache(client.sessionId, ownerKey);
+    }
+  }
+
+  /**
+   * Fills a freshly joined session's {@link PlayerSession.ownedPossessionKeys} from the store, so
+   * a portal gate check right after join does not have to wait on one — this is the one-time catch
+   * -up read for a possession item granted in an earlier room visit; a same-session grant during
+   * this visit is added to the set directly by {@link awardLoot} instead.
+   *
+   * Never awaited by its caller, for `awardLoot`'s reason: the room must not stall while the store
+   * answers, and the session may have disconnected by the time it does.
+   */
+  private async hydratePossessionCache(sessionId: string, ownerKey: string): Promise<void> {
+    const store = this.inventoryStore;
+    if (store === null) {
+      return;
+    }
+    const rows = await store.list(ownerKey);
+    // Re-resolved after the await, exactly as `awardLoot` does: the session may have left the
+    // room while the store was answering.
+    const session = this.clientsBySession.get(sessionId)?.userData;
+    if (!session) {
+      return;
+    }
+    for (const row of rows) {
+      if (this.gatedItemKeys.has(row.itemKey)) {
+        session.ownedPossessionKeys.add(row.itemKey);
+        session.confirmedPossessionKeys.add(row.itemKey);
+      }
     }
   }
 
@@ -498,10 +542,20 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // invisible (or permanently visible) to their neighbours.
     const portal = this.portalIndex.triggerAt(destination.tileX, destination.tileY);
     if (portal !== null) {
-      client.send(ServerMessage.PortalEntered, {
-        portalId: portal.id,
-        toRoom: portal.to.room,
-      } satisfies PortalEntered);
+      if (portal.requiresItemKey !== undefined && !session.ownedPossessionKeys.has(portal.requiresItemKey)) {
+        // The tile stays exactly as walkable as it was — no collision changes, the player just
+        // does not transition. The `!` is safe: boot validation refuses a `requiresItemKey`
+        // without a `deniedMessage`.
+        client.send(ServerMessage.PortalDenied, {
+          portalId: portal.id,
+          message: portal.deniedMessage!,
+        } satisfies PortalDenied);
+      } else {
+        client.send(ServerMessage.PortalEntered, {
+          portalId: portal.id,
+          toRoom: portal.to.room,
+        } satisfies PortalEntered);
+      }
     }
 
     // Behind the portal check for readability only: boot refuses a table that puts an object on a
@@ -779,31 +833,87 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // store — which is what keeps this whole path exercised in local development.
     const ownerKey = lastHit.ownerKey ?? lastHit.sessionId;
 
+    // Possession items are credited to the killer's own session here, before this function's
+    // first `await` (including one belonging to an earlier grant in this same array) — not after
+    // `store.grantOnce` resolves. `awardLoot` runs synchronously up to its first `await`, in the
+    // same call stack turn as the kill that produced `grants`; a client that kills and, with no
+    // microtask boundary in between, immediately steps onto a gated door in the same message
+    // batch must see the grant already applied. Waiting even one microtask — the shortest an
+    // `await store.grantOnce(...)` can take — is measurably too late for that case.
+    //
+    // A key already in `confirmedPossessionKeys` is skipped entirely: it is proven, so there is
+    // nothing left to credit and nothing a losing sibling call could ever take back. Everything
+    // else is counted into `pendingPossessionGrants` rather than compared against a snapshot
+    // "was this already cached" boolean — two kills that both drop the same key can have their
+    // `awardLoot` calls overlap, and only a count that every one of them decrements lets the last
+    // one to resolve tell "nobody has confirmed this yet" apart from "somebody still might".
+    const killerSession = this.clientsBySession.get(lastHit.sessionId)?.userData;
+    if (killerSession !== undefined) {
+      for (const grant of grants) {
+        const possessionDefinition = ITEM_DEFINITIONS.find((item) => item.key === grant.itemKey);
+        if (possessionDefinition?.possession !== true || killerSession.confirmedPossessionKeys.has(grant.itemKey)) {
+          continue;
+        }
+        killerSession.ownedPossessionKeys.add(grant.itemKey);
+        const pending = killerSession.pendingPossessionGrants.get(grant.itemKey) ?? 0;
+        killerSession.pendingPossessionGrants.set(grant.itemKey, pending + 1);
+      }
+    }
+
     for (const grant of grants) {
-      let total: number | null;
-      try {
-        total = await store.add(ownerKey, grant.itemKey, grant.quantity);
-      } catch (cause) {
-        // Nothing is sent. "You picked it up" followed by an empty bag next login is the worse of
-        // the two failures; the opposite — stored but unannounced — resolves itself on the next
-        // bag open. The remaining grants are still attempted: they are independent rows.
-        console.warn(
-          `[zep-test] could not credit ${grant.quantity}x ${grant.itemKey} to ${ownerKey}`,
-          cause,
-        );
-        continue;
-      }
-      if (total === null) {
-        // A full bag is a result rather than a fault (InventoryStore.add). Nothing was stored, so
-        // by the rule above nothing is announced.
-        continue;
-      }
       const definition = ITEM_DEFINITIONS.find((item) => item.key === grant.itemKey);
       if (definition === undefined) {
         // Boot validation refuses a loot row naming a key that is not in the catalogue, so this
         // is unreachable in production and is a lost toast rather than a lost item if it is not.
         continue;
       }
+
+      let total: number;
+      let quantity: number;
+      if (definition.possession === true) {
+        let granted: boolean;
+        try {
+          granted = await store.grantOnce(ownerKey, grant.itemKey);
+        } catch (cause) {
+          // Same rule as the `add` branch below: nothing is sent, and the remaining grants are
+          // still attempted since they are independent rows.
+          console.warn(`[zep-test] could not credit ${grant.itemKey} to ${ownerKey}`, cause);
+          this.settlePossessionGrant(killerSession, grant.itemKey, false);
+          continue;
+        }
+        // Already held, or the bag was full — `InventoryStore.grantOnce` makes the two
+        // indistinguishable, and both mean nothing was stored this call. `settlePossessionGrant`
+        // is what decides whether the optimistic credit survives a `false` here: it does, if a
+        // sibling call for the same key is still pending or already confirmed it.
+        this.settlePossessionGrant(killerSession, grant.itemKey, granted);
+        if (!granted) {
+          continue;
+        }
+        total = 1;
+        quantity = 1;
+      } else {
+        let credited: number | null;
+        try {
+          credited = await store.add(ownerKey, grant.itemKey, grant.quantity);
+        } catch (cause) {
+          // Nothing is sent. "You picked it up" followed by an empty bag next login is the worse
+          // of the two failures; the opposite — stored but unannounced — resolves itself on the
+          // next bag open. The remaining grants are still attempted: they are independent rows.
+          console.warn(
+            `[zep-test] could not credit ${grant.quantity}x ${grant.itemKey} to ${ownerKey}`,
+            cause,
+          );
+          continue;
+        }
+        if (credited === null) {
+          // A full bag is a result rather than a fault (InventoryStore.add). Nothing was stored,
+          // so by the rule above nothing is announced.
+          continue;
+        }
+        total = credited;
+        quantity = grant.quantity;
+      }
+
       // Resolved now rather than before the await: the killer may have left the room, or walked
       // through a door into another one, while the store was answering.
       this.clientsBySession.get(lastHit.sessionId)?.send(ServerMessage.ItemGranted, {
@@ -812,9 +922,46 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         // was handed — `GET /api/inventory` hands its rows over on the same terms.
         name: definition.name,
         icon: definition.icon,
-        quantity: grant.quantity,
+        quantity,
         total,
       } satisfies ItemGranted);
+    }
+  }
+
+  /**
+   * Resolves one `awardLoot` call's own attempt at crediting `itemKey` against what
+   * `store.grantOnce` actually answered, without assuming this is the only attempt in flight for
+   * that key on this session — see {@link PlayerSession.pendingPossessionGrants}.
+   *
+   * `succeeded` true confirms the key permanently: `confirmedPossessionKeys` is the one thing no
+   * later call, winning or losing, is allowed to undo. `succeeded` false only evicts the
+   * optimistic credit once every attempt this session has made for the key has reported in
+   * (`pending` counts down to zero) and none of them confirmed it — otherwise this call, if it
+   * happens to be the one that resolves first, would erase a credit a still-pending or
+   * already-succeeded sibling call is owed, purely because of the order two unrelated database
+   * round trips happened to come back in.
+   */
+  private settlePossessionGrant(
+    session: PlayerSession | undefined,
+    itemKey: string,
+    succeeded: boolean,
+  ): void {
+    if (session === undefined) {
+      return;
+    }
+    if (succeeded) {
+      session.confirmedPossessionKeys.add(itemKey);
+      session.pendingPossessionGrants.delete(itemKey);
+      return;
+    }
+    const remaining = (session.pendingPossessionGrants.get(itemKey) ?? 1) - 1;
+    if (remaining > 0) {
+      session.pendingPossessionGrants.set(itemKey, remaining);
+      return;
+    }
+    session.pendingPossessionGrants.delete(itemKey);
+    if (!session.confirmedPossessionKeys.has(itemKey)) {
+      session.ownedPossessionKeys.delete(itemKey);
     }
   }
 

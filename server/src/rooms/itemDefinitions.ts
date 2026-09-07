@@ -44,4 +44,5 @@ export const ITEM_DEFINITIONS: readonly ItemDefinition[] = [
   { key: "copper-coin", name: "구리 동전", icon: "copper-coin" },
   { key: "herb", name: "약초", icon: "herb" },
   { key: "old-dagger", name: "낡은 단검", icon: "old-dagger" },
+  { key: "entry-pass", name: "입장권", icon: "entry-pass", possession: true },
 ];

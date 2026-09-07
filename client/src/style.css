@@ -512,6 +512,30 @@ body {
 }
 
 /*
+ * Hunting-den entry denial. Centred like .notice, since both are one-off status lines, but
+ * tinted with --danger: the point is that a step was refused, not just reported. Click-through
+ * like the drop toasts — it is a readout, not a control.
+ */
+#portal-denial-banner {
+  position: absolute;
+  top: var(--space-3);
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(80%, 40ch);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid rgba(224, 128, 111, 0.4);
+  border-radius: var(--radius);
+  background: rgba(20, 19, 26, 0.92);
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  text-wrap: pretty;
+  pointer-events: none;
+}
+
+/*
  * Top-right cluster: the controls row, with the minimap unfolding beneath it. Its width is 240
  * of the 1024px backing canvas, and the minimap panel takes a percentage of that, so the whole
  * cluster scales with the stage exactly as Phaser's Scale.FIT scales the world.
@@ -717,7 +741,7 @@ body {
   height: 32px;
   background-image: url("/sprites/items.png");
   background-repeat: no-repeat;
-  background-size: 160px 32px;
+  background-size: 192px 32px;
   image-rendering: pixelated;
 }
 

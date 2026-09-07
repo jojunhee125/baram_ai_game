@@ -86,6 +86,7 @@ export const ServerMessage = {
   Chat: "chat",
   MoveRejected: "move:rejected",
   PortalEntered: "portal:entered",
+  PortalDenied: "portal:denied",
   Teleported: "player:teleported",
   InteractableEntered: "interactable:entered",
   QuizResult: "quiz:result",
@@ -130,6 +131,17 @@ export interface PortalEntered {
   portalId: string;
   /** Matchmaking room name to join, i.e. the `name` of a registered room. */
   toRoom: string;
+}
+
+/**
+ * The player's accepted step landed on a portal trigger tile that requires an item they do not
+ * hold. Sent instead of {@link PortalEntered}; no room transition happens and the tile stays
+ * exactly as walkable as it was, so the player is left standing on it.
+ */
+export interface PortalDenied {
+  portalId: string;
+  /** The server table's deniedMessage, verbatim. */
+  message: string;
 }
 
 /**
@@ -309,6 +321,7 @@ export interface ServerMessagePayload {
   [ServerMessage.Chat]: ChatBroadcast;
   [ServerMessage.MoveRejected]: MoveRejected;
   [ServerMessage.PortalEntered]: PortalEntered;
+  [ServerMessage.PortalDenied]: PortalDenied;
   [ServerMessage.Teleported]: Teleported;
   [ServerMessage.InteractableEntered]: InteractableEntered;
   [ServerMessage.QuizResult]: QuizResult;

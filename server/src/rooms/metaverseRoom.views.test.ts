@@ -726,6 +726,7 @@ class PortalRoom extends MetaverseRoom {
       triggerAt: () => null,
       arrivalFor: (portalId) => (portalId === "known-door" ? PORTAL_ARRIVAL : null),
       triggerTiles: () => [],
+      requiredItemKeys: () => new Set(),
     };
   }
 }

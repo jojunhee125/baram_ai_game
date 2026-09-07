@@ -31,6 +31,15 @@ export interface InventoryStore {
    * `quantity` must be a positive integer; anything else is a caller bug and rejects.
    */
   add(ownerKey: string, itemKey: string, quantity: number): Promise<number | null>;
+
+  /**
+   * Grants a cap-one possession item (`ItemDefinition.possession === true`) the first time only.
+   *
+   * Answers `true` the first time an account is granted this key, `false` on every later call —
+   * indistinguishable from "denied, bag full" (both mean "no new row"), which is all callers act
+   * on: neither case has anything else to tell the player.
+   */
+  grantOnce(ownerKey: string, itemKey: string): Promise<boolean>;
 }
 
 export interface InventoryRow {
@@ -111,6 +120,22 @@ export class InMemoryInventoryStore implements InventoryStore {
     bag.set(itemKey, total);
     return Promise.resolve(total);
   }
+
+  grantOnce(ownerKey: string, itemKey: string): Promise<boolean> {
+    let bag = this.bagsByOwner.get(ownerKey);
+    if (bag === undefined) {
+      bag = new Map<string, number>();
+      this.bagsByOwner.set(ownerKey, bag);
+    }
+    if (bag.has(itemKey)) {
+      return Promise.resolve(false);
+    }
+    if (bag.size >= MAX_DISTINCT_ITEMS) {
+      return Promise.resolve(false);
+    }
+    bag.set(itemKey, 1);
+    return Promise.resolve(true);
+  }
 }
 
 export class PostgresInventoryStore implements InventoryStore {
@@ -161,6 +186,23 @@ export class PostgresInventoryStore implements InventoryStore {
       [ownerKey, itemKey, quantity, MAX_DISTINCT_ITEMS],
     );
     return result.rows[0]?.quantity ?? null;
+  }
+
+  async grantOnce(ownerKey: string, itemKey: string): Promise<boolean> {
+    assertUuidOwnerKey(ownerKey);
+    // Same shape as `add`'s UPSERT, except a literal quantity of 1 and DO NOTHING instead of DO
+    // UPDATE: a possession item has no stack to top up, so a second grant must leave the existing
+    // row untouched rather than overwrite it back to 1.
+    const result = await this.query<{ quantity: number }>(
+      `INSERT INTO inventory_item (owner_key, item_key, quantity)
+       SELECT $1, $2, 1
+       WHERE EXISTS (SELECT 1 FROM inventory_item WHERE owner_key = $1 AND item_key = $2)
+          OR (SELECT count(*) FROM inventory_item WHERE owner_key = $1) < $3
+       ON CONFLICT (owner_key, item_key) DO NOTHING
+       RETURNING quantity`,
+      [ownerKey, itemKey, MAX_DISTINCT_ITEMS],
+    );
+    return result.rows.length > 0;
   }
 
   /**

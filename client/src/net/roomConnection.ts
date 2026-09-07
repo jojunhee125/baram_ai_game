@@ -16,6 +16,7 @@ import {
   type MoveRequest,
   type Player,
   type PlayerHit,
+  type PortalDenied,
   type PortalEntered,
   type PortalMarker,
   type QuizAnswerRequest,
@@ -100,6 +101,8 @@ export interface RoomEvents {
   onMoveRejected?(correction: MoveRejected): void;
   /** The local player stepped onto a portal trigger; the consumer owns the room transition. */
   onPortalEntered?(event: PortalEntered): void;
+  /** The step landed on a portal trigger the player lacks the item for; no room transition. */
+  onPortalDenied?(event: PortalDenied): void;
   /** The local player stepped onto a fixed object; the payload carries everything to draw it. */
   onInteractableEntered?(event: InteractableEntered): void;
   /** Verdict on one {@link RoomConnection.sendQuizAnswer}, possibly after its panel has closed. */
@@ -329,6 +332,9 @@ export class RoomConnection {
     });
     this.room.onMessage(ServerMessage.PortalEntered, (event: PortalEntered) => {
       this.events.onPortalEntered?.(event);
+    });
+    this.room.onMessage(ServerMessage.PortalDenied, (event: PortalDenied) => {
+      this.events.onPortalDenied?.(event);
     });
     this.room.onMessage(ServerMessage.Teleported, (event: Teleported) => {
       this.events.onTeleported?.(event);

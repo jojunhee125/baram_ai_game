@@ -61,6 +61,10 @@ class ScriptedInventoryStore implements InventoryStore {
   add(): Promise<number | null> {
     throw new Error("GET /api/inventory must never grant anything");
   }
+
+  grantOnce(): Promise<boolean> {
+    throw new Error("GET /api/inventory must never grant anything");
+  }
 }
 
 let server: Server;

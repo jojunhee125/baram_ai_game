@@ -70,6 +70,10 @@ export interface PortalDefinition {
   id: string;
   from: PortalSource;
   to: PortalTarget;
+  /** An {@link ItemDefinition.key} the player must own to use this portal. Absent means open. */
+  requiresItemKey?: string;
+  /** Shown verbatim when denied. Required together with {@link PortalDefinition.requiresItemKey}. */
+  deniedMessage?: string;
 }
 
 /** Where a portal is entered. */
@@ -133,6 +137,9 @@ export interface PortalIndex {
    * draws the same marker twice on the same tile.
    */
   triggerTiles(): readonly TilePosition[];
+
+  /** Distinct {@link PortalDefinition.requiresItemKey} values among the portals leaving this room. */
+  requiredItemKeys(): ReadonlySet<string>;
 }
 
 /**
@@ -274,6 +281,12 @@ export interface ItemDefinition {
    * database.
    */
   icon: string;
+  /**
+   * True for a cap-one item held rather than stacked, e.g. a hunting-den entry pass — granted
+   * through `InventoryStore.grantOnce` instead of `add`, and gated on in {@link PortalDefinition.requiresItemKey}.
+   * Absent (falsy) for every ordinary stackable resource, which is every row but this kind.
+   */
+  possession?: boolean;
 }
 
 /** Data attached to `client.userData`; never synced to clients. */
@@ -311,6 +324,37 @@ export interface PlayerSession {
    * `ItemGranted` toast — exercisable in local development.
    */
   ownerKey: string | null;
+  /**
+   * {@link ItemDefinition.key} values this account is known to hold, for gating a
+   * {@link PortalDefinition.requiresItemKey} check without a live store read on the move path.
+   * Populated on grant and, for rooms with at least one gated portal, hydrated once from the
+   * store on join.
+   *
+   * Holds both confirmed keys and keys credited optimistically by an `awardLoot` call still
+   * waiting on `store.grantOnce` — see {@link confirmedPossessionKeys} and
+   * {@link pendingPossessionGrants} for how the two are told apart once the store answers.
+   */
+  ownedPossessionKeys: Set<string>;
+  /**
+   * The subset of {@link ownedPossessionKeys} proven true: hydrated from the store on join, or
+   * confirmed by a `store.grantOnce` call that returned `true`. Once a key is in here it can
+   * never be evicted from `ownedPossessionKeys` — the whole reason this set exists separately is
+   * so that a *different*, losing `awardLoot` call racing the one that earned it can tell "proven"
+   * apart from "merely not yet disproven" and knows not to touch it.
+   */
+  confirmedPossessionKeys: Set<string>;
+  /**
+   * Count of in-flight `awardLoot` calls that optimistically added a key to
+   * {@link ownedPossessionKeys} and are still waiting on their own `store.grantOnce` to resolve.
+   *
+   * Needed because two kills of the same drop can overlap: each optimistically credits the key
+   * before its own `await`, and if a losing call rolled the credit back the moment *it* failed —
+   * rather than waiting for every overlapping attempt to report in — it could erase a credit a
+   * still-pending or already-succeeded sibling call is owed (or, if the sibling also fails, could
+   * fail to erase a credit nobody ever actually earned). A key's entry is removed once its count
+   * reaches zero; see `MetaverseRoom.settlePossessionGrant`.
+   */
+  pendingPossessionGrants: Map<string, number>;
 }
 
 /**

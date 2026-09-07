@@ -133,7 +133,7 @@ async function validateRoomMaps(): Promise<void> {
     }
   }
 
-  const { errors, warnings } = validatePortalDefinitions(PORTAL_DEFINITIONS, mapsByRoom);
+  const { errors, warnings } = validatePortalDefinitions(PORTAL_DEFINITIONS, mapsByRoom, ITEM_DEFINITIONS);
   for (const warning of warnings) {
     console.warn(`[zep-test] ${warning}`);
   }
@@ -166,8 +166,9 @@ async function validateRoomMaps(): Promise<void> {
     refuseBoot(`invalid item definitions: ${items.errors.join("; ")}`);
   }
 
-  // Last of the four, because it is the only one that reads another table: a drop line naming an
-  // item that is not in the catalogue can only be found out about on a kill.
+  // Last of the four. Portal validation above also reads the item table now (a gated door's
+  // requiresItemKey), but this one reads two others besides — a drop line naming an item that is
+  // not in the catalogue can only be found out about on a kill.
   const monsters = validateMonsterSpawnDefinitions(
     MONSTER_SPAWN_DEFINITIONS,
     MONSTER_TYPES,

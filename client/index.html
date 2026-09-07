@@ -83,6 +83,13 @@
         <ul class="toasts" id="item-toasts" role="status" aria-live="polite"></ul>
 
         <!--
+          Portal denial notice. A step onto a locked hunting-den door does not transition rooms;
+          this is the only feedback the player gets, so it is assertive rather than polite like
+          the drop toasts above.
+        -->
+        <div id="portal-denial-banner" role="status" aria-live="assertive" hidden></div>
+
+        <!--
           One top-right cluster: the controls row, and the minimap and the bag unfolding under it.
           Before #transition so the wipe, the notice and the boot overlay all draw over it. The
           wrapper is click-through; only the controls take pointer events, or its empty area would

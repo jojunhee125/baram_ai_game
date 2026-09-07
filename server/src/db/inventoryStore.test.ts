@@ -155,6 +155,52 @@ function assertInventoryStoreContract(label: string, create: () => InventoryStor
       }
       assert.deepEqual(await store.list(OWNER), [], "nothing may have been written");
     });
+
+    it("grantOnce credits a cap-one item the first time and answers true", async () => {
+      const store = create();
+      assert.equal(await store.grantOnce(OWNER, "entry-pass"), true);
+      assert.deepEqual(await store.list(OWNER), [{ itemKey: "entry-pass", quantity: 1 }]);
+    });
+
+    it("grantOnce answers false, and stores nothing new, on every later call", async () => {
+      const store = create();
+      assert.equal(await store.grantOnce(OWNER, "entry-pass"), true);
+      assert.equal(await store.grantOnce(OWNER, "entry-pass"), false);
+      assert.equal(await store.grantOnce(OWNER, "entry-pass"), false);
+      assert.deepEqual(await store.list(OWNER), [{ itemKey: "entry-pass", quantity: 1 }]);
+    });
+
+    it("grantOnce answers false instead of throwing once the bag is at MAX_DISTINCT_ITEMS", async () => {
+      const store = create();
+      for (let index = 0; index < MAX_DISTINCT_ITEMS; index += 1) {
+        await store.add(OWNER, `filler-${index}`, 1);
+      }
+      assert.equal(await store.grantOnce(OWNER, "entry-pass"), false);
+      assert.deepEqual(
+        (await store.list(OWNER)).some((row) => row.itemKey === "entry-pass"),
+        false,
+        "a refused grant must not leave a row behind",
+      );
+    });
+
+    it("grantOnce keeps two owners apart", async () => {
+      const store = create();
+      assert.equal(await store.grantOnce(OWNER, "entry-pass"), true);
+      assert.equal(await store.grantOnce(OTHER_OWNER, "entry-pass"), true);
+      assert.deepEqual(await store.list(OTHER_OWNER), [{ itemKey: "entry-pass", quantity: 1 }]);
+    });
+
+    it("grantOnce is atomic under concurrency: exactly one caller wins, quantity never exceeds 1", async () => {
+      // The cap-of-1 invariant Phase G's entry pass depends on. A check-then-set race across an
+      // await boundary would let two concurrent kills both see "not held yet" and both grant.
+      const store = create();
+      const results = await Promise.all(
+        Array.from({ length: 25 }, () => store.grantOnce(OWNER, "entry-pass")),
+      );
+      assert.equal(results.filter((won) => won).length, 1, "exactly one of 25 concurrent callers must win");
+      assert.equal(results.filter((won) => !won).length, 24);
+      assert.deepEqual(await store.list(OWNER), [{ itemKey: "entry-pass", quantity: 1 }]);
+    });
   });
 }
 
@@ -177,6 +223,15 @@ function inMemoryBackedPostgresStore(): InventoryStore {
     }
     const itemKey = String(values[1]);
     const held = bag.get(itemKey);
+    // grantOnce's statement carries no quantity parameter — cap is $3, not $4 — and DO NOTHING
+    // instead of DO UPDATE, so a held key answers false rather than topping up.
+    if (sql.includes("DO NOTHING")) {
+      if (held !== undefined || bag.size >= Number(values[2])) {
+        return { rows: [] };
+      }
+      bag.set(itemKey, 1);
+      return { rows: [{ quantity: 1 }] };
+    }
     if (held === undefined && bag.size >= Number(values[3])) {
       return { rows: [] };
     }
@@ -266,6 +321,23 @@ describe("PostgresInventoryStore — the statements it sends", () => {
     assert.match(sql, /count\(\*\)/, "a separate COUNT round trip is what this avoids");
     assert.match(sql, /EXISTS/, "a held key must top up regardless of the count");
     assert.equal(queries.length, 1);
+  });
+
+  it("grantOnce sends a single DO NOTHING statement with a literal quantity of 1", async () => {
+    const { pool, queries } = stubPool(() => ({ rows: [{ quantity: 1 }] }));
+    assert.equal(await new PostgresInventoryStore(pool).grantOnce(OWNER, "entry-pass"), true);
+    assert.equal(queries.length, 1);
+    const sql = queries[0]?.sql ?? "";
+    assert.match(sql, /INSERT INTO inventory_item/);
+    assert.match(sql, /SELECT \$1, \$2, 1\b/, "quantity is a literal, not a parameter");
+    assert.match(sql, /ON CONFLICT \(owner_key, item_key\) DO NOTHING/);
+    assert.match(sql, /RETURNING quantity/);
+    assert.deepEqual(queries[0]?.values, [OWNER, "entry-pass", MAX_DISTINCT_ITEMS]);
+  });
+
+  it("grantOnce answers false, without throwing, when the conflict branch returns no row", async () => {
+    const { pool } = stubPool(() => ({ rows: [] }));
+    assert.equal(await new PostgresInventoryStore(pool).grantOnce(OWNER, "entry-pass"), false);
   });
 
   it("passes the cap as a parameter rather than interpolating it into the statement", async () => {
@@ -417,6 +489,7 @@ function ownerScopedStore(pool: Pool): InventoryStore {
   return {
     list: (ownerKey) => inner.list(resolve(ownerKey)),
     add: (ownerKey, itemKey, quantity) => inner.add(resolve(ownerKey), itemKey, quantity),
+    grantOnce: (ownerKey, itemKey) => inner.grantOnce(resolve(ownerKey), itemKey),
   };
 }
 

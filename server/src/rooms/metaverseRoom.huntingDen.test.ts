@@ -9,12 +9,14 @@ import {
   PATCH_RATE_MS,
   ServerMessage,
   type MoveRejected,
+  type PortalDenied,
   type PortalEntered,
   type RoomState,
 } from "@zep-test/shared";
 import { TiledMapLoader } from "../game/tiledMap";
 import { createGameServer } from "../server";
 import { ROOM_DEFINITIONS } from "./definitions";
+import { MetaverseRoom } from "./metaverseRoom";
 import { MONSTER_SPAWN_DEFINITIONS, MonsterKind } from "./monsterDefinitions";
 import { PORTAL_DEFINITIONS } from "./portalDefinitions";
 
@@ -70,6 +72,7 @@ interface ClientRoom {
 interface Inbox {
   portals: PortalEntered[];
   rejects: MoveRejected[];
+  denials: PortalDenied[];
 }
 
 let testServer: ColyseusTestServer;
@@ -92,12 +95,15 @@ async function waitUntil(predicate: () => boolean, label: string, timeoutMs = 50
 }
 
 function collect(client: ClientRoom): Inbox {
-  const inbox: Inbox = { portals: [], rejects: [] };
+  const inbox: Inbox = { portals: [], rejects: [], denials: [] };
   client.onMessage(ServerMessage.PortalEntered, (message: unknown) => {
     inbox.portals.push(message as PortalEntered);
   });
   client.onMessage(ServerMessage.MoveRejected, (message: unknown) => {
     inbox.rejects.push(message as MoveRejected);
+  });
+  client.onMessage(ServerMessage.PortalDenied, (message: unknown) => {
+    inbox.denials.push(message as PortalDenied);
   });
   return inbox;
 }
@@ -123,6 +129,18 @@ async function join(room: AnyRoom, nickname: string, viaPortal?: string): Promis
     `${nickname} to appear in ${room.roomName ?? "the room"}`,
   );
   return client;
+}
+
+/**
+ * Stages the precondition `hunting-ground-north-door`'s gate now checks, the same way
+ * `metaverseRoom.huntingGround.test.ts` stages a death — by reaching into the room's own
+ * bookkeeping directly, since there is no store wired into these tests to grant it through.
+ */
+function grantEntryPass(room: AnyRoom, sessionId: string): void {
+  const client = (room as unknown as MetaverseRoom)["clientsBySession"].get(sessionId);
+  const session = client?.userData;
+  assert.ok(session, `no session registered for ${sessionId}`);
+  session.ownedPossessionKeys.add("entry-pass");
 }
 
 async function stepMany(client: ClientRoom, dir: Direction, steps: number): Promise<void> {
@@ -236,10 +254,35 @@ describe("hunting-den — the room itself", () => {
   });
 });
 
+describe("hunting-den — hunting-ground-north-door is gated on the entry pass", () => {
+  it("denies a walker with no entry pass, and leaves them standing on the door tile", async () => {
+    const room = await createRoom(HUNTING_GROUND);
+    const walker = await join(room, "walker");
+    const inbox = collect(walker);
+
+    await walkToNorthDoor(room, walker);
+
+    await waitUntil(() => inbox.denials.length === 1, "PortalDenied for the north door");
+    assert.deepEqual(inbox.denials[0], {
+      portalId: outbound.id,
+      message: "입장권은 다람쥐를 잡아서 획득하세요",
+    });
+    assert.deepEqual(inbox.portals, [], "a denied portal must not also fire PortalEntered");
+    assert.equal(inbox.rejects.length, 0, "the move itself is accepted; only the transition is denied");
+
+    const player = serverPlayer(room, walker.sessionId);
+    assert.ok(
+      outbound.from.tiles.some((tile) => tile.tileX === player.tileX && tile.tileY === player.tileY),
+      "a denial must not warp the player off the trigger tile they stepped onto",
+    );
+  });
+});
+
 describe("hunting-den — the round trip through hunting-ground's north door", () => {
   it("fires hunting-ground-north-door when a walker reaches the top row", async () => {
     const room = await createRoom(HUNTING_GROUND);
     const walker = await join(room, "walker");
+    grantEntryPass(room, walker.sessionId);
     const inbox = collect(walker);
 
     await walkToNorthDoor(room, walker);
@@ -254,6 +297,7 @@ describe("hunting-den — the round trip through hunting-ground's north door", (
     // somehow doubled back south would report a hop to plaza and nothing else would notice.
     const room = await createRoom(HUNTING_GROUND);
     const walker = await join(room, "walker");
+    grantEntryPass(room, walker.sessionId);
     const inbox = collect(walker);
 
     await walkToNorthDoor(room, walker);
@@ -291,6 +335,7 @@ describe("hunting-den — the round trip through hunting-ground's north door", (
     await join(den, "den-anchor");
 
     const walker = await join(groundRoom, "walker");
+    grantEntryPass(groundRoom, walker.sessionId);
     const outboundInbox = collect(walker);
     await walkToNorthDoor(groundRoom, walker);
     await waitUntil(() => outboundInbox.portals.length === 1, "the outbound PortalEntered");

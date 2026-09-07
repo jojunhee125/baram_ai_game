@@ -103,6 +103,7 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
         { itemKey: "acorn", chance: 0.6, quantity: 1 },
         { itemKey: "copper-coin", chance: 0.25, quantity: 1 },
         { itemKey: "herb", chance: 0.08, quantity: 1 },
+        { itemKey: "entry-pass", chance: 0.15, quantity: 1 },
       ],
     },
   ],
@@ -292,7 +293,7 @@ export function validateMonsterSpawnDefinitions(
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  const itemKeys = new Set(items.map((item) => item.key));
+  const itemsByKey = new Map(items.map((item) => [item.key, item]));
   for (const [kind, type] of types) {
     const label = `monster type "${kind}"`;
     if (type.kind !== kind) {
@@ -302,8 +303,13 @@ export function validateMonsterSpawnDefinitions(
     }
     for (const [index, entry] of type.loot.entries()) {
       const line = `${label} loot row ${index}`;
-      if (!itemKeys.has(entry.itemKey)) {
+      const item = itemsByKey.get(entry.itemKey);
+      if (item === undefined) {
         errors.push(`${line} drops "${entry.itemKey}", which is not in the item catalogue`);
+      } else if (item.possession === true && entry.quantity !== 1) {
+        // A possession item is granted through `grantOnce`, which always credits exactly one —
+        // a row asking for more is a promise the grant path can never keep.
+        errors.push(`${line} drops possession item "${entry.itemKey}" with quantity ${entry.quantity}, which must be 1`);
       }
       if (!(entry.chance > 0) || entry.chance > 1) {
         errors.push(`${line} has a chance of ${entry.chance}, which is outside (0, 1]`);

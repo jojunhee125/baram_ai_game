@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { CollisionMap, PortalDefinition } from "../rooms/contracts";
+import type { CollisionMap, ItemDefinition, PortalDefinition } from "../rooms/contracts";
 import { ROOM_DEFINITIONS } from "../rooms/definitions";
+import { ITEM_DEFINITIONS } from "../rooms/itemDefinitions";
 import { PORTAL_DEFINITIONS } from "../rooms/portalDefinitions";
 import { TablePortalIndex, validatePortalDefinitions } from "./portals";
 import { TiledMapLoader } from "./tiledMap";
@@ -50,6 +51,9 @@ const C_TO_A: PortalDefinition = {
 };
 
 const TABLE: readonly PortalDefinition[] = [A_TO_B, B_TO_A, C_TO_A];
+
+/** None of the synthetic tables below gate on an item, so their item catalogue is empty. */
+const NO_ITEMS: readonly ItemDefinition[] = [];
 
 function mapsFor(...rooms: string[]): ReadonlyMap<string, CollisionMap> {
   return new Map(rooms.map((room) => [room, MAP]));
@@ -115,6 +119,21 @@ describe("TablePortalIndex", () => {
     assert.equal(index.arrivalFor("b-to-a"), null);
   });
 
+  it("collects the distinct requiresItemKey values of the portals leaving this room", () => {
+    const gated: readonly PortalDefinition[] = [
+      { ...A_TO_B, id: "gated-1", requiresItemKey: "entry-pass", deniedMessage: "no" },
+      { ...A_TO_B, id: "gated-2", requiresItemKey: "entry-pass", deniedMessage: "no" },
+      B_TO_A,
+    ];
+    const index = new TablePortalIndex("a", gated, MAP);
+    assert.deepEqual([...index.requiredItemKeys()], ["entry-pass"]);
+  });
+
+  it("answers an empty set when no portal leaving this room is gated", () => {
+    const index = new TablePortalIndex("a", TABLE, MAP);
+    assert.deepEqual([...index.requiredItemKeys()], []);
+  });
+
   it("answers null to everything for a room whose name is undefined at runtime", () => {
     // A room built without the matchmaker, which is how metaverseRoom.views.test.ts builds one:
     // Colyseus types `roomName` as string but only assigns it in `__init`.
@@ -126,27 +145,28 @@ describe("TablePortalIndex", () => {
 
 describe("validatePortalDefinitions", () => {
   it("accepts a table whose rooms, triggers and arrivals all check out", () => {
-    assert.deepEqual(validatePortalDefinitions(TABLE, mapsFor("a", "b", "c")), {
+    assert.deepEqual(validatePortalDefinitions(TABLE, mapsFor("a", "b", "c"), NO_ITEMS), {
       errors: [],
       warnings: [],
     });
   });
 
   it("accepts an empty table", () => {
-    assert.deepEqual(validatePortalDefinitions([], mapsFor("a")), { errors: [], warnings: [] });
+    assert.deepEqual(validatePortalDefinitions([], mapsFor("a"), NO_ITEMS), { errors: [], warnings: [] });
   });
 
   it("rejects an empty id", () => {
     const { errors } = validatePortalDefinitions(
       [{ id: "", from: { room: "a", tiles: [{ tileX: 1, tileY: 1 }] }, to: A_TO_B.to }],
       mapsFor("a", "b"),
+      NO_ITEMS,
     );
     assert.equal(errors.length, 1);
     assert.match(errors[0] ?? "", /row 0.*empty id/);
   });
 
   it("rejects a duplicate id", () => {
-    const { errors } = validatePortalDefinitions([A_TO_B, A_TO_B], mapsFor("a", "b"));
+    const { errors } = validatePortalDefinitions([A_TO_B, A_TO_B], mapsFor("a", "b"), NO_ITEMS);
     assert.equal(errors.length, 1);
     assert.match(errors[0] ?? "", /"a-to-b" is declared more than once/);
   });
@@ -155,12 +175,13 @@ describe("validatePortalDefinitions", () => {
     const { errors } = validatePortalDefinitions(
       [{ id: "doorless", from: { room: "a", tiles: [] }, to: A_TO_B.to }],
       mapsFor("a", "b"),
+      NO_ITEMS,
     );
     assert.deepEqual(errors, ['portal "doorless" has no trigger tiles']);
   });
 
   it("rejects an unregistered source or destination room", () => {
-    const { errors } = validatePortalDefinitions(TABLE, mapsFor("a", "b"));
+    const { errors } = validatePortalDefinitions(TABLE, mapsFor("a", "b"), NO_ITEMS);
     assert.deepEqual(errors, [
       'portal "c-to-a" leaves from "c", which is not a registered room',
     ]);
@@ -168,6 +189,7 @@ describe("validatePortalDefinitions", () => {
     const reversed = validatePortalDefinitions(
       [{ id: "nowhere", from: { room: "a", tiles: [{ tileX: 1, tileY: 1 }] }, to: A_TO_B.to }],
       mapsFor("a"),
+      NO_ITEMS,
     );
     assert.deepEqual(reversed.errors, [
       'portal "nowhere" points at "b", which is not a registered room',
@@ -195,6 +217,7 @@ describe("validatePortalDefinitions", () => {
         },
       ],
       walled,
+      NO_ITEMS,
     );
     assert.deepEqual(errors, [
       'portal "dead-door" triggers at (2,0), which is not a walkable tile of room "a"',
@@ -207,7 +230,7 @@ describe("validatePortalDefinitions", () => {
       ["a", MAP],
       ["b", gridMap(["......", "....#."])],
     ]);
-    const { errors } = validatePortalDefinitions([A_TO_B], walled);
+    const { errors } = validatePortalDefinitions([A_TO_B], walled, NO_ITEMS);
     assert.deepEqual(errors, [
       'portal "a-to-b" arrives at (4,1), which is not a walkable tile of room "b"',
     ]);
@@ -223,6 +246,7 @@ describe("validatePortalDefinitions", () => {
         },
       ],
       mapsFor("a", "b"),
+      NO_ITEMS,
     );
     assert.deepEqual(errors, [
       'portal "inverted" has a negative arrival spreadRadiusInTiles (-1)',
@@ -239,6 +263,7 @@ describe("validatePortalDefinitions", () => {
         },
       ],
       mapsFor("b"),
+      NO_ITEMS,
     );
     assert.equal(errors.length, 4, `expected all four issues, got ${JSON.stringify(errors)}`);
   });
@@ -257,10 +282,57 @@ describe("validatePortalDefinitions", () => {
         to: { room: "a", arrival: { tileX: 2, tileY: 1, spreadRadiusInTiles: 0 } },
       },
     ];
-    const { errors, warnings } = validatePortalDefinitions(sticky, mapsFor("a", "b"));
+    const { errors, warnings } = validatePortalDefinitions(sticky, mapsFor("a", "b"), NO_ITEMS);
     assert.deepEqual(errors, [], "a sticky arrival must not refuse boot");
     assert.equal(warnings.length, 1);
     assert.match(warnings[0] ?? "", /"a-to-b" arrives at \(5,3\), which is itself a portal trigger/);
+  });
+
+  it("rejects requiresItemKey set without deniedMessage, and the reverse", () => {
+    const oneOnly = validatePortalDefinitions(
+      [{ ...A_TO_B, requiresItemKey: "acorn" }],
+      mapsFor("a", "b"),
+      NO_ITEMS,
+    );
+    assert.equal(oneOnly.errors.length, 1);
+    assert.match(oneOnly.errors[0] ?? "", /sets only one of requiresItemKey\/deniedMessage/);
+
+    const otherOnly = validatePortalDefinitions(
+      [{ ...A_TO_B, deniedMessage: "no" }],
+      mapsFor("a", "b"),
+      NO_ITEMS,
+    );
+    assert.equal(otherOnly.errors.length, 1);
+    assert.match(otherOnly.errors[0] ?? "", /sets only one of requiresItemKey\/deniedMessage/);
+  });
+
+  it("rejects a requiresItemKey naming an item outside the catalogue", () => {
+    const { errors } = validatePortalDefinitions(
+      [{ ...A_TO_B, requiresItemKey: "no-such-item", deniedMessage: "denied" }],
+      mapsFor("a", "b"),
+      NO_ITEMS,
+    );
+    assert.deepEqual(errors, [
+      'portal "a-to-b" requires item "no-such-item", which is not in the item catalogue',
+    ]);
+  });
+
+  it("rejects an empty deniedMessage", () => {
+    const { errors } = validatePortalDefinitions(
+      [{ ...A_TO_B, requiresItemKey: "acorn", deniedMessage: "" }],
+      mapsFor("a", "b"),
+      [{ key: "acorn", name: "도토리", icon: "acorn" }],
+    );
+    assert.deepEqual(errors, ['portal "a-to-b" has an empty deniedMessage']);
+  });
+
+  it("accepts a portal gated on an item that is in the catalogue", () => {
+    const { errors } = validatePortalDefinitions(
+      [{ ...A_TO_B, requiresItemKey: "acorn", deniedMessage: "필요합니다" }],
+      mapsFor("a", "b"),
+      [{ key: "acorn", name: "도토리", icon: "acorn" }],
+    );
+    assert.deepEqual(errors, []);
   });
 });
 
@@ -272,7 +344,7 @@ describe("PORTAL_DEFINITIONS", () => {
       mapsByRoom.set(definition.name, await loader.load(definition.mapKey));
     }
 
-    assert.deepEqual(validatePortalDefinitions(PORTAL_DEFINITIONS, mapsByRoom), {
+    assert.deepEqual(validatePortalDefinitions(PORTAL_DEFINITIONS, mapsByRoom, ITEM_DEFINITIONS), {
       errors: [],
       warnings: [],
     });
