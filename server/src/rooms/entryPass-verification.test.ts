@@ -269,10 +269,13 @@ describe("VERIFY hydration race: a pending list() must not corrupt state, and a 
       async list(_ownerKey: string): Promise<readonly InventoryRow[]> {
         listCalls++;
         await listGate;
-        return [{ itemKey: "entry-pass", quantity: 1 }];
+        return [{ itemKey: "entry-pass", quantity: 1, equipped: false }];
       },
       add: () => Promise.resolve(null),
       grantOnce: () => Promise.resolve(false),
+      getEquipped: () => Promise.resolve(null),
+      equip: () => Promise.resolve(false),
+      unequip: () => Promise.resolve(false),
     };
 
     const room = await createGatedRoom([], store);
@@ -331,7 +334,9 @@ describe("VERIFY repeated kills after already owning the pass are silent no-ops"
 
       attack(room, walker, 0);
       await flush();
-      assert.deepEqual(await store.list("sso-repeat-1"), [{ itemKey: "entry-pass", quantity: 1 }]);
+      assert.deepEqual(await store.list("sso-repeat-1"), [
+        { itemKey: "entry-pass", quantity: 1, equipped: false },
+      ]);
       assert.equal(sentOfType<ItemGranted>(walker, ServerMessage.ItemGranted).length, 1);
 
       // Loot keeps rolling on every kill, by design — the second kill's roll still hits 100%.
@@ -342,7 +347,7 @@ describe("VERIFY repeated kills after already owning the pass are silent no-ops"
 
       assert.deepEqual(
         await store.list("sso-repeat-1"),
-        [{ itemKey: "entry-pass", quantity: 1 }],
+        [{ itemKey: "entry-pass", quantity: 1, equipped: false }],
         "quantity must stay 1, never 2",
       );
       assert.equal(
@@ -364,6 +369,7 @@ describe("VERIFY grand-plaza pays zero cost for a gate it does not have", () => 
     // A store that only counts, so a call the room should never make is caught rather than
     // silently answering something plausible.
     const listCalls: string[] = [];
+    const getEquippedCalls: string[] = [];
     const countingStore: InventoryStore = {
       list: (ownerKey: string) => {
         listCalls.push(ownerKey);
@@ -371,8 +377,15 @@ describe("VERIFY grand-plaza pays zero cost for a gate it does not have", () => 
       },
       add: () => Promise.resolve(null),
       grantOnce: () => Promise.resolve(false),
+      getEquipped: (ownerKey: string) => {
+        getEquippedCalls.push(ownerKey);
+        return Promise.resolve(null);
+      },
+      equip: () => Promise.resolve(false),
+      unequip: () => Promise.resolve(false),
     };
     (globalThis as { __listCalls?: string[] }).__listCalls = listCalls;
+    (globalThis as { __getEquippedCalls?: string[] }).__getEquippedCalls = getEquippedCalls;
     const gameServer = createGameServer(undefined, countingStore);
     await gameServer.listen(PORT);
     testServer = new ColyseusTestServer(gameServer);
@@ -405,6 +418,12 @@ describe("VERIFY grand-plaza pays zero cost for a gate it does not have", () => 
     );
     const listCalls = (globalThis as { __listCalls?: string[] }).__listCalls ?? [];
     assert.equal(listCalls.length, 0, "onJoin must not touch the store at all for this room");
+    const getEquippedCalls = (globalThis as { __getEquippedCalls?: string[] }).__getEquippedCalls ?? [];
+    assert.equal(
+      getEquippedCalls.length,
+      0,
+      "the equipment cache (Phase F) must also stay gated on hasMonsters for this room",
+    );
     assert.ok(room.state.players.get(client.sessionId), "the join itself still succeeded");
   });
 });
@@ -432,6 +451,18 @@ describe("VERIFY concurrent same-key grants settle correctly regardless of resol
       return new Promise((resolve, reject) => {
         this.waiters.push({ resolve, reject });
       });
+    }
+
+    getEquipped(): Promise<string | null> {
+      return Promise.resolve(null);
+    }
+
+    equip(): Promise<boolean> {
+      return Promise.resolve(false);
+    }
+
+    unequip(): Promise<boolean> {
+      return Promise.resolve(false);
     }
 
     /** Resolves the Nth `grantOnce` call in call order (0-indexed) — not in resolution order. */

@@ -19,6 +19,9 @@ export interface InventoryItem {
   /** An `ITEM_ICON_ORDER` value; an unknown one draws the fallback slot rather than nothing. */
   icon: string;
   quantity: number;
+  equipped: boolean;
+  /** Present only on equipment rows; its absence is what tells a row apart from a possession. */
+  damageReductionRatio?: number;
 }
 
 /**
@@ -64,6 +67,8 @@ function isInventoryItem(row: unknown): row is InventoryItem {
     typeof item.name === "string" &&
     typeof item.icon === "string" &&
     typeof item.quantity === "number" &&
-    Number.isFinite(item.quantity)
+    Number.isFinite(item.quantity) &&
+    typeof item.equipped === "boolean" &&
+    (typeof item.damageReductionRatio === "number" || item.damageReductionRatio === undefined)
   );
 }

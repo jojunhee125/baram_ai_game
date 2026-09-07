@@ -1,4 +1,4 @@
-import type { ItemGranted } from "@zep-test/shared";
+import type { EquipmentChanged, ItemGranted } from "@zep-test/shared";
 import { loadInventory, type InventoryItem } from "../net/inventory";
 import { isTextEntry } from "../input/textEntry";
 
@@ -15,6 +15,7 @@ export const ITEM_ICON_ORDER = [
   "herb",
   "old-dagger",
   "entry-pass",
+  "leather-armor",
 ] as const;
 
 /** One frame of items.png at 1x. The HUD column is CSS-sized, so this is CSS pixels. */
@@ -82,7 +83,10 @@ export class InventoryPanel {
   /** Which block is on screen, so a live grant knows whether there is a list to patch. */
   private view: PanelView = "loading";
 
-  constructor() {
+  constructor(
+    private readonly onEquipItem: (itemKey: string) => void,
+    private readonly onUnequipItem: () => void,
+  ) {
     this.button.addEventListener("click", this.handleToggleClick);
     this.closeButton.addEventListener("click", this.handleCloseClick);
     this.retryButton.addEventListener("click", this.handleRetryClick);
@@ -125,11 +129,38 @@ export class InventoryPanel {
         name: event.name,
         icon: event.icon,
         quantity: event.total,
+        // A grant only ever adds to a stack or introduces a new row; it never arrives already
+        // equipped, since equipping is its own request the player makes afterwards.
+        equipped: false,
+        damageReductionRatio: event.damageReductionRatio,
       }),
     );
     this.list.hidden = false;
     this.status.hidden = true;
     this.view = "items";
+  }
+
+  /**
+   * Folds one equip/unequip verdict into an open bag. Dropped under the same conditions as
+   * {@link applyGrant} — a reopen re-reads and picks up the true state either way — and also
+   * when `applied` is false, since a denied request changed nothing for this row to reflect.
+   */
+  applyEquipmentChange(event: EquipmentChanged): void {
+    if (!event.applied || !panelOpen || this.view !== "items") {
+      return;
+    }
+    for (const row of this.list.children) {
+      if (!(row instanceof HTMLElement)) {
+        continue;
+      }
+      const equip = row.querySelector<HTMLButtonElement>(".bag__equip");
+      if (!equip) {
+        continue;
+      }
+      const equipped = row.dataset.itemKey === event.itemKey;
+      row.dataset.equipped = String(equipped);
+      equip.textContent = equipped ? "해제" : "장착";
+    }
   }
 
   /**
@@ -325,6 +356,27 @@ export class InventoryPanel {
     unit.textContent = "개";
 
     row.append(icon, name, count, unit);
+
+    // Only equipment rows get a toggle; a possession like entry-pass has no slot to occupy.
+    if (item.damageReductionRatio !== undefined) {
+      row.dataset.equipped = String(item.equipped);
+      const equip = document.createElement("button");
+      equip.type = "button";
+      equip.className = "bag__equip";
+      equip.textContent = item.equipped ? "해제" : "장착";
+      equip.addEventListener("click", (event) => {
+        if (row.dataset.equipped === "true") {
+          this.onUnequipItem();
+        } else {
+          this.onEquipItem(item.itemKey);
+        }
+        if (event.detail > 0) {
+          equip.blur();
+        }
+      });
+      row.append(equip);
+    }
+
     return row;
   }
 

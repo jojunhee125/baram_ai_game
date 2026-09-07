@@ -61,14 +61,14 @@ function assertInventoryStoreContract(label: string, create: () => InventoryStor
     it("returns what was granted, with the total", async () => {
       const store = create();
       assert.equal(await store.add(OWNER, "acorn", 3), 3);
-      assert.deepEqual(await store.list(OWNER), [{ itemKey: "acorn", quantity: 3 }]);
+      assert.deepEqual(await store.list(OWNER), [{ itemKey: "acorn", quantity: 3, equipped: false }]);
     });
 
     it("adds to an existing stack rather than replacing it", async () => {
       const store = create();
       await store.add(OWNER, "acorn", 3);
       assert.equal(await store.add(OWNER, "acorn", 4), 7, "the total is after the grant");
-      assert.deepEqual(await store.list(OWNER), [{ itemKey: "acorn", quantity: 7 }]);
+      assert.deepEqual(await store.list(OWNER), [{ itemKey: "acorn", quantity: 7, equipped: false }]);
     });
 
     it("keeps two item kinds apart in one bag", async () => {
@@ -76,8 +76,8 @@ function assertInventoryStoreContract(label: string, create: () => InventoryStor
       await store.add(OWNER, "acorn", 2);
       await store.add(OWNER, "carrot", 5);
       assert.deepEqual(sorted(await store.list(OWNER)), [
-        { itemKey: "acorn", quantity: 2 },
-        { itemKey: "carrot", quantity: 5 },
+        { itemKey: "acorn", quantity: 2, equipped: false },
+        { itemKey: "carrot", quantity: 5, equipped: false },
       ]);
     });
 
@@ -85,8 +85,8 @@ function assertInventoryStoreContract(label: string, create: () => InventoryStor
       const store = create();
       await store.add(OWNER, "acorn", 2);
       await store.add(OTHER_OWNER, "acorn", 9);
-      assert.deepEqual(await store.list(OWNER), [{ itemKey: "acorn", quantity: 2 }]);
-      assert.deepEqual(await store.list(OTHER_OWNER), [{ itemKey: "acorn", quantity: 9 }]);
+      assert.deepEqual(await store.list(OWNER), [{ itemKey: "acorn", quantity: 2, equipped: false }]);
+      assert.deepEqual(await store.list(OTHER_OWNER), [{ itemKey: "acorn", quantity: 9, equipped: false }]);
     });
 
     it("survives a hundred grants of the same key without losing one", async () => {
@@ -106,7 +106,7 @@ function assertInventoryStoreContract(label: string, create: () => InventoryStor
         Array.from({ length: 25 }, () => store.add(OWNER, "herb", 2)),
       );
       assert.equal(totals.includes(null), false, "none of these can be a full bag");
-      assert.deepEqual(await store.list(OWNER), [{ itemKey: "herb", quantity: 50 }]);
+      assert.deepEqual(await store.list(OWNER), [{ itemKey: "herb", quantity: 50, equipped: false }]);
       // Every intermediate total is distinct, which is what "atomic" means from outside: no two
       // grants can have read the same prior amount.
       assert.equal(new Set(totals).size, 25);
@@ -159,7 +159,7 @@ function assertInventoryStoreContract(label: string, create: () => InventoryStor
     it("grantOnce credits a cap-one item the first time and answers true", async () => {
       const store = create();
       assert.equal(await store.grantOnce(OWNER, "entry-pass"), true);
-      assert.deepEqual(await store.list(OWNER), [{ itemKey: "entry-pass", quantity: 1 }]);
+      assert.deepEqual(await store.list(OWNER), [{ itemKey: "entry-pass", quantity: 1, equipped: false }]);
     });
 
     it("grantOnce answers false, and stores nothing new, on every later call", async () => {
@@ -167,7 +167,7 @@ function assertInventoryStoreContract(label: string, create: () => InventoryStor
       assert.equal(await store.grantOnce(OWNER, "entry-pass"), true);
       assert.equal(await store.grantOnce(OWNER, "entry-pass"), false);
       assert.equal(await store.grantOnce(OWNER, "entry-pass"), false);
-      assert.deepEqual(await store.list(OWNER), [{ itemKey: "entry-pass", quantity: 1 }]);
+      assert.deepEqual(await store.list(OWNER), [{ itemKey: "entry-pass", quantity: 1, equipped: false }]);
     });
 
     it("grantOnce answers false instead of throwing once the bag is at MAX_DISTINCT_ITEMS", async () => {
@@ -187,7 +187,7 @@ function assertInventoryStoreContract(label: string, create: () => InventoryStor
       const store = create();
       assert.equal(await store.grantOnce(OWNER, "entry-pass"), true);
       assert.equal(await store.grantOnce(OTHER_OWNER, "entry-pass"), true);
-      assert.deepEqual(await store.list(OTHER_OWNER), [{ itemKey: "entry-pass", quantity: 1 }]);
+      assert.deepEqual(await store.list(OTHER_OWNER), [{ itemKey: "entry-pass", quantity: 1, equipped: false }]);
     });
 
     it("grantOnce is atomic under concurrency: exactly one caller wins, quantity never exceeds 1", async () => {
@@ -199,7 +199,7 @@ function assertInventoryStoreContract(label: string, create: () => InventoryStor
       );
       assert.equal(results.filter((won) => won).length, 1, "exactly one of 25 concurrent callers must win");
       assert.equal(results.filter((won) => !won).length, 24);
-      assert.deepEqual(await store.list(OWNER), [{ itemKey: "entry-pass", quantity: 1 }]);
+      assert.deepEqual(await store.list(OWNER), [{ itemKey: "entry-pass", quantity: 1, equipped: false }]);
     });
   });
 }
@@ -218,8 +218,10 @@ function inMemoryBackedPostgresStore(): InventoryStore {
       bag = new Map<string, number>();
       rows.set(ownerKey, bag);
     }
-    if (sql.includes("SELECT item_key")) {
-      return { rows: [...bag].map(([item_key, quantity]) => ({ item_key, quantity })) };
+    if (sql.includes("SELECT item_key, quantity")) {
+      // Never equipped by anything this stub drives: no existing test in this file calls
+      // `equip`, and `equip`/`unequip`/`getEquipped` route to the branches below unexercised.
+      return { rows: [...bag].map(([item_key, quantity]) => ({ item_key, quantity, equipped: false })) };
     }
     const itemKey = String(values[1]);
     const held = bag.get(itemKey);
@@ -265,7 +267,7 @@ describe("InMemoryInventoryStore", () => {
     await store.add(OWNER, "acorn", 1);
     const rows = await store.list(OWNER);
     (rows[0] as InventoryRow).quantity = 999;
-    assert.deepEqual(await store.list(OWNER), [{ itemKey: "acorn", quantity: 1 }]);
+    assert.deepEqual(await store.list(OWNER), [{ itemKey: "acorn", quantity: 1, equipped: false }]);
   });
 });
 
@@ -275,19 +277,19 @@ describe("PostgresInventoryStore — the statements it sends", () => {
   it("reads one owner's rows and nothing else", async () => {
     const { pool, queries } = stubPool(() => ({
       rows: [
-        { item_key: "acorn", quantity: 3 },
-        { item_key: "carrot", quantity: 1 },
+        { item_key: "acorn", quantity: 3, equipped: false },
+        { item_key: "carrot", quantity: 1, equipped: true },
       ],
     }));
     const rows = await new PostgresInventoryStore(pool).list(OWNER);
     assert.deepEqual(rows, [
-      { itemKey: "acorn", quantity: 3 },
-      { itemKey: "carrot", quantity: 1 },
+      { itemKey: "acorn", quantity: 3, equipped: false },
+      { itemKey: "carrot", quantity: 1, equipped: true },
     ]);
     assert.equal(queries.length, 1);
     assert.match(
       queries[0]?.sql ?? "",
-      /SELECT item_key, quantity FROM inventory_item WHERE owner_key = \$1/,
+      /SELECT item_key, quantity, equipped FROM inventory_item WHERE owner_key = \$1/,
     );
     assert.deepEqual(queries[0]?.values, [OWNER]);
   });
@@ -430,13 +432,13 @@ describe("PostgresInventoryStore — health reporting", () => {
       if (fail) {
         throw new Error("terminating connection due to administrator command");
       }
-      return { rows: [{ item_key: "acorn", quantity: 2 }] };
+      return { rows: [{ item_key: "acorn", quantity: 2, equipped: false }] };
     });
     const store = new PostgresInventoryStore(pool);
     await assert.rejects(() => store.list(OWNER));
     assert.equal(getDatabaseStatus(), "degraded");
     fail = false;
-    assert.deepEqual(await store.list(OWNER), [{ itemKey: "acorn", quantity: 2 }]);
+    assert.deepEqual(await store.list(OWNER), [{ itemKey: "acorn", quantity: 2, equipped: false }]);
     assert.equal(getDatabaseStatus(), "ok", "a database that answers again must stop reading as degraded");
   });
 
@@ -490,6 +492,9 @@ function ownerScopedStore(pool: Pool): InventoryStore {
     list: (ownerKey) => inner.list(resolve(ownerKey)),
     add: (ownerKey, itemKey, quantity) => inner.add(resolve(ownerKey), itemKey, quantity),
     grantOnce: (ownerKey, itemKey) => inner.grantOnce(resolve(ownerKey), itemKey),
+    getEquipped: (ownerKey) => inner.getEquipped(resolve(ownerKey)),
+    equip: (ownerKey, itemKey) => inner.equip(resolve(ownerKey), itemKey),
+    unequip: (ownerKey) => inner.unequip(resolve(ownerKey)),
   };
 }
 
@@ -524,7 +529,7 @@ describe("PostgresInventoryStore — against a real server", { skip: REAL_DATABA
     );
     assert.equal(totals.includes(null), false, "none of these can be a full bag");
     assert.equal(new Set(totals).size, 25, "two grants returned the same total, so one was lost");
-    assert.deepEqual(await store.list(owner), [{ itemKey: "herb", quantity: 50 }]);
+    assert.deepEqual(await store.list(owner), [{ itemKey: "herb", quantity: 50, equipped: false }]);
   });
 
   it("keeps topping up a held key while the bag is full, concurrently", async () => {
@@ -637,5 +642,57 @@ describe("PostgresInventoryStore — against a real server", { skip: REAL_DATABA
       /duplicate key/,
       "a second row for the same stack would make list() report the item twice",
     );
+  });
+
+  describe("PostgresInventoryStore.equip — concurrent equip of two different items", () => {
+    it("the partial unique index lets exactly one row end up equipped, and the loser's call resolves false rather than rejecting", async () => {
+      // Phase F's own atomicity claim, forced rather than assumed: two genuinely concurrent
+      // connections racing `equip()` for two *different* items on one owner. The CTE's own
+      // "cleared" step only clears rows it can see in its own snapshot, so the real guarantee
+      // has to come from `inventory_item_owner_equipped_uidx` itself — this proves it does, and
+      // that `equip()` now catches the loser's own `23505` off that index and resolves `false`
+      // (Bug 1 fix) instead of letting it reject: an uncaught rejection there left
+      // `settleEquipRequest`'s catch block sending nothing at all to the losing session, which
+      // looked like a dropped click rather than a denied request.
+      const store = new PostgresInventoryStore(pool);
+      for (let trial = 0; trial < 10; trial++) {
+        const owner = randomUUID();
+        await store.add(owner, "leather-armor", 1);
+        await store.add(owner, "old-dagger", 1);
+
+        const results = await Promise.allSettled([
+          store.equip(owner, "leather-armor"),
+          store.equip(owner, "old-dagger"),
+        ]);
+
+        const rows = await store.list(owner);
+        const equippedRows = rows.filter((row) => row.equipped);
+        assert.equal(
+          equippedRows.length,
+          1,
+          `trial ${trial}: exactly one row must be equipped, got ${JSON.stringify(rows)}`,
+        );
+
+        const rejected = results.filter((r) => r.status === "rejected");
+        assert.equal(rejected.length, 0, `trial ${trial}: neither concurrent equip() call may reject`);
+
+        const values = (results as PromiseFulfilledResult<boolean>[]).map((r) => r.value);
+        assert.equal(
+          values.filter((value) => value === true).length,
+          1,
+          `trial ${trial}: exactly one concurrent equip() must report success`,
+        );
+        assert.equal(
+          values.filter((value) => value === false).length,
+          1,
+          `trial ${trial}: the loser must resolve false rather than throw`,
+        );
+        assert.equal(
+          getDatabaseStatus(),
+          "ok",
+          `trial ${trial}: a losing 23505 is an expected race outcome, not a database fault`,
+        );
+      }
+    });
   });
 });

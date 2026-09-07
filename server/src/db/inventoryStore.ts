@@ -40,11 +40,34 @@ export interface InventoryStore {
    * on: neither case has anything else to tell the player.
    */
   grantOnce(ownerKey: string, itemKey: string): Promise<boolean>;
+
+  /** The account's equipped item, or null when nothing is equipped or the key is unheld. */
+  getEquipped(ownerKey: string): Promise<string | null>;
+
+  /**
+   * Equips `itemKey`, unequipping whatever else this account had equipped first — at most one
+   * item is ever equipped, and the caller does not have to unequip before equipping.
+   *
+   * Answers `false`, and changes nothing, when the account does not hold `itemKey` — and also
+   * when a concurrent `equip` call for a *different* item on the same account committed first:
+   * `inventory_item_owner_equipped_uidx` (design §7.2) lets only one of the two ever win, and the
+   * loser reports it the same way a not-held item does, rather than throwing.
+   */
+  equip(ownerKey: string, itemKey: string): Promise<boolean>;
+
+  /**
+   * Unequips whatever this account has equipped. A no-op, not an error, if nothing is — and
+   * `true`/`false` says which of those two happened, so a caller whose own cache of "what was
+   * equipped before this call" might already be stale has the store's real answer to act on
+   * instead.
+   */
+  unequip(ownerKey: string): Promise<boolean>;
 }
 
 export interface InventoryRow {
   itemKey: string;
   quantity: number;
+  equipped: boolean;
 }
 
 /**
@@ -87,18 +110,33 @@ function assertUuidOwnerKey(ownerKey: string): void {
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * `23505` is Postgres's own code for a unique-constraint violation — unlike the `23514`/`22P02`
+ * this file already refuses to guess at (design intent: those two are caller bugs that should
+ * never reach a query), a `unique_violation` off `inventory_item_owner_equipped_uidx` is a normal,
+ * expected outcome of two sessions of one account equipping different items at once, so `equip`
+ * needs to tell it apart from every other failure rather than let it read as a dropped connection.
+ */
+function isUniqueViolation(cause: unknown): boolean {
+  return typeof cause === "object" && cause !== null && (cause as { code?: unknown }).code === "23505";
+}
+
+/**
  * The store a server booted without `DATABASE_URL` runs on. Its contents live and die with the
  * process, so a restart is indistinguishable from a first visit.
  */
 export class InMemoryInventoryStore implements InventoryStore {
   private readonly bagsByOwner = new Map<string, Map<string, number>>();
+  private readonly equippedByOwner = new Map<string, string>();
 
   list(ownerKey: string): Promise<readonly InventoryRow[]> {
     const bag = this.bagsByOwner.get(ownerKey);
     if (bag === undefined) {
       return Promise.resolve([]);
     }
-    return Promise.resolve([...bag].map(([itemKey, quantity]) => ({ itemKey, quantity })));
+    const equipped = this.equippedByOwner.get(ownerKey);
+    return Promise.resolve(
+      [...bag].map(([itemKey, quantity]) => ({ itemKey, quantity, equipped: itemKey === equipped })),
+    );
   }
 
   add(ownerKey: string, itemKey: string, quantity: number): Promise<number | null> {
@@ -136,6 +174,23 @@ export class InMemoryInventoryStore implements InventoryStore {
     bag.set(itemKey, 1);
     return Promise.resolve(true);
   }
+
+  getEquipped(ownerKey: string): Promise<string | null> {
+    return Promise.resolve(this.equippedByOwner.get(ownerKey) ?? null);
+  }
+
+  equip(ownerKey: string, itemKey: string): Promise<boolean> {
+    const bag = this.bagsByOwner.get(ownerKey);
+    if (bag === undefined || !bag.has(itemKey)) {
+      return Promise.resolve(false);
+    }
+    this.equippedByOwner.set(ownerKey, itemKey);
+    return Promise.resolve(true);
+  }
+
+  unequip(ownerKey: string): Promise<boolean> {
+    return Promise.resolve(this.equippedByOwner.delete(ownerKey));
+  }
 }
 
 export class PostgresInventoryStore implements InventoryStore {
@@ -145,11 +200,15 @@ export class PostgresInventoryStore implements InventoryStore {
     assertUuidOwnerKey(ownerKey);
     // No ORDER BY: the caller orders against ITEM_DEFINITIONS, and an ordering here would be a
     // second answer to that question that nobody is keeping in step with the first.
-    const result = await this.query<{ item_key: string; quantity: number }>(
-      "SELECT item_key, quantity FROM inventory_item WHERE owner_key = $1",
+    const result = await this.query<{ item_key: string; quantity: number; equipped: boolean }>(
+      "SELECT item_key, quantity, equipped FROM inventory_item WHERE owner_key = $1",
       [ownerKey],
     );
-    return result.rows.map((row) => ({ itemKey: row.item_key, quantity: row.quantity }));
+    return result.rows.map((row) => ({
+      itemKey: row.item_key,
+      quantity: row.quantity,
+      equipped: row.equipped,
+    }));
   }
 
   async add(ownerKey: string, itemKey: string, quantity: number): Promise<number | null> {
@@ -203,6 +262,62 @@ export class PostgresInventoryStore implements InventoryStore {
       [ownerKey, itemKey, MAX_DISTINCT_ITEMS],
     );
     return result.rows.length > 0;
+  }
+
+  async equip(ownerKey: string, itemKey: string): Promise<boolean> {
+    assertUuidOwnerKey(ownerKey);
+    // The `item_key <> $2` guard on `cleared` is required, not cosmetic: without it, equipping an
+    // already-equipped item would have `cleared` and the final UPDATE both target the same row in
+    // the same statement, which Postgres defines as an error (or, worse, an unspecified result).
+    //
+    // Bypasses the shared `query` helper deliberately: two sessions of the same account equipping
+    // two different items at once both pass the `target` CTE (each holds its own item), and only
+    // the final UPDATE discovers the conflict, as a `23505` off `inventory_item_owner_equipped_uidx`
+    // — the loser's connection is fine, so routing that through `query`'s catch would call
+    // `markDatabaseDegraded` (and log a scary "database degraded" line) for a race that is normal,
+    // expected concurrent usage, not a fault.
+    try {
+      const result = await this.pool.query<{ item_key: string }>(
+        `WITH target AS (
+           SELECT 1 FROM inventory_item WHERE owner_key = $1 AND item_key = $2
+         ),
+         cleared AS (
+           UPDATE inventory_item SET equipped = false
+           WHERE owner_key = $1 AND equipped = true AND item_key <> $2 AND EXISTS (SELECT 1 FROM target)
+         )
+         UPDATE inventory_item SET equipped = true
+         WHERE owner_key = $1 AND item_key = $2 AND EXISTS (SELECT 1 FROM target)
+         RETURNING item_key`,
+        [ownerKey, itemKey],
+      );
+      markDatabaseOk();
+      return result.rows.length > 0;
+    } catch (cause) {
+      if (isUniqueViolation(cause)) {
+        markDatabaseOk();
+        return false;
+      }
+      markDatabaseDegraded(cause);
+      throw cause;
+    }
+  }
+
+  async unequip(ownerKey: string): Promise<boolean> {
+    assertUuidOwnerKey(ownerKey);
+    const result = await this.query<{ item_key: string }>(
+      `UPDATE inventory_item SET equipped = false WHERE owner_key = $1 AND equipped = true RETURNING item_key`,
+      [ownerKey],
+    );
+    return result.rows.length > 0;
+  }
+
+  async getEquipped(ownerKey: string): Promise<string | null> {
+    assertUuidOwnerKey(ownerKey);
+    const result = await this.query<{ item_key: string }>(
+      `SELECT item_key FROM inventory_item WHERE owner_key = $1 AND equipped = true`,
+      [ownerKey],
+    );
+    return result.rows[0]?.item_key ?? null;
   }
 
   /**

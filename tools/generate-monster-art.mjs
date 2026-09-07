@@ -589,6 +589,32 @@ const ITEMS = [
       "................",
     ],
   },
+  {
+    /**
+     * A leather cuirass: collar, chest plate and two shoulder straps, in the same
+     * brown/tan family as old-dagger's handle rather than a new hue — armor is leatherwork,
+     * not metal, so it borrows the palette's warm tones instead of the blade's cool ones.
+     */
+    icon: "leather-armor",
+    rows: [
+      "................",
+      "......oo.oo.....",
+      ".....occ.cco....",
+      "....occooocco...",
+      "...occcssscco...",
+      "..occcccsccccco.",
+      ".occcCCsCCcccco.",
+      ".occCCCsCCCcco..",
+      ".occCCCsCCCcco..",
+      ".occcCCsCCcccco.",
+      "..occcccsccccc..",
+      "...occccscccc...",
+      "....occcccco....",
+      ".....occcco.....",
+      "......oooo......",
+      "................",
+    ],
+  },
 ];
 
 function buildItemSheet() {

@@ -38,6 +38,8 @@ export const ClientMessage = {
    * Rate-limited by ATTACK_COOLDOWN_MS.
    */
   Attack: "combat:attack",
+  EquipItem: "equipment:equip",
+  UnequipItem: "equipment:unequip",
 } as const;
 
 export type ClientMessage = (typeof ClientMessage)[keyof typeof ClientMessage];
@@ -63,6 +65,11 @@ export interface QuizAnswerRequest {
   choiceIndex: number;
 }
 
+/** Names the item to equip. An unknown key, or one with no `equipment` stats, is ignored. */
+export interface EquipItemRequest {
+  itemKey: string;
+}
+
 export interface ClientMessagePayload {
   [ClientMessage.Move]: MoveRequest;
   [ClientMessage.Chat]: ChatRequest;
@@ -80,6 +87,9 @@ export interface ClientMessagePayload {
    * ATTACK_COOLDOWN_MS is dropped in silence for the same reason.
    */
   [ClientMessage.Attack]: undefined;
+  [ClientMessage.EquipItem]: EquipItemRequest;
+  /** No payload: there is at most one equipped item, so there is nothing to name. */
+  [ClientMessage.UnequipItem]: undefined;
 }
 
 export const ServerMessage = {
@@ -93,6 +103,7 @@ export const ServerMessage = {
   MonsterHit: "combat:monster-hit",
   PlayerHit: "combat:player-hit",
   ItemGranted: "inventory:granted",
+  EquipmentChanged: "equipment:changed",
 } as const;
 
 export type ServerMessage = (typeof ServerMessage)[keyof typeof ServerMessage];
@@ -315,6 +326,28 @@ export interface ItemGranted {
   quantity: number;
   /** Total held afterwards, so an open bag window updates without a re-read. */
   total: number;
+  /**
+   * Fraction of incoming monster damage this item removes while equipped, present only for an
+   * equipment item. Sent so the bag's toast can show the stat without the client holding a
+   * catalogue of its own.
+   */
+  damageReductionRatio?: number;
+}
+
+/**
+ * The result of one equip or unequip request. Unicast to the requester and to nobody else — the
+ * same rule as {@link PlayerHit}: what somebody else has equipped is their own business.
+ */
+export interface EquipmentChanged {
+  /** What is equipped after this request, or null if nothing is. */
+  itemKey: string | null;
+  /**
+   * False when an equip named an item the account does not hold, or lost a same-account,
+   * different-tab concurrent equip race — or when an unequip found nothing equipped. Always the
+   * store's own answer, never a locally-cached guess, so the state above is unchanged only when
+   * this is false.
+   */
+  applied: boolean;
 }
 
 export interface ServerMessagePayload {
@@ -328,4 +361,5 @@ export interface ServerMessagePayload {
   [ServerMessage.MonsterHit]: MonsterHit;
   [ServerMessage.PlayerHit]: PlayerHit;
   [ServerMessage.ItemGranted]: ItemGranted;
+  [ServerMessage.EquipmentChanged]: EquipmentChanged;
 }

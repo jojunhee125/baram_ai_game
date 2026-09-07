@@ -251,19 +251,23 @@ function presentInventory(rows: readonly InventoryRow[]): readonly {
   name: string;
   icon: string;
   quantity: number;
+  equipped: boolean;
+  damageReductionRatio?: number;
 }[] {
-  const quantities = new Map(rows.map((row) => [row.itemKey, row.quantity]));
+  const rowsByKey = new Map(rows.map((row) => [row.itemKey, row]));
   const items = [];
   for (const definition of ITEM_DEFINITIONS) {
-    const quantity = quantities.get(definition.key);
-    if (quantity === undefined) {
+    const row = rowsByKey.get(definition.key);
+    if (row === undefined) {
       continue;
     }
     items.push({
       itemKey: definition.key,
       name: definition.name,
       icon: definition.icon,
-      quantity,
+      quantity: row.quantity,
+      equipped: row.equipped,
+      damageReductionRatio: definition.equipment?.damageReductionRatio,
     });
   }
   return items;

@@ -1,0 +1,835 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { after, afterEach, before, describe, it } from "node:test";
+import { Pool } from "pg";
+import { ColyseusTestServer } from "@colyseus/testing";
+import {
+  Direction,
+  MONSTER_TICK_MS,
+  PLAYER_ATTACK_DAMAGE,
+  PLAYER_MAX_HP,
+  ServerMessage,
+  type EquipmentChanged,
+  type ItemGranted,
+  type JoinOptions,
+  type PlayerHit,
+  type RoomState,
+  type TilePosition,
+} from "@zep-test/shared";
+import {
+  InMemoryInventoryStore,
+  PostgresInventoryStore,
+  type InventoryRow,
+  type InventoryStore,
+} from "../db/inventoryStore";
+import { runMigrations } from "../db/migrate";
+import { resetDatabaseStatus } from "../db/status";
+import { createGameServer } from "../server";
+import { ITEM_DEFINITIONS } from "./itemDefinitions";
+import type { CollisionMap, ProximityIndex, RoomCreateOptions } from "./contracts";
+import { MetaverseRoom } from "./metaverseRoom";
+import { MonsterKind, type MonsterSpawnDefinition, type MonsterType } from "./monsterDefinitions";
+
+/**
+ * Independent re-verification of Phase F (leather-armor equip/unequip), adversarial rather than
+ * confirmatory. Built on the same private-method-access harness as `passE-combat-verification.test.ts`
+ * and `entryPass-verification.test.ts`.
+ */
+
+type RoomClient = Parameters<MetaverseRoom["onJoin"]>[0];
+
+interface SentMessage {
+  type: string;
+  payload: unknown;
+}
+
+interface FakeClient {
+  sessionId: string;
+  auth: { ssoNickname: string | null; ssoUserId: string | null };
+  userData?: {
+    lastMoveAt: number;
+    lastAttackAt: number;
+    hp: number;
+    lastDamagedAt: number;
+    equippedItemKey: string | null;
+    equipCacheVersion: number;
+    equipRequestPending: boolean;
+  };
+  sent: SentMessage[];
+}
+
+function fakeClient(sessionId: string, ssoUserId: string | null = null): FakeClient {
+  const sent: SentMessage[] = [];
+  return {
+    sessionId,
+    auth: { ssoNickname: null, ssoUserId },
+    sent,
+    send: (type: string, payload: unknown) => {
+      sent.push({ type, payload });
+    },
+  } as FakeClient;
+}
+
+function sentOfType<T>(client: FakeClient, type: string): T[] {
+  return client.sent.filter((message) => message.type === type).map((message) => message.payload as T);
+}
+
+function asRoomClient(client: FakeClient): RoomClient {
+  return client as unknown as RoomClient;
+}
+
+const OPEN_CENTRE: TilePosition = { tileX: 78, tileY: 70 };
+
+const LEATHER_ARMOR_REDUCTION = ITEM_DEFINITIONS.find((item) => item.key === "leather-armor")?.equipment
+  ?.damageReductionRatio;
+assert.equal(LEATHER_ARMOR_REDUCTION, 0.2, "precondition: this file's math assumes the catalogue's own ratio");
+
+/** Squirrel(5 dmg, the real post-nerf value) / Rabbit(1 dmg, a boundary fixture) / Deer(one-hit-kill armor drop). */
+const FIXTURE_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
+  [
+    MonsterKind.Squirrel,
+    {
+      kind: MonsterKind.Squirrel,
+      maxHp: 100,
+      damage: 5,
+      attackCooldownMs: MONSTER_TICK_MS,
+      wanderStepIntervalMs: MONSTER_TICK_MS,
+      chaseStepIntervalMs: MONSTER_TICK_MS,
+      aggroRadiusTiles: 6,
+      leashRadiusTiles: 10,
+      respawnDelayMs: MONSTER_TICK_MS * 5,
+      loot: [],
+    },
+  ],
+  [
+    // Damage 1 is the boundary Math.max(1, Math.floor(1 * 0.8)) = Math.max(1, 0) exercises directly.
+    MonsterKind.Rabbit,
+    {
+      kind: MonsterKind.Rabbit,
+      maxHp: 100,
+      damage: 1,
+      attackCooldownMs: MONSTER_TICK_MS,
+      wanderStepIntervalMs: MONSTER_TICK_MS,
+      chaseStepIntervalMs: MONSTER_TICK_MS,
+      aggroRadiusTiles: 6,
+      leashRadiusTiles: 10,
+      respawnDelayMs: MONSTER_TICK_MS * 5,
+      loot: [],
+    },
+  ],
+  [
+    MonsterKind.Deer,
+    {
+      kind: MonsterKind.Deer,
+      maxHp: PLAYER_ATTACK_DAMAGE,
+      damage: 0,
+      attackCooldownMs: MONSTER_TICK_MS,
+      wanderStepIntervalMs: MONSTER_TICK_MS,
+      chaseStepIntervalMs: MONSTER_TICK_MS,
+      aggroRadiusTiles: 0,
+      leashRadiusTiles: 0,
+      respawnDelayMs: MONSTER_TICK_MS * 100_000,
+      loot: [{ itemKey: "leather-armor", chance: 1, quantity: 1 }],
+    },
+  ],
+]);
+
+class VerifyRoom extends MetaverseRoom {
+  fixtureSpawns: readonly MonsterSpawnDefinition[] = [];
+
+  protected override monsterSpawns(): readonly MonsterSpawnDefinition[] {
+    return this.fixtureSpawns;
+  }
+
+  protected override monsterTypes(): ReadonlyMap<MonsterKind, MonsterType> {
+    return FIXTURE_TYPES;
+  }
+
+  protected override createMonsterIndex(map: CollisionMap): ProximityIndex {
+    return super.createMonsterIndex(map);
+  }
+
+  override setSimulationInterval(): void {
+    // A live timer would mutate state mid-assertion; every test here drives `tick` itself.
+  }
+}
+
+const ROOM_OPTIONS: RoomCreateOptions = {
+  roomType: "verify-armor",
+  mapKey: "grand-plaza",
+  maxClients: 500,
+  spawn: { tileX: OPEN_CENTRE.tileX, tileY: OPEN_CENTRE.tileY, spreadRadiusInTiles: 0 },
+};
+
+function spawnAt(id: string, kind: MonsterKind, at: TilePosition): MonsterSpawnDefinition {
+  return { id, room: ROOM_OPTIONS.roomType, kind, at, wanderRadiusTiles: 0 };
+}
+
+/**
+ * `hydrateEquipmentCache` only fires in a `hasMonsters` room (Phase F reviewer fix — grand-plaza
+ * must never pay a join-time DB cost for a cache `damagePlayer` can't read there). The
+ * session-cache tests below are about the version-race logic itself, not about a specific
+ * monster, so every room they create needs *some* monster — this one, far off-tile and fully
+ * inert (0 aggro/leash radius, 0 damage), exists purely to make `hasMonsters` true.
+ */
+const INERT_SPAWN = spawnAt("inert-hasMonsters-fixture", MonsterKind.Deer, { tileX: 0, tileY: 0 });
+
+async function createRoom(
+  spawns: readonly MonsterSpawnDefinition[],
+  store?: InventoryStore,
+): Promise<VerifyRoom> {
+  const room = new VerifyRoom();
+  room.fixtureSpawns = spawns;
+  await room.onCreate({ ...ROOM_OPTIONS, inventoryStore: store });
+  return room;
+}
+
+function join(
+  room: MetaverseRoom,
+  sessionId: string,
+  ssoUserId: string | null = null,
+  options?: Partial<JoinOptions>,
+): FakeClient {
+  const client = fakeClient(sessionId, ssoUserId);
+  room.onJoin(asRoomClient(client), { nickname: sessionId, avatarSkin: 0, ...options });
+  return client;
+}
+
+function place(room: MetaverseRoom, sessionId: string, tile: TilePosition): void {
+  const player = room.state.players.get(sessionId);
+  assert.ok(player);
+  player.tileX = tile.tileX;
+  player.tileY = tile.tileY;
+  room["proximityIndex"].move(sessionId, tile);
+  room["refreshViewFor"](sessionId);
+  room["refreshMonsterViewFor"](sessionId);
+}
+
+function face(room: MetaverseRoom, sessionId: string, dir: Direction): void {
+  const player = room.state.players.get(sessionId);
+  assert.ok(player);
+  player.facing = dir;
+}
+
+function attack(room: MetaverseRoom, client: FakeClient, at?: number): void {
+  if (at !== undefined && client.userData) {
+    client.userData.lastAttackAt = at;
+  }
+  room["handleAttack"](asRoomClient(client));
+}
+
+function equipItem(room: MetaverseRoom, client: FakeClient, itemKey: string): void {
+  room["handleEquipItem"](asRoomClient(client), { itemKey });
+}
+
+function unequipItem(room: MetaverseRoom, client: FakeClient): void {
+  room["handleUnequipItem"](asRoomClient(client));
+}
+
+/** Lets a fire-and-forget async continuation (settleEquipRequest, awardLoot, hydration) settle. */
+async function flush(): Promise<void> {
+  for (let index = 0; index < 8; index++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+function dispose(room: MetaverseRoom): void {
+  room.setPatchRate(null);
+}
+
+/**
+ * An `InventoryStore` whose `getEquipped`/`equip`/`unequip` never resolve on their own — a test
+ * drives each call's settlement by hand, in whichever order the scenario needs. `list`/`add`/
+ * `grantOnce` are never exercised by the tests in this file and answer inertly.
+ */
+class ControlledEquipStore implements InventoryStore {
+  private readonly getEquippedWaiters: Array<(value: string | null) => void> = [];
+  private readonly equipWaiters: Array<{
+    resolve: (value: boolean) => void;
+    reject: (cause: unknown) => void;
+  }> = [];
+  private readonly unequipWaiters: Array<(value: boolean) => void> = [];
+
+  list(): Promise<readonly InventoryRow[]> {
+    return Promise.resolve([]);
+  }
+
+  add(): Promise<number | null> {
+    return Promise.resolve(null);
+  }
+
+  grantOnce(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
+  getEquipped(): Promise<string | null> {
+    return new Promise((resolve) => {
+      this.getEquippedWaiters.push(resolve);
+    });
+  }
+
+  equip(): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+      this.equipWaiters.push({ resolve, reject });
+    });
+  }
+
+  unequip(): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.unequipWaiters.push(resolve);
+    });
+  }
+
+  settleGetEquipped(callIndex: number, value: string | null): void {
+    this.getEquippedWaiters[callIndex]!(value);
+  }
+
+  settleEquip(callIndex: number, value: boolean): void {
+    this.equipWaiters[callIndex]!.resolve(value);
+  }
+
+  failEquip(callIndex: number, cause: unknown): void {
+    this.equipWaiters[callIndex]!.reject(cause);
+  }
+
+  settleUnequip(callIndex: number, value = true): void {
+    this.unequipWaiters[callIndex]!(value);
+  }
+
+  get getEquippedCallCount(): number {
+    return this.getEquippedWaiters.length;
+  }
+
+  get equipCallCount(): number {
+    return this.equipWaiters.length;
+  }
+
+  get unequipCallCount(): number {
+    return this.unequipWaiters.length;
+  }
+}
+
+describe("VERIFY equipCacheVersion protects a settled equip/unequip against a stale hydration", () => {
+  it("an equip that settles before a slower join-time hydration is not clobbered by the hydration's stale answer", async () => {
+    const store = new ControlledEquipStore();
+    const room = await createRoom([INERT_SPAWN], store);
+    try {
+      const client = join(room, "s1", "sso-hydrate-race-1");
+      assert.equal(store.getEquippedCallCount, 1, "onJoin must fire the catch-up read exactly once");
+
+      equipItem(room, client, "leather-armor");
+      assert.equal(store.equipCallCount, 1);
+
+      store.settleEquip(0, true);
+      await flush();
+      assert.equal(client.userData?.equippedItemKey, "leather-armor", "the equip applied");
+      const versionAfterEquip = client.userData?.equipCacheVersion;
+
+      // The stale hydration, which started before the equip and answers only now, must lose.
+      store.settleGetEquipped(0, null);
+      await flush();
+
+      assert.equal(
+        client.userData?.equippedItemKey,
+        "leather-armor",
+        "a stale hydration must not overwrite the equip that already landed",
+      );
+      assert.equal(
+        client.userData?.equipCacheVersion,
+        versionAfterEquip,
+        "a discarded hydration must not itself bump the version",
+      );
+      assert.deepEqual(
+        sentOfType<EquipmentChanged>(client, ServerMessage.EquipmentChanged),
+        [{ itemKey: "leather-armor", applied: true }],
+        "the hydration losing the race sends nothing at all — only the equip's own verdict",
+      );
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("FIXED: hydrateEquipmentCache bumps equipCacheVersion when its answer actually changes the cache, matching the field's own doc comment", async () => {
+    // contracts.ts's PlayerSession.equipCacheVersion doc: "Bumped by every write that actually
+    // changes the cache (hydration, a confirmed equip, a confirmed unequip)". Was previously
+    // false for hydration — metaverseRoom.ts hydrateEquipmentCache wrote
+    // `current.equippedItemKey = equipped;` and never touched `equipCacheVersion`. No corruption
+    // was observed from that only because exactly one hydration ever runs per session and
+    // equip/unequip is serialized by `equipRequestPending` — a future caller that assumed the
+    // documented contract held would not have been so lucky.
+    const store = new ControlledEquipStore();
+    const room = await createRoom([INERT_SPAWN], store);
+    try {
+      const client = join(room, "s1", "sso-doc-mismatch-1");
+      const versionBeforeHydration = client.userData?.equipCacheVersion;
+      assert.equal(versionBeforeHydration, 0);
+
+      store.settleGetEquipped(0, "some-earlier-visit-item");
+      await flush();
+
+      assert.equal(client.userData?.equippedItemKey, "some-earlier-visit-item", "hydration applied its answer");
+      assert.equal(
+        client.userData?.equipCacheVersion,
+        (versionBeforeHydration ?? 0) + 1,
+        "a cache-changing hydration now bumps the version exactly once, matching the doc comment",
+      );
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("hydrateEquipmentCache does not bump equipCacheVersion when its answer leaves the cache unchanged", async () => {
+    // The common case: nothing has happened between join and the catch-up read resolving, so the
+    // read confirms the initial `null` rather than changing it. A bump here would have no
+    // upside and a real downside — it would invalidate a same-session equip/unequip request still
+    // in flight (captured `versionAtStart` before this hydration started) for no reason at all.
+    const store = new ControlledEquipStore();
+    const room = await createRoom([INERT_SPAWN], store);
+    try {
+      const client = join(room, "s1", "sso-doc-mismatch-2");
+      const versionBeforeHydration = client.userData?.equipCacheVersion;
+
+      store.settleGetEquipped(0, null);
+      await flush();
+
+      assert.equal(client.userData?.equippedItemKey, null);
+      assert.equal(
+        client.userData?.equipCacheVersion,
+        versionBeforeHydration,
+        "an unchanged answer must not bump the version",
+      );
+    } finally {
+      dispose(room);
+    }
+  });
+});
+
+describe("VERIFY equipRequestPending serializes one session's own requests", () => {
+  it("a second request on the same session while the first is still in flight is dropped, not queued, and never reaches the store", async () => {
+    const store = new ControlledEquipStore();
+    const room = await createRoom([INERT_SPAWN], store);
+    try {
+      const client = join(room, "s1", "sso-pending-1");
+      store.settleGetEquipped(0, null);
+      await flush();
+
+      equipItem(room, client, "leather-armor");
+      assert.equal(client.userData?.equipRequestPending, true, "precondition: the first request is in flight");
+
+      // The overlapping request, sent before the first one's store call has resolved.
+      unequipItem(room, client);
+      assert.equal(store.unequipCallCount, 0, "the overlapping unequip must never reach the store at all");
+
+      store.settleEquip(0, true);
+      await flush();
+
+      assert.equal(client.userData?.equippedItemKey, "leather-armor", "only the first request's result survives");
+      assert.equal(client.userData?.equipRequestPending, false);
+      assert.deepEqual(
+        sentOfType<EquipmentChanged>(client, ServerMessage.EquipmentChanged),
+        [{ itemKey: "leather-armor", applied: true }],
+        "exactly one verdict is sent for the two messages the client sent",
+      );
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("once the first request settles, a session's next request is accepted normally", async () => {
+    const store = new ControlledEquipStore();
+    const room = await createRoom([INERT_SPAWN], store);
+    try {
+      const client = join(room, "s1", "sso-pending-2");
+      store.settleGetEquipped(0, null);
+      await flush();
+
+      equipItem(room, client, "leather-armor");
+      store.settleEquip(0, true);
+      await flush();
+      assert.equal(client.userData?.equipRequestPending, false);
+
+      unequipItem(room, client);
+      assert.equal(store.unequipCallCount, 1, "the request after the first one settled must reach the store");
+      store.settleUnequip(0);
+      await flush();
+
+      assert.equal(client.userData?.equippedItemKey, null);
+      assert.deepEqual(sentOfType<EquipmentChanged>(client, ServerMessage.EquipmentChanged), [
+        { itemKey: "leather-armor", applied: true },
+        { itemKey: null, applied: true },
+      ]);
+    } finally {
+      dispose(room);
+    }
+  });
+});
+
+describe("VERIFY an equip/unequip that resolves after the session has left is a silent no-op, not a crash", () => {
+  it("an equip resolving after onLeave touches nothing and sends nothing", async () => {
+    const store = new ControlledEquipStore();
+    const room = await createRoom([INERT_SPAWN], store);
+    try {
+      const client = join(room, "s1", "sso-leave-1");
+      store.settleGetEquipped(0, null);
+      await flush();
+
+      equipItem(room, client, "leather-armor");
+      assert.equal(store.equipCallCount, 1);
+
+      room.onLeave(asRoomClient(client));
+      assert.equal(room["clientsBySession"].has("s1"), false, "precondition: the session is gone");
+
+      assert.doesNotThrow(() => store.settleEquip(0, true));
+      await flush();
+
+      assert.equal(
+        sentOfType<EquipmentChanged>(client, ServerMessage.EquipmentChanged).length,
+        0,
+        "a departed session must never receive a verdict",
+      );
+    } finally {
+      dispose(room);
+    }
+  });
+});
+
+describe("FIXED: EquipmentChanged.applied for an unequip is derived from what the store actually did, not from the session's stale local cache", () => {
+  it("a session whose cache lags the database reports applied:true because its unequip call really did clear the DB row", async () => {
+    // The realistic route to this state is the cross-session equip race the Postgres-backed
+    // test below proves: this session's join-time hydration ran and correctly cached "nothing
+    // equipped" — accurate *at the time* — and only afterwards did a sibling session (the same
+    // SSO account, a second tab) equip something. This session's cache has no way to learn of
+    // that: nothing re-hydrates it mid-visit. Reproduced here without a second live session, by
+    // driving the shared store directly the way that sibling tab would.
+    const store = new InMemoryInventoryStore();
+    const ownerKey = "shared-owner";
+
+    const room = await createRoom([INERT_SPAWN], store);
+    try {
+      const client = join(room, "s1", ownerKey);
+      await flush();
+      assert.equal(client.userData?.equippedItemKey, null, "precondition: hydration caught up to an empty bag");
+
+      // The sibling tab's action, invisible to this session's cache.
+      await store.grantOnce(ownerKey, "leather-armor");
+      await store.equip(ownerKey, "leather-armor");
+      assert.equal(await store.getEquipped(ownerKey), "leather-armor", "precondition: the sibling really equipped it");
+      assert.equal(
+        client.userData?.equippedItemKey,
+        null,
+        "precondition: this session's cache never learned about the sibling's equip",
+      );
+
+      unequipItem(room, client);
+      await flush();
+
+      assert.equal(
+        await store.getEquipped(ownerKey),
+        null,
+        "the store call this triggered really did clear the account's equipped row",
+      );
+      assert.deepEqual(
+        sentOfType<EquipmentChanged>(client, ServerMessage.EquipmentChanged),
+        [{ itemKey: null, applied: true }],
+        "the client is now told applied:true, derived from InventoryStore.unequip's own return " +
+          "value rather than the session's stale pre-call cache — the real state change reaches " +
+          "the open bag UI instead of being dropped by InventoryPanel.applyEquipmentChange",
+      );
+    } finally {
+      dispose(room);
+    }
+  });
+});
+
+describe("VERIFY damage reduction — the equipped 20% reduction applies to the number sent to the client, not the raw monster stat", () => {
+  it("floors the reduced damage, and reverts to the raw value the hit after unequip", async () => {
+    const store = new InMemoryInventoryStore();
+    const room = await createRoom([spawnAt("m", MonsterKind.Squirrel, OPEN_CENTRE)], store);
+    try {
+      const victim = join(room, "victim", "sso-dmg-1");
+      place(room, "victim", OPEN_CENTRE);
+      await store.grantOnce("sso-dmg-1", "leather-armor");
+      equipItem(room, victim, "leather-armor");
+      await flush();
+      assert.equal(victim.userData?.equippedItemKey, "leather-armor", "precondition: armor is on");
+
+      room["tick"](1000);
+      const firstHit = sentOfType<PlayerHit>(victim, ServerMessage.PlayerHit).at(-1);
+      assert.equal(firstHit?.damage, Math.floor(5 * 0.8), "20% off 5 floors to 4");
+      assert.equal(victim.userData?.hp, PLAYER_MAX_HP - 4);
+
+      unequipItem(room, victim);
+      await flush();
+      assert.equal(victim.userData?.equippedItemKey, null);
+
+      room["tick"](1000 + MONSTER_TICK_MS);
+      const secondHit = sentOfType<PlayerHit>(victim, ServerMessage.PlayerHit).at(-1);
+      assert.equal(secondHit?.damage, 5, "unequipped, the very next hit is back to the raw value");
+      assert.equal(victim.userData?.hp, PLAYER_MAX_HP - 4 - 5);
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("never reduces a hit to 0 — the floor is clamped at 1 even when 20% off would round down to nothing", async () => {
+    const store = new InMemoryInventoryStore();
+    const room = await createRoom([spawnAt("m", MonsterKind.Rabbit, OPEN_CENTRE)], store);
+    try {
+      const victim = join(room, "victim", "sso-dmg-2");
+      place(room, "victim", OPEN_CENTRE);
+      await store.grantOnce("sso-dmg-2", "leather-armor");
+      equipItem(room, victim, "leather-armor");
+      await flush();
+
+      room["tick"](1000);
+      const hit = sentOfType<PlayerHit>(victim, ServerMessage.PlayerHit).at(-1);
+      assert.equal(Math.floor(1 * 0.8), 0, "precondition: an unclamped floor would be 0");
+      assert.equal(hit?.damage, 1, "clamped to a minimum of 1 — an equipped player must stay killable");
+    } finally {
+      dispose(room);
+    }
+  });
+});
+
+describe("VERIFY a kill drop never auto-equips", () => {
+  it("leather-armor lands in the bag unequipped even though the account owns nothing else", async () => {
+    const faced = { tileX: OPEN_CENTRE.tileX + 1, tileY: OPEN_CENTRE.tileY };
+    const store = new InMemoryInventoryStore();
+    const room = await createRoom([spawnAt("m", MonsterKind.Deer, faced)], store);
+    try {
+      const hunter = join(room, "hunter", "sso-drop-1");
+      place(room, "hunter", OPEN_CENTRE);
+      face(room, "hunter", Direction.Right);
+
+      attack(room, hunter, 0);
+      await flush();
+
+      assert.deepEqual(await store.list("sso-drop-1"), [
+        { itemKey: "leather-armor", quantity: 1, equipped: false },
+      ]);
+      assert.equal(hunter.userData?.equippedItemKey, null, "the session cache must not auto-populate either");
+      assert.equal(
+        sentOfType<ItemGranted>(hunter, ServerMessage.ItemGranted).length,
+        1,
+        "one grant notice, and nothing that looks like an equip verdict",
+      );
+      assert.equal(sentOfType<EquipmentChanged>(hunter, ServerMessage.EquipmentChanged).length, 0);
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("FIXED: awardLoot's ItemGranted carries damageReductionRatio for an equipment item, so the equip button renders without a bag close/reopen", async () => {
+    const faced = { tileX: OPEN_CENTRE.tileX + 1, tileY: OPEN_CENTRE.tileY };
+    const store = new InMemoryInventoryStore();
+    const room = await createRoom([spawnAt("m", MonsterKind.Deer, faced)], store);
+    try {
+      const hunter = join(room, "hunter", "sso-drop-2");
+      place(room, "hunter", OPEN_CENTRE);
+      face(room, "hunter", Direction.Right);
+
+      attack(room, hunter, 0);
+      await flush();
+
+      const grant = sentOfType<ItemGranted>(hunter, ServerMessage.ItemGranted).at(0);
+      assert.ok(grant);
+      assert.equal(
+        grant.damageReductionRatio,
+        LEATHER_ARMOR_REDUCTION,
+        "the field now travels on the live drop toast, matching what GET /api/inventory sends",
+      );
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("a bag already holding the possession item rejects a second grant and stays unequipped", async () => {
+    const secondMonsterTile = { tileX: OPEN_CENTRE.tileX, tileY: OPEN_CENTRE.tileY + 10 };
+    const faced = { tileX: OPEN_CENTRE.tileX + 1, tileY: OPEN_CENTRE.tileY };
+    const store = new InMemoryInventoryStore();
+    const room = await createRoom(
+      [spawnAt("m1", MonsterKind.Deer, faced), spawnAt("m2", MonsterKind.Deer, secondMonsterTile)],
+      store,
+    );
+    try {
+      const hunter = join(room, "hunter", "sso-drop-3");
+      place(room, "hunter", OPEN_CENTRE);
+      face(room, "hunter", Direction.Right);
+      attack(room, hunter, 0);
+      await flush();
+
+      place(room, "hunter", { tileX: secondMonsterTile.tileX - 1, tileY: secondMonsterTile.tileY });
+      face(room, "hunter", Direction.Right);
+      attack(room, hunter, 0);
+      await flush();
+
+      assert.deepEqual(
+        await store.list("sso-drop-3"),
+        [{ itemKey: "leather-armor", quantity: 1, equipped: false }],
+        "still exactly one row, still unequipped",
+      );
+      assert.equal(
+        sentOfType<ItemGranted>(hunter, ServerMessage.ItemGranted).length,
+        1,
+        "the second, already-owned drop must not send a second grant",
+      );
+    } finally {
+      dispose(room);
+    }
+  });
+});
+
+/**
+ * The half of this feature no in-process stub can reach: whether two genuinely concurrent
+ * `MetaverseRoom.handleEquipItem` calls for the *same account* (two sessions — the ordinary
+ * shape of the same SSO user open in two tabs) leave the database consistent, and what each
+ * session is actually told. Opt-in for `inventoryStore.test.ts`'s own reason: no container, no
+ * run. Point `ZEP_TEST_DATABASE_URL` at a scratch Postgres to exercise it — see that file's own
+ * header comment for the exact `docker run` line.
+ */
+const REAL_DATABASE_URL = process.env["ZEP_TEST_DATABASE_URL"]?.trim();
+
+describe(
+  "VERIFY cross-session (same account, two tabs) equip race against a real database",
+  { skip: REAL_DATABASE_URL === undefined ? "ZEP_TEST_DATABASE_URL is not set" : false },
+  () => {
+    let pool: Pool;
+
+    before(async () => {
+      pool = new Pool({ connectionString: REAL_DATABASE_URL, max: 8 });
+      await runMigrations(pool);
+      resetDatabaseStatus();
+    });
+
+    after(async () => {
+      await pool.end();
+      resetDatabaseStatus();
+    });
+
+    it(
+      "FIXED: one session's equip receives applied:false when it loses the database race to a sibling session (previously received no verdict at all)",
+      async () => {
+        // `ITEM_DEFINITIONS` ships exactly one row with `.equipment` today (`leather-armor`), so
+        // `handleEquipItem`'s own catalogue gate makes a *second* real equipment item unreachable
+        // through a live client message right now — there is nothing else a client could ever
+        // legitimately name. That gate is a business rule about which `itemKey`s are equipment,
+        // orthogonal to the concurrency mechanism under test here, so this drives
+        // `settleEquipRequest` directly (the same private method `handleEquipItem` calls into)
+        // with a second, synthetic equipment-shaped item — exactly what today's code will do the
+        // moment the catalogue grows a second row, which the roadmap's later phases plan to add.
+        const store = new PostgresInventoryStore(pool);
+        const ownerKey = randomUUID();
+        await store.add(ownerKey, "leather-armor", 1);
+        await store.add(ownerKey, "phantom-second-armor", 1);
+
+        const room = await createRoom([INERT_SPAWN], store);
+        try {
+          // Two sessions, same SSO account — exactly what two browser tabs for one login produce.
+          const tabA = join(room, "tabA", ownerKey);
+          const tabB = join(room, "tabB", ownerKey);
+          // Neither tab's join-time hydration is awaited before the race; both start at
+          // equipCacheVersion 0 independently, since each session owns its own cache.
+
+          // Awaited directly (not fire-and-forget + `flush()`, which this file's other tests use):
+          // those races are between in-process promises with no real latency, so a handful of
+          // `setImmediate` rounds always outlasts them. A genuine socket round trip to Postgres
+          // does not respect that budget, so the only honest way to know both continuations —
+          // including their trailing `client.send` — have actually finished is to await them.
+          await Promise.all([
+            room["settleEquipRequest"](
+              asRoomClient(tabA),
+              () => store.equip(ownerKey, "leather-armor"),
+              "leather-armor",
+            ),
+            room["settleEquipRequest"](
+              asRoomClient(tabB),
+              () => store.equip(ownerKey, "phantom-second-armor"),
+              "phantom-second-armor",
+            ),
+          ]);
+
+          const rows = await store.list(ownerKey);
+          const equippedRows = rows.filter((row) => row.equipped);
+          assert.equal(equippedRows.length, 1, "the database must never end up with two equipped rows");
+
+          const changedA = sentOfType<EquipmentChanged>(tabA, ServerMessage.EquipmentChanged);
+          const changedB = sentOfType<EquipmentChanged>(tabB, ServerMessage.EquipmentChanged);
+
+          assert.equal(changedA.length, 1, "tabA must receive exactly one verdict for its one request");
+          assert.equal(changedB.length, 1, "tabB must receive exactly one verdict for its one request — " +
+            "the loser is no longer left silent by a swallowed unique_violation");
+
+          const winnerChanged = changedA[0]!.applied ? changedA[0]! : changedB[0]!;
+          const loserChanged = changedA[0]!.applied ? changedB[0]! : changedA[0]!;
+          assert.equal(winnerChanged.applied, true);
+          assert.equal(loserChanged.applied, false, "the loser's equip() call reported false, not an exception");
+          assert.equal(equippedRows[0]?.itemKey, winnerChanged.itemKey);
+
+          const loserSession = changedA[0]!.applied ? tabB.userData : tabA.userData;
+          assert.equal(
+            loserSession?.equipRequestPending,
+            false,
+            "the losing session's pending flag is cleared same as any other settled request",
+          );
+        } finally {
+          dispose(room);
+        }
+      },
+    );
+  },
+);
+
+/**
+ * `hydrateEquipmentCache` is gated on `this.hasMonsters`, mirroring the possession catch-up read
+ * (`hydratePossessionCache`, gated on `gatedItemKeys.size > 0`) — `equippedItemKey` is only ever
+ * read by `damagePlayer`, which never runs outside a hasMonsters room, so grand-plaza must pay
+ * zero cost for a cache it can never consume (reviewer finding, Phase F: an earlier revision of
+ * this code hydrated unconditionally, wasting one DB round trip per join on the 500 CCU path).
+ */
+describe("VERIFY grand-plaza pays zero equipment-cache cost, matching the possession cache", () => {
+  const PORT = 2589;
+  let testServer: ColyseusTestServer;
+  let getEquippedCalls: string[];
+
+  before(async () => {
+    getEquippedCalls = [];
+    const countingStore: InventoryStore = {
+      list: () => Promise.resolve([]),
+      add: () => Promise.resolve(null),
+      grantOnce: () => Promise.resolve(false),
+      getEquipped: (ownerKey: string) => {
+        getEquippedCalls.push(ownerKey);
+        return Promise.resolve(null);
+      },
+      equip: () => Promise.resolve(false),
+      unequip: () => Promise.resolve(false),
+    };
+    const gameServer = createGameServer(undefined, countingStore);
+    await gameServer.listen(PORT);
+    testServer = new ColyseusTestServer(gameServer);
+  });
+
+  after(async () => {
+    await testServer.shutdown();
+  });
+
+  afterEach(async () => {
+    await testServer.cleanup();
+  });
+
+  it("never calls getEquipped on a grand-plaza join, since the room has no monsters to consume the cache", async () => {
+    const room = (await testServer.createRoom<RoomState>("grand-plaza", {})) as Awaited<
+      ReturnType<ColyseusTestServer["createRoom"]>
+    > & { state: RoomState };
+    const client = await testServer.connectTo(room, { nickname: "visitor", avatarSkin: 0 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    assert.equal(
+      (room as unknown as MetaverseRoom)["gatedItemKeys"].size,
+      0,
+      "precondition, matching entryPass-verification.test.ts: grand-plaza gates nothing",
+    );
+    assert.equal(getEquippedCalls.length, 0, "the equipment cache is gated on hasMonsters, same as the possession cache");
+    assert.ok(room.state.players.get(client.sessionId), "the join itself still succeeded");
+  });
+});

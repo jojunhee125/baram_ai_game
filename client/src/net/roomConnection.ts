@@ -6,6 +6,8 @@ import {
   type ChatBroadcast,
   type ChatRequest,
   type Direction,
+  type EquipItemRequest,
+  type EquipmentChanged,
   type InteractableEntered,
   type InteractableMarker,
   type ItemGranted,
@@ -97,6 +99,8 @@ export interface RoomEvents {
   onPlayerHit?(event: PlayerHit): void;
   /** A drop was credited to this account, and the store has already committed it. */
   onItemGranted?(event: ItemGranted): void;
+  /** The account's equipped item slot changed — or an equip/unequip request was ignored. */
+  onEquipmentChanged?(event: EquipmentChanged): void;
   onChat?(message: ChatBroadcast): void;
   onMoveRejected?(correction: MoveRejected): void;
   /** The local player stepped onto a portal trigger; the consumer owns the room transition. */
@@ -245,6 +249,16 @@ export class RoomConnection {
     this.room.send(ClientMessage.Attack);
   }
 
+  /** Requests the named item as the account's equipped item. */
+  sendEquipItem(itemKey: string): void {
+    this.room.send(ClientMessage.EquipItem, { itemKey } satisfies EquipItemRequest);
+  }
+
+  /** Requests that the account go bare-handed, no matter what is currently equipped. */
+  sendUnequipItem(): void {
+    this.room.send(ClientMessage.UnequipItem);
+  }
+
   /**
    * Hangs up on purpose, as the last step of a portal hop. `leaving` keeps the resulting
    * `room.onLeave` out of `RoomEvents.onLeave`, whose consumers treat a leave as a lost
@@ -353,6 +367,9 @@ export class RoomConnection {
     });
     this.room.onMessage(ServerMessage.ItemGranted, (event: ItemGranted) => {
       this.events.onItemGranted?.(event);
+    });
+    this.room.onMessage(ServerMessage.EquipmentChanged, (event: EquipmentChanged) => {
+      this.events.onEquipmentChanged?.(event);
     });
   }
 

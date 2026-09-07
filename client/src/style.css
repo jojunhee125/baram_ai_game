@@ -741,7 +741,7 @@ body {
   height: 32px;
   background-image: url("/sprites/items.png");
   background-repeat: no-repeat;
-  background-size: 192px 32px;
+  background-size: 224px 32px;
   image-rendering: pixelated;
 }
 
@@ -767,6 +767,39 @@ body {
   font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+/* Equip/unequip toggle, shown only on a row whose item occupies an equipment slot. */
+.bag__equip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(236, 234, 244, 0.06);
+  color: #eceaf4;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.bag__equip:hover {
+  background: rgba(236, 234, 244, 0.12);
+  border-color: rgba(236, 234, 244, 0.32);
+}
+
+.bag__equip:active {
+  transform: translateY(1px);
+}
+
+.bag__equip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* Loading, empty and failure share this block; exactly one of them is ever on screen. */
@@ -1372,6 +1405,7 @@ body {
   }
 
   .bag__close,
+  .bag__equip,
   .bag__retry,
   .boot__retry,
   .chat__input,

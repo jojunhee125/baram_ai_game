@@ -164,6 +164,7 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
         { itemKey: "copper-coin", chance: 0.3, quantity: 1 },
         { itemKey: "carrot", chance: 0.15, quantity: 1 },
         { itemKey: "old-dagger", chance: 0.05, quantity: 1 },
+        { itemKey: "leather-armor", chance: 0.03, quantity: 1 },
       ],
     },
   ],

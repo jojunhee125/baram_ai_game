@@ -287,6 +287,11 @@ export interface ItemDefinition {
    * Absent (falsy) for every ordinary stackable resource, which is every row but this kind.
    */
   possession?: boolean;
+  /** Present for an item that can be equipped, e.g. armor. Absent for everything else. */
+  equipment?: {
+    /** Fraction of incoming monster damage removed, in (0, 1). Applied in `damagePlayer`. */
+    damageReductionRatio: number;
+  };
 }
 
 /** Data attached to `client.userData`; never synced to clients. */
@@ -355,6 +360,25 @@ export interface PlayerSession {
    * reaches zero; see `MetaverseRoom.settlePossessionGrant`.
    */
   pendingPossessionGrants: Map<string, number>;
+  /**
+   * {@link ItemDefinition.key} of the account's equipped item, or null. Cached the way
+   * {@link ownedPossessionKeys} is: `damagePlayer` reads it on every hit, which is too hot a path
+   * for a store round trip.
+   */
+  equippedItemKey: string | null;
+  /**
+   * Optimistic-concurrency counter for {@link equippedItemKey}. Bumped by every write that
+   * actually changes the cache (hydration, a confirmed equip, a confirmed unequip), and compared
+   * before applying any of them: a write that started before a still-in-flight one but resolves
+   * after it must not clobber the newer result with a stale one.
+   */
+  equipCacheVersion: number;
+  /**
+   * True while an equip/unequip request for this session is awaiting the store. A second request
+   * arriving before the first resolves is dropped rather than queued — correctness already comes
+   * from {@link equipCacheVersion}, so this exists only to save the redundant round trip.
+   */
+  equipRequestPending: boolean;
 }
 
 /**

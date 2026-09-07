@@ -109,7 +109,7 @@ describe("ITEM_DEFINITIONS", () => {
     // boot refusal; a row reordered here without those is every icon drawn as the wrong item.
     assert.deepEqual(
       ITEM_DEFINITIONS.map((definition) => definition.key),
-      ["acorn", "carrot", "copper-coin", "herb", "old-dagger", "entry-pass"],
+      ["acorn", "carrot", "copper-coin", "herb", "old-dagger", "entry-pass", "leather-armor"],
     );
   });
 

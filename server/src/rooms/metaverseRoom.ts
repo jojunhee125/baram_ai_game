@@ -28,6 +28,8 @@ import {
   VIEW_RADIUS_TILES,
   type ChatBroadcast,
   type ChatRequest,
+  type EquipItemRequest,
+  type EquipmentChanged,
   type InteractableEntered,
   type ItemGranted,
   type JoinOptions,
@@ -261,6 +263,12 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.onMessage(ClientMessage.Attack, (client: RoomClient) => {
       this.handleAttack(client);
     });
+    this.onMessage(ClientMessage.EquipItem, (client: RoomClient, message: EquipItemRequest) => {
+      this.handleEquipItem(client, message);
+    });
+    this.onMessage(ClientMessage.UnequipItem, (client: RoomClient) => {
+      this.handleUnequipItem(client);
+    });
 
     // Last, and only where there is something to simulate. A room with no monsters stays purely
     // message-driven, which is what it was before this feature existed. Colyseus disposes an
@@ -406,6 +414,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       ownedPossessionKeys: new Set(),
       confirmedPossessionKeys: new Set(),
       pendingPossessionGrants: new Map(),
+      equippedItemKey: null,
+      equipCacheVersion: 0,
+      equipRequestPending: false,
     };
     client.view = new StateView();
     this.viewedBySession.set(client.sessionId, new Set());
@@ -422,6 +433,13 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     const ownerKey = client.userData.ownerKey ?? client.sessionId;
     if (this.gatedItemKeys.size > 0 && this.inventoryStore !== null) {
       void this.hydratePossessionCache(client.sessionId, ownerKey);
+    }
+    // Same reasoning as the possession gate above: equippedItemKey is only ever read by
+    // damagePlayer, which never runs outside a hasMonsters room, so hydrating it in grand-plaza
+    // is a pure-waste DB round trip on the 500 CCU join path (PoC #2). Equip/unequip itself
+    // still works in any room — that path writes the cache directly, it never depends on hydration.
+    if (this.hasMonsters && this.inventoryStore !== null) {
+      void this.hydrateEquipmentCache(client.sessionId, ownerKey);
     }
   }
 
@@ -451,6 +469,44 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         session.ownedPossessionKeys.add(row.itemKey);
         session.confirmedPossessionKeys.add(row.itemKey);
       }
+    }
+  }
+
+  /**
+   * Fills a freshly joined session's {@link PlayerSession.equippedItemKey} from the store — the
+   * one-time catch-up read for an item equipped in an earlier room visit. Never awaited by its
+   * caller, for {@link hydratePossessionCache}'s reason.
+   *
+   * Guarded by `equipCacheVersion` rather than only by the session still existing: an equip or
+   * unequip request issued right after join can resolve before this read does, and that request
+   * is the newer, more specific action — this stale answer must not overwrite it. The compare is
+   * enough on its own, whichever of the two actually resolves first, because a request that wins
+   * the race always bumps the version itself (see {@link handleEquipItem}).
+   */
+  private async hydrateEquipmentCache(sessionId: string, ownerKey: string): Promise<void> {
+    const store = this.inventoryStore;
+    if (store === null) {
+      return;
+    }
+    const session = this.clientsBySession.get(sessionId)?.userData;
+    if (!session) {
+      return;
+    }
+    const versionAtStart = session.equipCacheVersion;
+    const equipped = await store.getEquipped(ownerKey);
+    const current = this.clientsBySession.get(sessionId)?.userData;
+    if (!current || current.equipCacheVersion !== versionAtStart) {
+      return;
+    }
+    // Bumped only when this actually changes the cache — matching `equipCacheVersion`'s own doc
+    // comment ("bumped by every write that actually changes the cache") literally, rather than
+    // unconditionally on every hydration: an unconditional bump would let a same-answer hydration
+    // (the common case — nothing has happened between join and this read resolving) invalidate a
+    // same-session equip/unequip request that is still in flight for no reason at all, since that
+    // request's own `versionAtStart` was captured before this hydration started.
+    if (current.equippedItemKey !== equipped) {
+      current.equippedItemKey = equipped;
+      current.equipCacheVersion += 1;
     }
   }
 
@@ -818,6 +874,102 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   }
 
   /**
+   * One equip request. Ignored outright — no store call, no `EquipmentChanged` — for a request
+   * naming no equipment item at all (an unknown key, or one that is not `equipment`): unlike a
+   * held-or-not question, that is not something the store has any way to answer.
+   */
+  private handleEquipItem(client: RoomClient, message: EquipItemRequest): void {
+    const session = client.userData;
+    if (!session || this.inventoryStore === null || session.equipRequestPending) {
+      return;
+    }
+    const itemKey = message?.itemKey;
+    if (typeof itemKey !== "string") {
+      return;
+    }
+    const definition = ITEM_DEFINITIONS.find((item) => item.key === itemKey);
+    if (definition === undefined || definition.equipment === undefined) {
+      return;
+    }
+    void this.settleEquipRequest(client, () => this.inventoryStore!.equip(this.equipOwnerKey(client), itemKey), itemKey);
+  }
+
+  private handleUnequipItem(client: RoomClient): void {
+    const session = client.userData;
+    if (!session || this.inventoryStore === null || session.equipRequestPending) {
+      return;
+    }
+    // Whether this un-equips anything at all is the store's own answer, not the session's cache
+    // of what it was before the call: that cache can already be stale (a sibling session's equip
+    // the store has recorded but this session's own cache has no way to have learned about), and
+    // reporting `applied` off it would tell a client nothing changed when the store just did.
+    void this.settleEquipRequest(client, () => this.inventoryStore!.unequip(this.equipOwnerKey(client)), null);
+  }
+
+  private equipOwnerKey(client: RoomClient): string {
+    return client.userData?.ownerKey ?? client.sessionId;
+  }
+
+  /**
+   * Shared tail of {@link handleEquipItem} and {@link handleUnequipItem}: run one store call, then
+   * decide whether its answer is still the newest thing to have happened to this session.
+   *
+   * `applyTo` is what the cache becomes on a change — the item just equipped, or null for an
+   * unequip — supplied by the caller rather than re-derived here, because only the caller knows
+   * which of the two requests this is.
+   *
+   * `equipRequestPending` only saves a duplicate request its own round trip; correctness comes
+   * entirely from the `equipCacheVersion` compare below, which is what lets a slower, still-in-
+   * flight `hydrateEquipmentCache` or a second overlapping request lose without corrupting the
+   * cache — the same discipline `settlePossessionGrant` applies to possession grants.
+   */
+  private async settleEquipRequest(
+    client: RoomClient,
+    run: () => Promise<boolean>,
+    applyTo: string | null,
+  ): Promise<void> {
+    const session = client.userData;
+    if (!session) {
+      return;
+    }
+    session.equipRequestPending = true;
+    const versionAtStart = session.equipCacheVersion;
+
+    let applied: boolean;
+    try {
+      applied = await run();
+    } catch (cause) {
+      console.warn(`[zep-test] could not update equipment for ${this.equipOwnerKey(client)}`, cause);
+      const current = this.clientsBySession.get(client.sessionId)?.userData;
+      if (current) {
+        current.equipRequestPending = false;
+      }
+      return;
+    }
+
+    // Re-resolved after the await, exactly as `awardLoot` does: the session may have left the
+    // room while the store was answering.
+    const current = this.clientsBySession.get(client.sessionId)?.userData;
+    if (!current) {
+      return;
+    }
+    current.equipRequestPending = false;
+    if (current.equipCacheVersion !== versionAtStart) {
+      // A newer write already landed while this one was in flight; that one's answer stands, and
+      // this one's is neither applied nor announced.
+      return;
+    }
+    if (applied) {
+      current.equippedItemKey = applyTo;
+      current.equipCacheVersion += 1;
+    }
+    this.clientsBySession.get(client.sessionId)?.send(ServerMessage.EquipmentChanged, {
+      itemKey: current.equippedItemKey,
+      applied,
+    } satisfies EquipmentChanged);
+  }
+
+  /**
    * Files one kill's drops and, only once the store has committed them, tells the killer.
    *
    * Async and never awaited by its caller, which is the whole shape of it: the grant belongs to an
@@ -924,6 +1076,10 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         icon: definition.icon,
         quantity,
         total,
+        // Present only for an equipment item, same as `GET /api/inventory` — without it, the row
+        // this grant builds (`InventoryPanel.buildRow`) has no equip button until the bag is
+        // closed and reopened, since that button is gated on this field being defined.
+        damageReductionRatio: definition.equipment?.damageReductionRatio,
       } satisfies ItemGranted);
     }
   }
@@ -1288,14 +1444,28 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       return;
     }
 
-    session.hp -= damage;
+    // The reduction, if any, is looked up by key on every hit rather than cached alongside it:
+    // `session.equippedItemKey` is the hot value and `ITEM_DEFINITIONS` is a handful of rows, so
+    // this `find` costs nothing a second cache would be worth carrying.
+    const equippedDefinition =
+      session.equippedItemKey === null
+        ? undefined
+        : ITEM_DEFINITIONS.find((item) => item.key === session.equippedItemKey);
+    const reduction = equippedDefinition?.equipment?.damageReductionRatio ?? 0;
+    // Floored rather than rounded, and never below 1: a hit that reduces to nothing would make an
+    // equipped player literally unkillable, which is a different feature than "hits less hard".
+    const appliedDamage = reduction > 0 ? Math.max(1, Math.floor(damage * (1 - reduction))) : damage;
+
+    session.hp -= appliedDamage;
     // "Taken", not "dealt": swinging at something does not keep you in combat, being swung at
     // does. This is what COMBAT_EXIT_MS is measured from.
     session.lastDamagedAt = now;
     const hpRemaining = Math.max(0, session.hp);
     client.send(ServerMessage.PlayerHit, {
       monsterId,
-      damage,
+      // The damage actually applied, not the monster's raw stat: the client holds no stat table
+      // of its own, the same reason `MonsterHit.damage` is never anything but what landed.
+      damage: appliedDamage,
       hpRemaining,
       hpMax: PLAYER_MAX_HP,
     } satisfies PlayerHit);

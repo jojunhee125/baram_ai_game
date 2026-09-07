@@ -228,6 +228,7 @@ export class WorldScene extends Phaser.Scene {
         this.inventoryPanel?.applyGrant(event);
         this.weapon?.applyGrant(event);
       },
+      onEquipmentChanged: (event) => this.inventoryPanel?.applyEquipmentChange(event),
       onMoveRejected: (correction) => this.localPlayer?.applyRejection(correction),
       onTeleported: (destination) => this.localPlayer?.applyTeleport(destination),
       onChat: (message) => this.showChat(message),
@@ -262,7 +263,10 @@ export class WorldScene extends Phaser.Scene {
     this.objectPanel = new ObjectPanel((objectId, choiceIndex) =>
       connection.sendQuizAnswer(objectId, choiceIndex),
     );
-    this.inventoryPanel = new InventoryPanel();
+    this.inventoryPanel = new InventoryPanel(
+      (itemKey) => connection.sendEquipItem(itemKey),
+      () => connection.sendUnequipItem(),
+    );
     this.lootTablePanel = new LootTablePanel(this.connection.roomName);
     this.toasts = new ItemToasts();
     this.portalDenialBanner = new PortalDenialBanner();

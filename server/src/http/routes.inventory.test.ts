@@ -39,6 +39,8 @@ interface InventoryItemView {
   name: string;
   icon: string;
   quantity: number;
+  equipped: boolean;
+  damageReductionRatio?: number;
 }
 
 /**
@@ -64,6 +66,18 @@ class ScriptedInventoryStore implements InventoryStore {
 
   grantOnce(): Promise<boolean> {
     throw new Error("GET /api/inventory must never grant anything");
+  }
+
+  getEquipped(): Promise<string | null> {
+    throw new Error("GET /api/inventory must never touch equipment");
+  }
+
+  equip(): Promise<boolean> {
+    throw new Error("GET /api/inventory must never touch equipment");
+  }
+
+  unequip(): Promise<boolean> {
+    throw new Error("GET /api/inventory must never touch equipment");
   }
 }
 
@@ -145,11 +159,11 @@ beforeEach(() => {
 describe("GET /api/inventory", () => {
   it("answers the bag of the account the token names, with names and icons attached", async () => {
     const first = definitionAt(0);
-    store.bags.set(SUB_A, [{ itemKey: first.key, quantity: 3 }]);
+    store.bags.set(SUB_A, [{ itemKey: first.key, quantity: 3, equipped: false }]);
     const { status, items } = await readInventory(tokenHeader(SUB_A));
     assert.equal(status, 200);
     assert.deepEqual(items, [
-      { itemKey: first.key, name: first.name, icon: first.icon, quantity: 3 },
+      { itemKey: first.key, name: first.name, icon: first.icon, quantity: 3, equipped: false },
     ]);
     assert.deepEqual(store.reads, [SUB_A], "the sub claim is the key it looked under");
   });
@@ -161,7 +175,7 @@ describe("GET /api/inventory", () => {
   });
 
   it("does not hand one account another account's bag", async () => {
-    store.bags.set(SUB_B, [{ itemKey: definitionAt(0).key, quantity: 5 }]);
+    store.bags.set(SUB_B, [{ itemKey: definitionAt(0).key, quantity: 5, equipped: false }]);
     assert.deepEqual((await readInventory(tokenHeader(SUB_A))).items, []);
   });
 
@@ -171,8 +185,8 @@ describe("GET /api/inventory", () => {
     const first = definitionAt(0);
     const second = definitionAt(1);
     store.bags.set(SUB_A, [
-      { itemKey: second.key, quantity: 1 },
-      { itemKey: first.key, quantity: 2 },
+      { itemKey: second.key, quantity: 1, equipped: false },
+      { itemKey: first.key, quantity: 2, equipped: false },
     ]);
     const { items } = await readInventory(tokenHeader(SUB_A));
     assert.deepEqual(
@@ -183,8 +197,8 @@ describe("GET /api/inventory", () => {
 
   it("drops a stored row whose key has left the table rather than rendering it nameless", async () => {
     store.bags.set(SUB_A, [
-      { itemKey: "a-retired-item", quantity: 9 },
-      { itemKey: definitionAt(0).key, quantity: 1 },
+      { itemKey: "a-retired-item", quantity: 9, equipped: false },
+      { itemKey: definitionAt(0).key, quantity: 1, equipped: false },
     ]);
     const { items } = await readInventory(tokenHeader(SUB_A));
     assert.deepEqual(

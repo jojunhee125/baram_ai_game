@@ -423,8 +423,9 @@ describe("VERIFY handleAttack", () => {
         icon: "acorn",
         quantity: 2,
         total: 2,
+        damageReductionRatio: undefined,
       });
-      assert.deepEqual(await store.list("sso-user-1"), [{ itemKey: "acorn", quantity: 2 }]);
+      assert.deepEqual(await store.list("sso-user-1"), [{ itemKey: "acorn", quantity: 2, equipped: false }]);
       assert.deepEqual(await store.list("attacker"), [], "credited to the account, not the session");
     } finally {
       dispose(room);
@@ -445,7 +446,7 @@ describe("VERIFY handleAttack", () => {
       room.onLeave(asRoomClient(attacker));
       await flush();
 
-      assert.deepEqual(await store.list("sso-user-2"), [{ itemKey: "acorn", quantity: 2 }]);
+      assert.deepEqual(await store.list("sso-user-2"), [{ itemKey: "acorn", quantity: 2, equipped: false }]);
       assert.equal(
         sentOfType<ItemGranted>(attacker, ServerMessage.ItemGranted).length,
         0,
@@ -467,7 +468,7 @@ describe("VERIFY handleAttack", () => {
       attack(room, attacker, 0);
       attack(room, attacker, 0);
       await flush();
-      assert.deepEqual(await store.list("attacker"), [{ itemKey: "acorn", quantity: 2 }]);
+      assert.deepEqual(await store.list("attacker"), [{ itemKey: "acorn", quantity: 2, equipped: false }]);
     } finally {
       dispose(room);
     }
@@ -661,7 +662,7 @@ describe("VERIFY last-hit changes hands between two different attackers", () => 
       );
       const granted = sentOfType<ItemGranted>(second, ServerMessage.ItemGranted);
       assert.equal(granted.length, 1, "the killer is told");
-      assert.deepEqual(await store.list("sso-user-second"), [{ itemKey: "acorn", quantity: 2 }]);
+      assert.deepEqual(await store.list("sso-user-second"), [{ itemKey: "acorn", quantity: 2, equipped: false }]);
       assert.deepEqual(
         await store.list("sso-user-first"),
         [],
@@ -730,9 +731,11 @@ describe("VERIFY a store that actually throws (not just a full bag)", () => {
     readonly addCalls: string[] = [];
     private readonly bag = new Map<string, number>();
 
-    list(ownerKey: string): Promise<readonly { itemKey: string; quantity: number }[]> {
+    list(ownerKey: string): Promise<readonly { itemKey: string; quantity: number; equipped: boolean }[]> {
       void ownerKey;
-      return Promise.resolve([...this.bag].map(([itemKey, quantity]) => ({ itemKey, quantity })));
+      return Promise.resolve(
+        [...this.bag].map(([itemKey, quantity]) => ({ itemKey, quantity, equipped: false })),
+      );
     }
 
     add(_ownerKey: string, itemKey: string, quantity: number): Promise<number | null> {
@@ -751,6 +754,18 @@ describe("VERIFY a store that actually throws (not just a full bag)", () => {
       }
       this.bag.set(itemKey, 1);
       return Promise.resolve(true);
+    }
+
+    getEquipped(): Promise<string | null> {
+      return Promise.resolve(null);
+    }
+
+    equip(): Promise<boolean> {
+      return Promise.resolve(false);
+    }
+
+    unequip(): Promise<boolean> {
+      return Promise.resolve(false);
     }
   }
 
@@ -786,7 +801,7 @@ describe("VERIFY a store that actually throws (not just a full bag)", () => {
       assert.equal(granted[0]?.itemKey, "herb");
       assert.deepEqual(
         await store.list("sso-user-throw"),
-        [{ itemKey: "herb", quantity: 1 }],
+        [{ itemKey: "herb", quantity: 1, equipped: false }],
         "the failed row was never stored either — the announcement matches reality",
       );
       assert.ok(warnings.length >= 1, "the failure is logged, not swallowed silently");
