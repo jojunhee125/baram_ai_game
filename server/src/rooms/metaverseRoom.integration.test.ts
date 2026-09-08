@@ -1216,3 +1216,66 @@ describe("MetaverseRoom — return home", () => {
     });
   });
 });
+
+describe("MetaverseRoom — change skin", () => {
+  it("applies an in-range skin change and syncs it to observers", async () => {
+    const room = await createPlaza();
+    const client = await join(room, "reskinner", 0);
+    const observer = await join(room, "observer");
+    await waitUntil(
+      () => seen(observer, client.sessionId) !== undefined,
+      "the observer to see the reskinner",
+    );
+
+    client.send(ClientMessage.ChangeSkin, { skin: 5 });
+
+    await waitUntil(
+      () => serverPlayer(room, client.sessionId).avatarSkin === 5,
+      "the server to apply the new skin",
+    );
+    // The server mutating its own object is not the same moment the patch reaches either
+    // client — that is a further round trip through the patch encoder and this socket, so
+    // asserting the decoded copy right after the server-side waitUntil above (rather than
+    // waiting on the decoded copy itself) is a race: it happened to pass only because earlier
+    // tests in this file leave enough real time between send() and the assertion for the
+    // patch to land.
+    await waitUntil(
+      () => seen(client, client.sessionId)?.avatarSkin === 5,
+      "the reskinner to see their own new skin",
+    );
+    await waitUntil(
+      () => seen(observer, client.sessionId)?.avatarSkin === 5,
+      "the observer to see the new skin through the normal Player patch",
+    );
+  });
+
+  it("ignores an out-of-range skin and leaves the current skin unchanged", async () => {
+    const room = await createPlaza();
+    const client = await join(room, "reskinner", 3);
+
+    for (const skin of [-1, AVATAR_SKIN_COUNT, 1.5, Number.NaN]) {
+      client.send(ClientMessage.ChangeSkin, { skin });
+    }
+    // No acknowledgement exists to wait on (§4: no ack), so settle on the clock instead.
+    await sleep(SETTLE_MS);
+
+    assert.equal(
+      serverPlayer(room, client.sessionId).avatarSkin,
+      3,
+      "an out-of-range skin must not overwrite the current one",
+    );
+  });
+
+  it("ignores a malformed change-skin payload without touching the current skin", async () => {
+    const room = await createPlaza();
+    const client = await join(room, "reskinner", 2);
+
+    const malformed: unknown[] = [{ skin: "5" }, { skin: null }, {}, null, 42, "avatar:change-skin"];
+    for (const payload of malformed) {
+      client.send(ClientMessage.ChangeSkin, payload);
+    }
+    await sleep(SETTLE_MS);
+
+    assert.equal(serverPlayer(room, client.sessionId).avatarSkin, 2);
+  });
+});

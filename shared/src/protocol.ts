@@ -40,6 +40,8 @@ export const ClientMessage = {
   Attack: "combat:attack",
   EquipItem: "equipment:equip",
   UnequipItem: "equipment:unequip",
+  /** Live re-skin from the in-game character menu. No ack: see ChangeSkinRequest. */
+  ChangeSkin: "avatar:change-skin",
 } as const;
 
 export type ClientMessage = (typeof ClientMessage)[keyof typeof ClientMessage];
@@ -70,6 +72,16 @@ export interface EquipItemRequest {
   itemKey: string;
 }
 
+/**
+ * Range is validated against AVATAR_SKIN_COUNT server-side and dropped silently out of range —
+ * the same treatment EquipItemRequest gives an unknown key. No cooldown: unlike every other
+ * mutating message this touches no DB and no proximity index, so there is nothing beyond
+ * Colyseus' own MAX_MESSAGES_PER_SECOND to protect.
+ */
+export interface ChangeSkinRequest {
+  skin: number;
+}
+
 export interface ClientMessagePayload {
   [ClientMessage.Move]: MoveRequest;
   [ClientMessage.Chat]: ChatRequest;
@@ -90,6 +102,7 @@ export interface ClientMessagePayload {
   [ClientMessage.EquipItem]: EquipItemRequest;
   /** No payload: there is at most one equipped item, so there is nothing to name. */
   [ClientMessage.UnequipItem]: undefined;
+  [ClientMessage.ChangeSkin]: ChangeSkinRequest;
 }
 
 export const ServerMessage = {

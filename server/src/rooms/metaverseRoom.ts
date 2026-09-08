@@ -26,6 +26,7 @@ import {
   RoomState,
   ServerMessage,
   VIEW_RADIUS_TILES,
+  type ChangeSkinRequest,
   type ChatBroadcast,
   type ChatRequest,
   type EquipItemRequest,
@@ -268,6 +269,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     });
     this.onMessage(ClientMessage.UnequipItem, (client: RoomClient) => {
       this.handleUnequipItem(client);
+    });
+    this.onMessage(ClientMessage.ChangeSkin, (client: RoomClient, message: ChangeSkinRequest) => {
+      this.handleChangeSkin(client, message);
     });
 
     // Last, and only where there is something to simulate. A room with no monsters stays purely
@@ -908,6 +912,23 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
 
   private equipOwnerKey(client: RoomClient): string {
     return client.userData?.ownerKey ?? client.sessionId;
+  }
+
+  /**
+   * Re-skins a live player. No position/proximity work: avatarSkin is a plain schema field,
+   * already synced to every viewer by the normal Player patch — the only thing this touches.
+   */
+  private handleChangeSkin(client: RoomClient, message: ChangeSkinRequest): void {
+    const session = client.userData;
+    const player = this.state.players.get(client.sessionId);
+    if (!session || !player) {
+      return;
+    }
+    const skin = message?.skin;
+    if (typeof skin !== "number" || !Number.isInteger(skin) || skin < 0 || skin >= AVATAR_SKIN_COUNT) {
+      return;
+    }
+    player.avatarSkin = skin;
   }
 
   /**

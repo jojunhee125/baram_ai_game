@@ -9,10 +9,13 @@ import {
 import { hideBootStatus, showBootError } from "../bootStatus";
 import { AttackKey } from "../input/attackKey";
 import { MovementKeys } from "../input/movementKeys";
-import { resolveJoinOptions } from "../net/identity";
+import { resolveJoinOptions, updateAvatarSkin } from "../net/identity";
+import { saveAvatarSkin } from "../net/profile";
 import { RoomConnection, type PlayerSnapshot } from "../net/roomConnection";
 import { resolveHomeRoomName } from "../net/roomTarget";
 import { fadeFromBlack, fadeToBlack, showTransitionNotice } from "../transitionOverlay";
+import { chooseAvatarSkin } from "../ui/avatarPicker";
+import { CharacterMenu } from "../ui/characterMenu";
 import { ChatPanel } from "../ui/chatPanel";
 import { HomeButton } from "../ui/homeButton";
 import { InventoryPanel } from "../ui/inventoryPanel";
@@ -101,6 +104,7 @@ export class WorldScene extends Phaser.Scene {
   private objectPanel: ObjectPanel | null = null;
   private inventoryPanel: InventoryPanel | null = null;
   private lootTablePanel: LootTablePanel | null = null;
+  private characterMenu: CharacterMenu | null = null;
   private vitals: PlayerVitals | null = null;
   private toasts: ItemToasts | null = null;
   private portalDenialBanner: PortalDenialBanner | null = null;
@@ -110,6 +114,13 @@ export class WorldScene extends Phaser.Scene {
   private weapon: WeaponVisualState | null = null;
   private lastStepAt = Number.NEGATIVE_INFINITY;
   private transitioning = false;
+  /**
+   * True for as long as the avatar picker is reopened mid-session from the character menu
+   * (`docs/design-phase-h-skin-skip-menu.md` §2.3). Unlike the bag and the drop-table window,
+   * this picker is modal — it covers the stage — so movement and the home warp are blocked on
+   * the same footing as `objectPanel?.isOpen`, for as long as it is open.
+   */
+  private skinPickerOpen = false;
 
   constructor() {
     super(WorldScene.KEY);
@@ -129,6 +140,7 @@ export class WorldScene extends Phaser.Scene {
     this.objectPanel = null;
     this.inventoryPanel = null;
     this.lootTablePanel = null;
+    this.characterMenu = null;
     this.vitals = null;
     this.toasts = null;
     this.portalDenialBanner = null;
@@ -138,6 +150,7 @@ export class WorldScene extends Phaser.Scene {
     this.weapon = null;
     this.lastStepAt = Number.NEGATIVE_INFINITY;
     this.transitioning = false;
+    this.skinPickerOpen = false;
   }
 
   preload(): void {
@@ -268,6 +281,7 @@ export class WorldScene extends Phaser.Scene {
       () => connection.sendUnequipItem(),
     );
     this.lootTablePanel = new LootTablePanel(this.connection.roomName);
+    this.characterMenu = new CharacterMenu(() => void this.openSkinPicker());
     this.toasts = new ItemToasts();
     this.portalDenialBanner = new PortalDenialBanner();
     this.attackKey = new AttackKey(() => this.swing());
@@ -308,6 +322,11 @@ export class WorldScene extends Phaser.Scene {
     // be swallowed while either was open; that gate is gone too (2026-09-03) — a fight in progress
     // should not stop just because a panel is up.
     if (this.objectPanel?.isOpen === true) {
+      return;
+    }
+    // The re-skin picker is modal, unlike the bag and the drop-table window (design §2.3): it
+    // covers the stage, so movement has to stop the same way it does behind the object panel.
+    if (this.skinPickerOpen) {
       return;
     }
 
@@ -428,13 +447,53 @@ export class WorldScene extends Phaser.Scene {
     if (this.objectPanel?.isOpen === true) {
       return;
     }
+    // Same reasoning, for the re-skin picker (design §2.3): without this, a home warp mid-picker
+    // would restart this scene while the picker's own DOM — plain DOM outside Phaser, so the
+    // restart does not touch it — is still waiting to resolve into a room that has since been
+    // left, sending a skin change nobody asked for into the wrong room.
+    if (this.skinPickerOpen) {
+      return;
+    }
     const home = resolveHomeRoomName();
-    this.homeButton?.beginCooldown();
     if (home === this.connection.roomName) {
+      // Fire-and-forget and effectively always successful, so it stays optimistic.
+      this.homeButton?.beginCooldown();
       this.connection.sendReturnHome();
       return;
     }
+    // Cross-room: `hop()` starts the cooldown itself, only once the join has actually
+    // succeeded — a failed hop must leave the button usable for an immediate retry.
     this.startHop(home, { kind: "home" });
+  }
+
+  /**
+   * The character menu's "스킨 변경" row: reopens the same picker BootScene runs, blocking
+   * movement and the home warp for as long as it is up (`skinPickerOpen`, checked in `update()`
+   * and `returnHome()`). No `destroy()`/cancel-on-scene-death is needed for this promise —
+   * those two gates are what keep a room transition from ever starting while it is outstanding
+   * (`docs/design-phase-h-skin-skip-menu.md` §2.3).
+   *
+   * A no-op pick (Escape, or re-confirming the same skin) sends nothing: nothing changed, so
+   * there is nothing to broadcast or persist.
+   */
+  private async openSkinPicker(): Promise<void> {
+    if (this.skinPickerOpen) {
+      return;
+    }
+    const current = this.connection.players.get(this.connection.sessionId)?.avatarSkin ?? 0;
+    this.skinPickerOpen = true;
+    const skin = await chooseAvatarSkin(current);
+    this.skinPickerOpen = false;
+    if (skin === current) {
+      return;
+    }
+    // So a later portal/home rejoin carries the new skin instead of reverting to BootScene's
+    // frozen choice.
+    updateAvatarSkin(skin);
+    // Both sides of the split this project already draws between them: the room (live display
+    // to every viewer) and the account (persisted for the next login).
+    this.connection.sendChangeSkin(skin);
+    saveAvatarSkin(skin);
   }
 
   /**
@@ -449,8 +508,10 @@ export class WorldScene extends Phaser.Scene {
    */
   private async hop(toRoom: string, arrival: Arrival): Promise<void> {
     // Stepping off a portal trigger and back on fires again, and the server does not care that
-    // we are mid-hop. The home control is gated on the same flag.
-    if (this.transitioning) {
+    // we are mid-hop. The home control is gated on the same flag. A hop that was already in
+    // flight when the skin picker opened (e.g. a portal reply arriving late) must also be
+    // dropped — stepping off/back on refires it once the picker closes.
+    if (this.transitioning || this.skinPickerOpen) {
       return;
     }
     this.transitioning = true;
@@ -464,6 +525,9 @@ export class WorldScene extends Phaser.Scene {
       await this.abandonTransition(arrivalFailureNotice(arrival));
       return;
     }
+    if (arrival.kind === "home") {
+      this.homeButton?.beginCooldown();
+    }
 
     await this.connection.leave();
     // Every one of these holds window/document listeners, which the scene restart does not touch.
@@ -475,6 +539,7 @@ export class WorldScene extends Phaser.Scene {
     this.objectPanel?.destroy();
     this.inventoryPanel?.destroy();
     this.lootTablePanel?.destroy();
+    this.characterMenu?.destroy();
     this.vitals?.destroy();
     this.toasts?.destroy();
     this.portalDenialBanner?.destroy();

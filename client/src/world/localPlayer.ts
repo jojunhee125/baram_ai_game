@@ -158,6 +158,17 @@ export class LocalPlayer {
    * self-heals any drift.
    */
   applyServerState(snapshot: PlayerSnapshot): void {
+    // Skin has no prediction to reconcile — unlike position, the server's value is simply the
+    // truth — so it is applied unconditionally, ahead of the tile-reconciliation branches below.
+    // Some of those branches return early without ever touching the sprite (the server has not
+    // caught up to an in-flight step yet), so without this a re-skin from the character menu
+    // (Phase H) would go unseen on the local player's own screen until one of those branches
+    // happened to fall through to `adopt()`.
+    if (snapshot.avatarSkin !== this.predicted.avatarSkin) {
+      this.predicted = { ...this.predicted, avatarSkin: snapshot.avatarSkin };
+      this.sprites.update(this.sessionId, this.predicted);
+    }
+
     const reached = this.pendingPath.findIndex((tile) => sameTile(tile, snapshot));
     if (reached >= 0) {
       this.confirmed = tileOf(snapshot);

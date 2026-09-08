@@ -5,6 +5,14 @@ import { isTextEntry } from "../input/textEntry";
 const SHORTCUT_CODES: ReadonlySet<string> = new Set(["KeyH", "Home"]);
 
 /**
+ * Module-scope, not instance: a cross-room hop destroys and reconstructs `HomeButton`, and the
+ * cooldown this mirrors is a per-account rule (the server's `HOME_COOLDOWN_MS`/`lastHomeAt`), not
+ * a per-instance one — surviving the hop is the point, otherwise a fresh instance starts enabled
+ * mid-cooldown.
+ */
+let cooldownUntil = 0;
+
+/**
  * The "return home" control and its H / Home shortcut.
  *
  * The disabled window after an activation is the only success feedback there is — arriving at
@@ -18,28 +26,45 @@ export class HomeButton {
   constructor(private readonly onActivate: () => void) {
     this.button.addEventListener("click", this.handleClick);
     window.addEventListener("keydown", this.handleKey);
-    this.button.disabled = false;
     this.button.hidden = false;
+    this.applyCooldown();
   }
 
   /** Locks the control for HOME_COOLDOWN_MS, mirroring the server's rate limit. */
   beginCooldown(): void {
-    this.button.disabled = true;
+    cooldownUntil = Date.now() + HOME_COOLDOWN_MS;
+    this.applyCooldown();
+  }
+
+  /** Disables the button for whatever is left of the module's cooldown window, if any. */
+  private applyCooldown(): void {
+    const remainingMs = cooldownUntil - Date.now();
     window.clearTimeout(this.cooldownTimer);
+    if (remainingMs <= 0) {
+      this.button.disabled = false;
+      return;
+    }
+    this.button.disabled = true;
     this.cooldownTimer = window.setTimeout(() => {
       this.button.disabled = false;
-    }, HOME_COOLDOWN_MS);
+    }, remainingMs);
   }
 
   /**
    * Mandatory before constructing a successor, which a cross-room hop does. All three things
    * this holds outlive the scene restart: a `window` listener, a shared DOM node, and a pending
    * timer that would otherwise re-enable the live instance's button on the old room's schedule.
+   *
+   * Leaves the button hidden and disabled rather than restoring it enabled: the normal path is a
+   * successor's constructor immediately overwriting both, so this only shows up if that
+   * construction fails, where it keeps a stale button from looking live over the wrong room.
    */
   destroy(): void {
     this.button.removeEventListener("click", this.handleClick);
     window.removeEventListener("keydown", this.handleKey);
     window.clearTimeout(this.cooldownTimer);
+    this.button.disabled = true;
+    this.button.hidden = true;
   }
 
   private readonly handleClick = (event: MouseEvent): void => {

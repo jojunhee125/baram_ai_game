@@ -29,6 +29,20 @@ export function resolveJoinOptions(): JoinOptions {
 }
 
 /**
+ * Updates the frozen join identity's skin after the first join — the character menu's
+ * "change skin" action (Phase H), so that a later portal/home rejoin carries the new skin
+ * instead of reverting to whatever BootScene picked. A no-op with a warning if called before
+ * the first join, which should not happen: this is reachable only from inside a room.
+ */
+export function updateAvatarSkin(skin: number): void {
+  if (sessionIdentity === null) {
+    console.warn("updateAvatarSkin() ran before the first join; ignoring");
+    return;
+  }
+  sessionIdentity = { ...sessionIdentity, avatarSkin: skin };
+}
+
+/**
  * Deliberately loud and deterministic rather than a random fallback: joining without a choice
  * means the boot flow skipped the picker, and a random skin would hide that behind a plausible
  * avatar until someone noticed their character changing between sessions.

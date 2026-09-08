@@ -34,15 +34,22 @@ export class BootScene extends Phaser.Scene {
     // Character select comes first and the identity is frozen by the join below, so the skin has
     // to be recorded before anything can call resolveJoinOptions().
     hideBootStatus();
-    const skin = await chooseAvatarSkin(loaded.skin ?? 0);
-    setAvatarSkin(skin);
-    // Skipped when the read itself failed (Phase C, 2026-09-03): a failure means this boot never
-    // learned whether an account skin already exists, so writing here could silently overwrite a
-    // real stored choice with the picker's arbitrary fallback. The session still plays with the
-    // chosen skin either way — only persistence is held back.
-    if (loaded.ok) {
-      saveAvatarSkin(skin);
+    let skin: number;
+    if (loaded.ok && loaded.skin !== null) {
+      // A stored skin already exists (Phase H): skip the picker and go straight in with it.
+      // Nothing changed from what was read, so there is nothing to save back either.
+      skin = loaded.skin;
+    } else {
+      skin = await chooseAvatarSkin(loaded.skin ?? 0);
+      // Skipped when the read itself failed (Phase C, 2026-09-03): a failure means this boot
+      // never learned whether an account skin already exists, so writing here could silently
+      // overwrite a real stored choice with the picker's arbitrary fallback. The session still
+      // plays with the chosen skin either way — only persistence is held back.
+      if (loaded.ok) {
+        saveAvatarSkin(skin);
+      }
     }
+    setAvatarSkin(skin);
 
     showBootLoading("서버에 접속하는 중", "잠시만 기다려 주세요.");
 

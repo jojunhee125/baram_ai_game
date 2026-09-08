@@ -3,6 +3,7 @@ import {
   ClientMessage,
   RoomState,
   ServerMessage,
+  type ChangeSkinRequest,
   type ChatBroadcast,
   type ChatRequest,
   type Direction,
@@ -257,6 +258,14 @@ export class RoomConnection {
   /** Requests that the account go bare-handed, no matter what is currently equipped. */
   sendUnequipItem(): void {
     this.room.send(ClientMessage.UnequipItem);
+  }
+
+  /**
+   * Requests a live re-skin from the character menu. No reply: `avatarSkin` is a plain schema
+   * field, so the normal `Player` patch is what carries it to every viewer, including this one.
+   */
+  sendChangeSkin(skin: number): void {
+    this.room.send(ClientMessage.ChangeSkin, { skin } satisfies ChangeSkinRequest);
   }
 
   /**

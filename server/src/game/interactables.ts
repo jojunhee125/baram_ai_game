@@ -5,6 +5,7 @@ import type {
   InteractableIndex,
   InteractableMarkerTile,
   PortalDefinition,
+  RoomDefinition,
 } from "../rooms/contracts";
 
 /**
@@ -84,11 +85,16 @@ export interface InteractableValidation {
  *
  * Every issue is collected rather than thrown at the first one: a boot failure that reveals one
  * typo per restart is a bad way to fix a table.
+ *
+ * `rooms` is only for the spawn/interactable/portal-trigger overlap check below (Info-level): a
+ * room whose spawn square reaches one of those tiles still boots fine, it just opens a panel or
+ * fires a door the moment someone joins there.
  */
 export function validateInteractableDefinitions(
   interactables: readonly InteractableDefinition[],
   portals: readonly PortalDefinition[],
   mapsByRoom: ReadonlyMap<string, CollisionMap>,
+  rooms: readonly RoomDefinition[],
 ): InteractableValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -194,6 +200,31 @@ export function validateInteractableDefinitions(
           );
         }
         break;
+      }
+    }
+  }
+
+  // Info-level only: a spawn square is a Chebyshev square of half-extent spreadRadiusInTiles
+  // around `spawn` (the same shape `MetaverseRoom.pickSpawnTile` samples from), so a wide-spread
+  // room like grand-plaza can reach a tile far from its centre. Nothing here refuses boot — the
+  // worst case is a panel opening, or a door firing, the moment a joining player lands on it.
+  for (const room of rooms) {
+    const { spawn } = room;
+    for (let tileX = spawn.tileX - spawn.spreadRadiusInTiles; tileX <= spawn.tileX + spawn.spreadRadiusInTiles; tileX++) {
+      for (let tileY = spawn.tileY - spawn.spreadRadiusInTiles; tileY <= spawn.tileY + spawn.spreadRadiusInTiles; tileY++) {
+        const key = roomTileKey(room.name, tileX, tileY);
+        const at = `(${tileX},${tileY})`;
+        const owner = claimedBy.get(key);
+        if (owner !== undefined) {
+          warnings.push(
+            `room "${room.name}" spawn square reaches ${at}, occupied by ${owner}; a joining player may open its panel immediately`,
+          );
+        }
+        if (portalTriggers.has(key)) {
+          warnings.push(
+            `room "${room.name}" spawn square reaches ${at}, a portal trigger tile; a joining player may fire it immediately`,
+          );
+        }
       }
     }
   }

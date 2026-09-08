@@ -189,6 +189,35 @@
               </svg>
               <span class="visually-hidden">확률표</span>
             </button>
+            <button
+              type="button"
+              class="hud__button hud__button--square"
+              id="character-menu-button"
+              aria-expanded="false"
+              aria-controls="character-menu"
+              aria-keyshortcuts="C"
+              title="캐릭터 (C)"
+              hidden
+            >
+              <svg class="hud__icon" viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  d="M8 8.3a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2Z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M3.4 13.4c.5-2.8 2.4-4.3 4.6-4.3s4.1 1.5 4.6 4.3"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span class="visually-hidden">캐릭터</span>
+            </button>
           </div>
           <div class="minimap" id="minimap" hidden>
             <canvas class="minimap__canvas" id="minimap-canvas" role="img" aria-label="미니맵"></canvas>
@@ -273,6 +302,41 @@
               <p class="loot-table__status-hint" id="loot-table-status-hint"></p>
               <button type="button" class="loot-table__retry" id="loot-table-retry" hidden>다시 시도</button>
             </div>
+          </div>
+
+          <!--
+            The character menu. Same HUD-column placement and non-modal treatment as .bag and
+            .loot-table — Phase H seeds it with one row ("스킨 변경"); Phase Q appends more without
+            this markup's shape changing (docs/design-phase-h-skin-skip-menu.md §2.2).
+          -->
+          <div class="character-menu" id="character-menu" hidden>
+            <div class="character-menu__header">
+              <h2 class="character-menu__title" id="character-menu-title">캐릭터</h2>
+              <button
+                type="button"
+                class="character-menu__close"
+                id="character-menu-close"
+                title="닫기 (Esc)"
+              >
+                <svg class="character-menu__close-icon" viewBox="0 0 16 16" aria-hidden="true">
+                  <path
+                    d="M5 5l6 6M11 5l-6 6"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.4"
+                    stroke-linecap="round"
+                  />
+                </svg>
+                <span class="visually-hidden">캐릭터 메뉴 닫기</span>
+              </button>
+            </div>
+            <ul class="character-menu__list" aria-labelledby="character-menu-title">
+              <li>
+                <button type="button" class="character-menu__item" id="character-menu-change-skin">
+                  스킨 변경
+                </button>
+              </li>
+            </ul>
           </div>
         </div>
 

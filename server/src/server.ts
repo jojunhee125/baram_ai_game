@@ -147,6 +147,7 @@ async function validateRoomMaps(): Promise<void> {
     INTERACTABLE_DEFINITIONS,
     PORTAL_DEFINITIONS,
     mapsByRoom,
+    ROOM_DEFINITIONS,
   );
   for (const warning of objects.warnings) {
     console.warn(`[zep-test] ${warning}`);

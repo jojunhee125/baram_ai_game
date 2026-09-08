@@ -119,15 +119,20 @@ export class PlayerSprites {
       Math.abs(snapshot.tileY - player.tileY),
     );
     const turned = snapshot.facing !== player.facing;
+    // `avatarSkin` never changed after join until the character menu (Phase H), so nothing here
+    // ever read it past `add()` — a live change would otherwise render as the old skin forever,
+    // until this player left and re-entered view.
+    const skinChanged = snapshot.avatarSkin !== player.skin;
     player.tileX = snapshot.tileX;
     player.tileY = snapshot.tileY;
     player.facing = snapshot.facing;
+    player.skin = snapshot.avatarSkin;
 
     if (distance > 0) {
       this.stepTo(player, distance > 1);
       return;
     }
-    if (turned) {
+    if (turned || skinChanged) {
       // A refused move still turns the player; nothing to tween, just face the new way.
       if (player.tween) {
         player.sprite.play(walkKey(player.skin, player.facing), true);

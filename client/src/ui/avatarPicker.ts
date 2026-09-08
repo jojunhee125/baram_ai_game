@@ -28,12 +28,18 @@ const startButton = document.querySelector<HTMLButtonElement>("#avatar-picker-st
 /**
  * Runs character select and resolves with the chosen skin.
  *
- * `initialSkin` is the cell to open on — the account's stored choice, or 0 when there is none.
- * The caller owns that range check: a value with no cell would leave the grid with nothing
- * selected and nothing focused.
+ * `initialSkin` is the cell to open on — the account's stored choice at boot, or the current
+ * skin when this reopens mid-session from the character menu (Phase H). The caller owns that
+ * range check: a value with no cell would leave the grid with nothing selected and nothing
+ * focused.
  *
  * Resolves once and then tears itself down, so unlike the chat panel or the minimap there is no
- * `destroy()` for a caller to forget: this is a boot step that ends before the world exists.
+ * `destroy()` for a caller to forget. That still holds now that this can reopen mid-session:
+ * `WorldScene` blocks room transitions for as long as this is open (`skinPickerOpen`), so there
+ * is never a scene restart for this promise to survive —
+ * `docs/design-phase-h-skin-skip-menu.md` §2.3. Escape resolves with `initialSkin` unchanged,
+ * the only way to leave without picking (§2.4); the boot call passes through the same branch
+ * but has no reason to trigger it.
  */
 export function chooseAvatarSkin(initialSkin: number): Promise<number> {
   return new Promise((resolve) => {
@@ -78,12 +84,30 @@ export function chooseAvatarSkin(initialSkin: number): Promise<number> {
         finish();
         return;
       }
+      // Cancel: resolve with whatever was already chosen, as if nothing happened. Only reachable
+      // when this reopens mid-session (Phase H) — the boot call has nothing to cancel back to
+      // besides the same fallback `initialSkin` it opened on, so the branch is harmless there too.
+      if (event.key === "Escape") {
+        event.preventDefault();
+        selected = initialSkin;
+        finish();
+        return;
+      }
       const step = ARROW_STEPS[event.key];
       if (step === undefined) {
         return;
       }
       event.preventDefault();
-      select(selected + (step.axis === "row" ? step.delta * columns : step.delta));
+      if (step.axis === "row") {
+        select(selected + step.delta * columns);
+        return;
+      }
+      // Column moves stay inside the visual row: `select()` only guards against falling off
+      // the whole grid, so without this a right-arrow off the last column would silently
+      // continue onto the next row's first cell instead of stopping.
+      const rowStart = Math.floor(selected / columns) * columns;
+      const rowEnd = Math.min(rowStart + columns, cells.length) - 1;
+      select(Math.min(Math.max(selected + step.delta, rowStart), rowEnd));
     };
 
     for (const [skin, cell] of cells.entries()) {

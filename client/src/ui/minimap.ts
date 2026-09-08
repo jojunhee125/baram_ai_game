@@ -118,10 +118,15 @@ export class Minimap {
    * Mandatory before constructing a successor, which a room hop does. The keydown listener is on
    * `window` and the canvas is shared, so an abandoned instance would toggle `panelOpen` back on
    * every press — the key would look dead — and repaint the old room's terrain.
+   *
+   * Only hides the button, not the panel: `panelOpen` is module-scope on purpose (a map you
+   * opened should not close itself because you walked through a door) and must survive this call
+   * unchanged — this is cleanup for a failed successor construction, not a room-hop close.
    */
   destroy(): void {
     this.button.removeEventListener("click", this.handleClick);
     window.removeEventListener("keydown", this.handleKey);
+    this.button.hidden = true;
   }
 
   private readonly handleClick = (event: MouseEvent): void => {

@@ -5,6 +5,7 @@ import type {
   CollisionMap,
   InteractableDefinition,
   PortalDefinition,
+  RoomDefinition,
 } from "../rooms/contracts";
 import { ROOM_DEFINITIONS } from "../rooms/definitions";
 import { INTERACTABLE_DEFINITIONS } from "../rooms/interactableDefinitions";
@@ -84,6 +85,9 @@ const PORTALS: readonly PortalDefinition[] = [A_TO_B, B_TO_A];
 function mapsFor(...rooms: string[]): ReadonlyMap<string, CollisionMap> {
   return new Map(rooms.map((room) => [room, MAP]));
 }
+
+/** The new spawn-overlap check is Info-level and off by default; only the tests that exercise it opt in. */
+const NO_ROOMS: readonly RoomDefinition[] = [];
 
 /** A well-formed row of each kind, so a rule test can break exactly one field. */
 function link(patch: Partial<Extract<InteractableDefinition, { kind: "link" }>> = {}) {
@@ -179,21 +183,26 @@ describe("TableInteractableIndex", () => {
 
 describe("validateInteractableDefinitions", () => {
   it("accepts a table whose rooms, tiles and content all check out", () => {
-    assert.deepEqual(validateInteractableDefinitions(TABLE, PORTALS, mapsFor("a", "b")), {
+    assert.deepEqual(validateInteractableDefinitions(TABLE, PORTALS, mapsFor("a", "b"), NO_ROOMS), {
       errors: [],
       warnings: [],
     });
   });
 
   it("accepts an empty table", () => {
-    assert.deepEqual(validateInteractableDefinitions([], PORTALS, mapsFor("a", "b")), {
+    assert.deepEqual(validateInteractableDefinitions([], PORTALS, mapsFor("a", "b"), NO_ROOMS), {
       errors: [],
       warnings: [],
     });
   });
 
   it("rejects an empty id", () => {
-    const { errors } = validateInteractableDefinitions([link({ id: "" })], PORTALS, mapsFor("a"));
+    const { errors } = validateInteractableDefinitions(
+      [link({ id: "" })],
+      PORTALS,
+      mapsFor("a"),
+      NO_ROOMS,
+    );
     assert.deepEqual(errors, ["object at row 0 has an empty id"]);
   });
 
@@ -202,6 +211,7 @@ describe("validateInteractableDefinitions", () => {
       [A_LINK, link({ at: { room: "a", tiles: [{ tileX: 4, tileY: 1 }] } })],
       PORTALS,
       mapsFor("a"),
+      NO_ROOMS,
     );
     assert.deepEqual(errors, ['object "a-link" is declared more than once']);
   });
@@ -211,6 +221,7 @@ describe("validateInteractableDefinitions", () => {
       [link({ at: { room: "ghost", tiles: [{ tileX: 1, tileY: 1 }] } })],
       PORTALS,
       mapsFor("a"),
+      NO_ROOMS,
     );
     assert.deepEqual(errors, [
       'object "a-link" sits in "ghost", which is not a registered room',
@@ -222,6 +233,7 @@ describe("validateInteractableDefinitions", () => {
       [link({ at: { room: "a", tiles: [] } })],
       PORTALS,
       mapsFor("a"),
+      NO_ROOMS,
     );
     assert.deepEqual(errors, ['object "a-link" has no tiles']);
   });
@@ -243,6 +255,7 @@ describe("validateInteractableDefinitions", () => {
       ],
       PORTALS,
       walled,
+      NO_ROOMS,
     );
     assert.deepEqual(errors, [
       'object "a-link" occupies (2,0), which is not a walkable tile of room "a"',
@@ -258,6 +271,7 @@ describe("validateInteractableDefinitions", () => {
       ],
       PORTALS,
       mapsFor("a"),
+      NO_ROOMS,
     );
     assert.equal(errors.length, 1);
     assert.match(
@@ -283,6 +297,7 @@ describe("validateInteractableDefinitions", () => {
       ],
       PORTALS,
       mapsFor("a"),
+      NO_ROOMS,
     );
     assert.equal(errors.length, 1);
     assert.match(errors[0] ?? "", /already occupied by object "x"/);
@@ -293,6 +308,7 @@ describe("validateInteractableDefinitions", () => {
       [link({ id: "x", at: { room: "a", tiles: [{ tileX: 5, tileY: 0 }] } })],
       PORTALS,
       mapsFor("a", "b"),
+      NO_ROOMS,
     );
     assert.equal(errors.length, 1);
     assert.match(
@@ -307,6 +323,7 @@ describe("validateInteractableDefinitions", () => {
       [link({ id: "x", at: { room: "a", tiles: [{ tileX: 0, tileY: 0 }] } })],
       PORTALS,
       mapsFor("a", "b"),
+      NO_ROOMS,
     );
     assert.deepEqual(errors, []);
     assert.deepEqual(warnings, []);
@@ -319,6 +336,7 @@ describe("validateInteractableDefinitions", () => {
       [link({ id: "x", at: { room: "a", tiles: [{ tileX: 4, tileY: 3 }] } })],
       PORTALS,
       mapsFor("a", "b"),
+      NO_ROOMS,
     );
     assert.deepEqual(errors, [], "a sticky arrival must not refuse boot");
     assert.equal(warnings.length, 1);
@@ -330,7 +348,12 @@ describe("validateInteractableDefinitions", () => {
 
   it("rejects an empty title, whitespace included, whatever the kind", () => {
     for (const row of [link({ title: "" }), notice({ title: "   " }), quiz({ title: "\n\t" })]) {
-      const { errors } = validateInteractableDefinitions([row], PORTALS, mapsFor("a"));
+      const { errors } = validateInteractableDefinitions(
+        [row],
+        PORTALS,
+        mapsFor("a"),
+        NO_ROOMS,
+      );
       assert.deepEqual(errors, [`object "${row.id}" has an empty title`]);
     }
   });
@@ -340,6 +363,7 @@ describe("validateInteractableDefinitions", () => {
       [link({ id: "x", url: "/relative/path" })],
       PORTALS,
       mapsFor("a"),
+      NO_ROOMS,
     );
     assert.deepEqual(errors, [
       'object "x" has a url that is not absolute: "/relative/path"',
@@ -351,6 +375,7 @@ describe("validateInteractableDefinitions", () => {
       [link({ id: "x", url: "ftp://files.example.com/notice.txt" })],
       PORTALS,
       mapsFor("a"),
+      NO_ROOMS,
     );
     assert.deepEqual(errors, ['object "x" has a "ftp:" url; only http and https are opened']);
 
@@ -358,6 +383,7 @@ describe("validateInteractableDefinitions", () => {
       [link({ id: "x", url: "javascript:alert(1)" })],
       PORTALS,
       mapsFor("a"),
+      NO_ROOMS,
     );
     assert.deepEqual(script.errors, [
       'object "x" has a "javascript:" url; only http and https are opened',
@@ -372,6 +398,7 @@ describe("validateInteractableDefinitions", () => {
       ],
       PORTALS,
       mapsFor("a"),
+      NO_ROOMS,
     );
     assert.deepEqual(errors, []);
   });
@@ -381,6 +408,7 @@ describe("validateInteractableDefinitions", () => {
       [notice({ id: "x", body: "   \n  " })],
       PORTALS,
       mapsFor("a"),
+      NO_ROOMS,
     );
     assert.deepEqual(errors, ['object "x" has an empty body']);
   });
@@ -390,6 +418,7 @@ describe("validateInteractableDefinitions", () => {
       [quiz({ id: "x", question: " " })],
       PORTALS,
       mapsFor("a"),
+      NO_ROOMS,
     );
     assert.deepEqual(errors, ['object "x" has an empty question']);
   });
@@ -399,6 +428,7 @@ describe("validateInteractableDefinitions", () => {
       [quiz({ id: "x", choices: ["하나"], answerIndex: 0 })],
       PORTALS,
       mapsFor("a"),
+      NO_ROOMS,
     );
     assert.deepEqual(errors, ['object "x" offers 1 choice(s); a quiz needs two or more']);
   });
@@ -409,6 +439,7 @@ describe("validateInteractableDefinitions", () => {
         [quiz({ id: "x", choices: ["하나", "둘"], answerIndex })],
         PORTALS,
         mapsFor("a"),
+        NO_ROOMS,
       );
       assert.deepEqual(errors, [
         `object "x" has answerIndex ${answerIndex}, which is outside its 2 choices`,
@@ -422,6 +453,7 @@ describe("validateInteractableDefinitions", () => {
       [quiz({ id: "x", choices: ["하나", "둘"], answerIndex: 1.5 })],
       PORTALS,
       mapsFor("a"),
+      NO_ROOMS,
     );
     assert.deepEqual(errors, [
       'object "x" has answerIndex 1.5, which is outside its 2 choices',
@@ -443,10 +475,43 @@ describe("validateInteractableDefinitions", () => {
       ],
       PORTALS,
       mapsFor("a"),
+      NO_ROOMS,
     );
     // empty id, unregistered room, no tiles, empty title, empty question, too few choices,
     // answerIndex outside an empty choice list.
     assert.equal(errors.length, 7, `expected all seven issues, got ${JSON.stringify(errors)}`);
+  });
+
+  function room(spawn: RoomDefinition["spawn"]): RoomDefinition {
+    return { name: "a", roomType: "a", mapKey: "a", maxClients: 10, spawn };
+  }
+
+  it("warns, without refusing boot, when a room's spawn square reaches an interactable tile", () => {
+    const { errors, warnings } = validateInteractableDefinitions(TABLE, PORTALS, mapsFor("a", "b"), [
+      room({ tileX: 1, tileY: 1, spreadRadiusInTiles: 0 }),
+    ]);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(warnings, [
+      'room "a" spawn square reaches (1,1), occupied by object "a-link"; a joining player may open its panel immediately',
+    ]);
+  });
+
+  it("warns, without refusing boot, when a room's spawn square reaches a portal trigger tile", () => {
+    const { errors, warnings } = validateInteractableDefinitions(TABLE, PORTALS, mapsFor("a", "b"), [
+      room({ tileX: 5, tileY: 0, spreadRadiusInTiles: 0 }),
+    ]);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(warnings, [
+      'room "a" spawn square reaches (5,0), a portal trigger tile; a joining player may fire it immediately',
+    ]);
+  });
+
+  it("stays silent when a room's spawn square reaches neither an interactable nor a portal trigger tile", () => {
+    const { errors, warnings } = validateInteractableDefinitions(TABLE, PORTALS, mapsFor("a", "b"), [
+      room({ tileX: 0, tileY: 0, spreadRadiusInTiles: 0 }),
+    ]);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(warnings, []);
   });
 });
 
@@ -461,9 +526,23 @@ describe("INTERACTABLE_DEFINITIONS", () => {
   }
 
   it("passes boot validation against the real room maps and the real portal table", async () => {
+    // grand-plaza's spawn spread (radius 70) is wide enough to reach grand-plaza-north-door's
+    // trigger tiles — a real, harmless authoring smell the new spawn-overlap check is meant to
+    // surface (§1.9 of docs/design-phase-j-grand-plaza-cleanup.md), not a regression to silence.
     assert.deepEqual(
-      validateInteractableDefinitions(INTERACTABLE_DEFINITIONS, PORTAL_DEFINITIONS, await realMaps()),
-      { errors: [], warnings: [] },
+      validateInteractableDefinitions(
+        INTERACTABLE_DEFINITIONS,
+        PORTAL_DEFINITIONS,
+        await realMaps(),
+        ROOM_DEFINITIONS,
+      ),
+      {
+        errors: [],
+        warnings: [
+          'room "grand-plaza" spawn square reaches (22,8), a portal trigger tile; a joining player may fire it immediately',
+          'room "grand-plaza" spawn square reaches (23,8), a portal trigger tile; a joining player may fire it immediately',
+        ],
+      },
     );
   });
 

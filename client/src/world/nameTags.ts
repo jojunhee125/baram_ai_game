@@ -4,6 +4,8 @@ import Phaser from "phaser";
 const NAME_TAG_OFFSET_Y = 34;
 /** Above every avatar (whose depth is its y pixel), just under chat bubbles. */
 const NAME_TAG_DEPTH = 9_999;
+/** Extra vertical gap per stacked label, on top of the 2nd+ tag sharing an exact spot. */
+const STACK_OFFSET_PX = 13;
 
 interface TrackedNameTag {
   text: Phaser.GameObjects.Text;
@@ -37,17 +39,57 @@ export class NameTags {
     text.setDepth(NAME_TAG_DEPTH);
 
     this.active.set(id, { text, sprite });
+    this.layout();
   }
 
   /** Tracks the sprite every frame: it moves via tween, not by re-triggering `add`. */
   update(): void {
-    for (const { text, sprite } of this.active.values()) {
-      text.setPosition(sprite.x, sprite.y - NAME_TAG_OFFSET_Y);
-    }
+    this.layout();
   }
 
   remove(id: string): void {
     this.active.get(id)?.text.destroy();
     this.active.delete(id);
+  }
+
+  /**
+   * Two tags land on the same pixel whenever their sprites share a spawn tile (spread 0 rooms
+   * like `plaza`'s and `grand-plaza`'s home tile). Grouped by exact rounded position and stacked
+   * upward from the 2nd label on, sorted by id so the stacking order never flickers between
+   * frames — this has to re-run every frame, not just on `add()`, since a player can walk onto an
+   * already-occupied tile well after both tags exist.
+   *
+   * Resets every label to its sprite baseline first so repeated calls (e.g. a synchronous burst
+   * of `add()`s replaying already-in-view players) never compound a prior call's stack offset.
+   */
+  private layout(): void {
+    for (const { text, sprite } of this.active.values()) {
+      text.setPosition(sprite.x, sprite.y - NAME_TAG_OFFSET_Y);
+    }
+    const groups = new Map<string, string[]>();
+    for (const [id, { sprite }] of this.active) {
+      const key = `${Math.round(sprite.x)},${Math.round(sprite.y)}`;
+      const ids = groups.get(key);
+      if (ids) {
+        ids.push(id);
+      } else {
+        groups.set(key, [id]);
+      }
+    }
+    for (const ids of groups.values()) {
+      if (ids.length < 2) {
+        continue;
+      }
+      ids.sort();
+      ids.forEach((id, index) => {
+        if (index === 0) {
+          return;
+        }
+        const tracked = this.active.get(id);
+        if (tracked) {
+          tracked.text.y -= index * STACK_OFFSET_PX;
+        }
+      });
+    }
   }
 }
