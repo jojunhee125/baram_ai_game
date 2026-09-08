@@ -76,6 +76,7 @@ export interface InteractableMarkerPosition extends TilePosition {
    * marker renderer's fallback branch only stays reachable while this type admits that.
    */
   kind: string;
+  avatarSkin?: number;
 }
 
 export interface RoomEvents {
@@ -457,7 +458,12 @@ function toInteractableMarkers(
 ): InteractableMarkerPosition[] {
   const positions: InteractableMarkerPosition[] = [];
   for (const marker of markers) {
-    positions.push({ tileX: marker.tileX, tileY: marker.tileY, kind: marker.kind });
+    positions.push({
+      tileX: marker.tileX,
+      tileY: marker.tileY,
+      kind: marker.kind,
+      avatarSkin: marker.avatarSkin,
+    });
   }
   return positions;
 }

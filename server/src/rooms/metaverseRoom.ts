@@ -1683,6 +1683,8 @@ function toInteraction(object: InteractableDefinition): InteractableEntered {
         question: object.question,
         choices: object.choices,
       };
+    case InteractableKind.Npc:
+      return { kind: object.kind, objectId: object.id, title: object.title, body: object.body };
   }
 }
 

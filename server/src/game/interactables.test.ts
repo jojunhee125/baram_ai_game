@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { InteractableKind } from "@zep-test/shared";
+import { AVATAR_SKIN_COUNT, InteractableKind } from "@zep-test/shared";
 import type {
   CollisionMap,
   InteractableDefinition,
@@ -65,7 +65,16 @@ const B_QUIZ: InteractableDefinition = {
   explanation: "해설",
 };
 
-const TABLE: readonly InteractableDefinition[] = [A_LINK, A_NOTICE, B_QUIZ];
+const A_NPC: InteractableDefinition = {
+  id: "a-npc",
+  kind: InteractableKind.Npc,
+  at: { room: "a", tiles: [{ tileX: 4, tileY: 1 }] },
+  title: "안내",
+  body: "여기는 사냥터입니다.",
+  avatarSkin: 21,
+};
+
+const TABLE: readonly InteractableDefinition[] = [A_LINK, A_NOTICE, B_QUIZ, A_NPC];
 
 /** A door out of "a" and one back, so tile-collision rules have a portal table to collide with. */
 const A_TO_B: PortalDefinition = {
@@ -100,6 +109,10 @@ function notice(patch: Partial<Extract<InteractableDefinition, { kind: "notice" 
 
 function quiz(patch: Partial<Extract<InteractableDefinition, { kind: "quiz" }>> = {}) {
   return { ...B_QUIZ, at: { room: "a", tiles: [{ tileX: 1, tileY: 3 }] }, ...patch } as InteractableDefinition;
+}
+
+function npc(patch: Partial<Extract<InteractableDefinition, { kind: "npc" }>> = {}) {
+  return { ...A_NPC, at: { room: "a", tiles: [{ tileX: 5, tileY: 1 }] }, ...patch } as InteractableDefinition;
 }
 
 describe("TableInteractableIndex", () => {
@@ -160,8 +173,25 @@ describe("TableInteractableIndex", () => {
         { tileX: 1, tileY: 1, kind: InteractableKind.Link },
         { tileX: 2, tileY: 2, kind: InteractableKind.Notice },
         { tileX: 3, tileY: 2, kind: InteractableKind.Notice },
+        { tileX: 4, tileY: 1, kind: InteractableKind.Npc, avatarSkin: 21 },
       ],
     );
+  });
+
+  it("fills avatarSkin on an Npc marker from the definition table, and on no other kind", () => {
+    // The one spot the design doc flags as compiler-invisible: an optional field that a missed
+    // spread leaves silently absent, rendering every Npc marker as skin 0.
+    const markers = new TableInteractableIndex("a", TABLE, MAP).markerTiles();
+    const npcMarker = markers.find((marker) => marker.kind === InteractableKind.Npc);
+    assert.ok(npcMarker, "precondition: the room's Npc row produced a marker");
+    assert.equal(npcMarker.avatarSkin, 21);
+
+    for (const marker of markers) {
+      if (marker.kind === InteractableKind.Npc) {
+        continue;
+      }
+      assert.equal("avatarSkin" in marker, false, `non-Npc marker at (${marker.tileX},${marker.tileY}) must not carry avatarSkin`);
+    }
   });
 
   it("answers null to everything for a room in no row", () => {
@@ -347,7 +377,7 @@ describe("validateInteractableDefinitions", () => {
   });
 
   it("rejects an empty title, whitespace included, whatever the kind", () => {
-    for (const row of [link({ title: "" }), notice({ title: "   " }), quiz({ title: "\n\t" })]) {
+    for (const row of [link({ title: "" }), notice({ title: "   " }), quiz({ title: "\n\t" }), npc({ title: "\n\t" })]) {
       const { errors } = validateInteractableDefinitions(
         [row],
         PORTALS,
@@ -458,6 +488,57 @@ describe("validateInteractableDefinitions", () => {
     assert.deepEqual(errors, [
       'object "x" has answerIndex 1.5, which is outside its 2 choices',
     ]);
+  });
+
+  it("accepts a well-formed npc row", () => {
+    const { errors } = validateInteractableDefinitions([npc({ id: "x" })], PORTALS, mapsFor("a"), NO_ROOMS);
+    assert.deepEqual(errors, []);
+  });
+
+  it("rejects an empty npc body", () => {
+    const { errors } = validateInteractableDefinitions(
+      [npc({ id: "x", body: "  \n " })],
+      PORTALS,
+      mapsFor("a"),
+      NO_ROOMS,
+    );
+    assert.deepEqual(errors, ['object "x" has an empty body']);
+  });
+
+  it("rejects an npc avatarSkin outside [0, AVATAR_SKIN_COUNT), on either end", () => {
+    for (const avatarSkin of [-1, AVATAR_SKIN_COUNT]) {
+      const { errors } = validateInteractableDefinitions(
+        [npc({ id: "x", avatarSkin })],
+        PORTALS,
+        mapsFor("a"),
+        NO_ROOMS,
+      );
+      assert.deepEqual(errors, [
+        `object "x" has avatarSkin ${avatarSkin}, outside [0, ${AVATAR_SKIN_COUNT})`,
+      ]);
+    }
+  });
+
+  it("rejects a non-integer npc avatarSkin", () => {
+    const { errors } = validateInteractableDefinitions(
+      [npc({ id: "x", avatarSkin: 1.5 })],
+      PORTALS,
+      mapsFor("a"),
+      NO_ROOMS,
+    );
+    assert.deepEqual(errors, ['object "x" has avatarSkin 1.5, outside [0, 24)']);
+  });
+
+  it("accepts the boundary avatarSkin values 0 and AVATAR_SKIN_COUNT - 1", () => {
+    for (const avatarSkin of [0, AVATAR_SKIN_COUNT - 1]) {
+      const { errors } = validateInteractableDefinitions(
+        [npc({ id: "x", avatarSkin })],
+        PORTALS,
+        mapsFor("a"),
+        NO_ROOMS,
+      );
+      assert.deepEqual(errors, []);
+    }
   });
 
   it("collects every issue instead of stopping at the first", () => {

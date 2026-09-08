@@ -155,7 +155,11 @@ export interface PortalIndex {
  * Three fixed shapes rather than one row with a free-form payload: a closed set of object types
  * instead of a scripting engine is the whole of item 3 (project CLAUDE.md, "Out of Scope").
  */
-export type InteractableDefinition = LinkInteractable | NoticeInteractable | QuizInteractable;
+export type InteractableDefinition =
+  | LinkInteractable
+  | NoticeInteractable
+  | QuizInteractable
+  | NpcInteractable;
 
 /** What every object row carries, whatever its kind. */
 interface InteractableBase {
@@ -211,6 +215,18 @@ export interface QuizInteractable extends InteractableBase {
   explanation?: string;
 }
 
+export interface NpcInteractable extends InteractableBase {
+  kind: typeof InteractableKind.Npc;
+  /** Same field as {@link NoticeInteractable.body} — static text, no dialogue branching. */
+  body: string;
+  /**
+   * Which of the 24 existing avatar skins (shared `AVATAR_SKIN_COUNT`) this NPC's marker stands
+   * in, idle, facing Down. No new art: boot validation rejects anything outside
+   * `[0, AVATAR_SKIN_COUNT)`, the same treatment `QuizInteractable.answerIndex` gets.
+   */
+  avatarSkin: number;
+}
+
 /**
  * One room's view of the object table, narrowed from the whole table at `onCreate` — the
  * {@link PortalIndex} arrangement, for the same reason: a room only ever needs its own rows, and
@@ -251,6 +267,12 @@ export interface InteractableIndex {
 /** One entry of {@link InteractableIndex.markerTiles}. */
 export interface InteractableMarkerTile extends TilePosition {
   kind: InteractableKind;
+  /**
+   * Present only when `kind` is `Npc` — see {@link NpcInteractable.avatarSkin}. Optional rather
+   * than a second marker shape: every other kind just never sets it, the same treatment
+   * `ItemGranted.damageReductionRatio` gets for a field that is only ever equipment's.
+   */
+  avatarSkin?: number;
 }
 
 /**

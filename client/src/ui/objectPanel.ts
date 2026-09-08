@@ -2,7 +2,6 @@ import {
   InteractableKind,
   type InteractableEntered,
   type LinkInteraction,
-  type NoticeInteraction,
   type QuizInteraction,
   type QuizResult,
 } from "@zep-test/shared";
@@ -12,6 +11,7 @@ const KIND_LABELS: Record<InteractableKind, string> = {
   [InteractableKind.Link]: "링크",
   [InteractableKind.Notice]: "공지",
   [InteractableKind.Quiz]: "퀴즈",
+  [InteractableKind.Npc]: "안내",
 };
 
 /** What a quiz currently on screen needs to match an asynchronous verdict against. */
@@ -71,6 +71,9 @@ export class ObjectPanel {
         break;
       case InteractableKind.Quiz:
         this.renderQuiz(payload);
+        break;
+      case InteractableKind.Npc:
+        this.renderNotice(payload);
         break;
       default:
         // A kind this bundle has no case for: the server serves the bundle but a browser can be
@@ -156,7 +159,7 @@ export class ObjectPanel {
     this.link.hidden = false;
   }
 
-  private renderNotice(payload: NoticeInteraction): void {
+  private renderNotice(payload: { body: string }): void {
     const text = document.createElement("p");
     text.className = "object__text";
     // textContent with `white-space: pre-wrap`, never innerHTML. The source is our own table, but

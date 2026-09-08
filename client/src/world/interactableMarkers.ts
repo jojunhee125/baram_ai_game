@@ -1,9 +1,18 @@
 import Phaser from "phaser";
-import { InteractableKind, TILE_SIZE_PX } from "@zep-test/shared";
+import { Direction, InteractableKind, TILE_SIZE_PX } from "@zep-test/shared";
 import type { InteractableMarkerPosition } from "../net/roomConnection";
+import { AVATAR_TEXTURE } from "./playerSprites";
 
 /** The layer portal pads use: above the tile layers, below every avatar. See portalMarkers.ts. */
 const MARKER_DEPTH = 1;
+
+/**
+ * `avatar.png`'s layout, duplicated from playerSprites.ts's `directionBase`/`idleFrame` rather
+ * than imported: the same relationship `monsterSprites.ts` has with it (a skin/kindIndex swap
+ * over one small formula isn't worth a shared helper for two call sites), see design doc §1.8.
+ */
+const FRAMES_PER_DIRECTION = 3;
+const DIRECTIONS_PER_SKIN = 4;
 
 const PLATE_SIZE_PX = 24;
 const PLATE_CORNER_PX = 6;
@@ -50,7 +59,12 @@ export function drawInteractableMarkers(
   scene: Phaser.Scene,
   markers: readonly InteractableMarkerPosition[],
 ): void {
-  for (const { tileX, tileY, kind } of markers) {
+  for (const { tileX, tileY, kind, avatarSkin } of markers) {
+    if (kind === InteractableKind.Npc) {
+      addNpcStandee(scene, tileX, tileY, avatarSkin ?? 0);
+      continue;
+    }
+
     // Tile-centred: this lies flat on the tile rather than standing on it like an avatar.
     const x = tileX * TILE_SIZE_PX + TILE_SIZE_PX / 2;
     const y = tileY * TILE_SIZE_PX + TILE_SIZE_PX / 2;
@@ -59,6 +73,24 @@ export function drawInteractableMarkers(
     addPlate(scene, x, y);
     addGlyph(scene, x, y, glyphFor(kind));
   }
+}
+
+/**
+ * Draws the NPC as a standing avatar frame instead of the flat plate+glyph the other kinds get.
+ * Positioned and depth-sorted like {@link PlayerSprites} — bottom-anchored on the tile, not
+ * tile-centred like the plate — because this is meant to read as a person standing there, not a
+ * signboard lying on the ground. Always idle, facing Down: this NPC never turns or walks, so one
+ * fixed frame is the whole of it (no animation object, unlike a real player).
+ */
+function addNpcStandee(scene: Phaser.Scene, tileX: number, tileY: number, avatarSkin: number): void {
+  const x = tileX * TILE_SIZE_PX + TILE_SIZE_PX / 2;
+  const y = (tileY + 1) * TILE_SIZE_PX;
+  const base = (avatarSkin * DIRECTIONS_PER_SKIN + Direction.Down) * FRAMES_PER_DIRECTION;
+  const idle = base + 1;
+
+  const sprite = scene.add.sprite(x, y, AVATAR_TEXTURE, idle);
+  sprite.setOrigin(0.5, 1);
+  sprite.setDepth(y);
 }
 
 function addPlate(scene: Phaser.Scene, x: number, y: number): void {

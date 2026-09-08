@@ -201,6 +201,7 @@ export const InteractableKind = {
   Link: "link",
   Notice: "notice",
   Quiz: "quiz",
+  Npc: "npc",
 } as const;
 
 export type InteractableKind = (typeof InteractableKind)[keyof typeof InteractableKind];
@@ -244,6 +245,13 @@ export interface QuizInteraction extends InteractionBase {
   choices: readonly string[];
 }
 
+/** Same shape as {@link NoticeInteraction} — the panel is identical; only the marker differs. */
+export interface NpcInteraction extends InteractionBase {
+  kind: typeof InteractableKind.Npc;
+  /** Newlines are significant, exactly like {@link NoticeInteraction.body}. */
+  body: string;
+}
+
 /**
  * The player's accepted step landed on a fixed object's tile; the client opens the matching panel.
  *
@@ -255,7 +263,11 @@ export interface QuizInteraction extends InteractionBase {
  * Unicast to the walker. Fires only on the move that enters the tile, so standing on it does not
  * re-fire; stepping off and back on does.
  */
-export type InteractableEntered = LinkInteraction | NoticeInteraction | QuizInteraction;
+export type InteractableEntered =
+  | LinkInteraction
+  | NoticeInteraction
+  | QuizInteraction
+  | NpcInteraction;
 
 /**
  * The verdict on one {@link QuizAnswerRequest}.

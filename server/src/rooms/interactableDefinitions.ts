@@ -60,4 +60,15 @@ export const INTERACTABLE_DEFINITIONS: readonly InteractableDefinition[] = [
     answerIndex: 0,
     explanation: "이 서비스의 실시간 서버는 Colyseus로 구현되어 있습니다.",
   },
+  {
+    id: "plaza-hunting-ground-npc",
+    kind: InteractableKind.Npc,
+    // One tile west of the north door's west trigger tile (31,8) — right beside the gate. Row 8
+    // has no shrub decorations (unlike rows 9/11), so this is open ground, not a boxed dead end;
+    // deliberate, since a guide NPC should be seen, not tucked away — see "좌표 확정 근거" above.
+    at: { room: "plaza", tiles: [{ tileX: 30, tileY: 8 }] },
+    title: "사냥터 안내",
+    body: "여기는 사냥터입니다. 몬스터가 서식하니 전투를 준비하세요.\n\n공격은 스페이스바, 가방은 I 키로 엽니다.",
+    avatarSkin: 21, // 백발 / 파랑 고글 / 주황 코트 (assets/README.md 스킨표) — 안내인 인상, 교체 쉬움
+  },
 ];

@@ -1,4 +1,4 @@
-import { InteractableKind } from "@zep-test/shared";
+import { AVATAR_SKIN_COUNT, InteractableKind } from "@zep-test/shared";
 import type {
   CollisionMap,
   InteractableDefinition,
@@ -45,7 +45,12 @@ export class TableInteractableIndex implements InteractableIndex {
       this.byObjectId.set(object.id, object);
       for (const tile of object.at.tiles) {
         this.byTile.set(tile.tileY * this.widthInTiles + tile.tileX, object);
-        this.markers.push({ tileX: tile.tileX, tileY: tile.tileY, kind: object.kind });
+        this.markers.push({
+          tileX: tile.tileX,
+          tileY: tile.tileY,
+          kind: object.kind,
+          ...(object.kind === InteractableKind.Npc ? { avatarSkin: object.avatarSkin } : {}),
+        });
       }
     }
   }
@@ -201,6 +206,14 @@ export function validateInteractableDefinitions(
         }
         break;
       }
+      case InteractableKind.Npc:
+        if (object.body.trim().length === 0) {
+          errors.push(`${label} has an empty body`);
+        }
+        if (!Number.isInteger(object.avatarSkin) || object.avatarSkin < 0 || object.avatarSkin >= AVATAR_SKIN_COUNT) {
+          errors.push(`${label} has avatarSkin ${object.avatarSkin}, outside [0, ${AVATAR_SKIN_COUNT})`);
+        }
+        break;
     }
   }
 

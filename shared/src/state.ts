@@ -42,6 +42,13 @@ export const InteractableMarker = schema({
   tileY: "uint16",
   /** An `InteractableKind` value. A string rather than a code — see that enum for why. */
   kind: "string",
+  /**
+   * Meaningful only when `kind === "npc"`; every other kind leaves this unset (`undefined` —
+   * `@colyseus/schema` does not zero-initialise unassigned primitives) and the marker renderer
+   * never reads it for them, {@link Monster.kind}'s reasoning for a field that costs nothing
+   * worth optimising per entry.
+   */
+  avatarSkin: "uint8",
 });
 
 export type InteractableMarker = SchemaType<typeof InteractableMarker>;

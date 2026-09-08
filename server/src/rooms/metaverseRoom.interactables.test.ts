@@ -18,6 +18,7 @@ import type {
   CollisionMap,
   LinkInteractable,
   NoticeInteractable,
+  NpcInteractable,
   QuizInteractable,
 } from "./contracts";
 import { ROOM_DEFINITIONS } from "./definitions";
@@ -45,6 +46,7 @@ const plaza = plazaDefinition;
 const LINK = definitionFor("plaza-link-board", InteractableKind.Link) as LinkInteractable;
 const NOTICE = definitionFor("plaza-notice-board", InteractableKind.Notice) as NoticeInteractable;
 const QUIZ = definitionFor("plaza-quiz-stand", InteractableKind.Quiz) as QuizInteractable;
+const NPC = definitionFor("plaza-hunting-ground-npc", InteractableKind.Npc) as NpcInteractable;
 
 /** Fails loudly if the placeholder table is swapped for one that renames or re-kinds a row. */
 function definitionFor(id: string, kind: InteractableKind) {
@@ -237,7 +239,37 @@ describe("MetaverseRoom — object markers in RoomState", () => {
     assert.equal(serialised.includes(QUIZ.question), false);
     assert.equal(serialised.includes(NOTICE.body), false);
     assert.equal(serialised.includes(LINK.url), false);
+    assert.equal(serialised.includes(NPC.body), false);
     assert.equal(serialised.includes("answerIndex"), false);
+  });
+
+  it("carries the npc's authored avatarSkin on its marker; every other kind's stays undefined", async () => {
+    // The one bug the design doc flags as invisible to the compiler: an optional field a missed
+    // spread leaves unset. This also confirms the documented behaviour of
+    // `InteractableMarker.avatarSkin` (state.ts) and `InteractableMarkerTile.avatarSkin`
+    // (contracts.ts): a schema `uint8` that is never assigned decodes as `undefined`, not `0` —
+    // verified directly against @colyseus/schema's Encoder/Decoder round trip.
+    const { room } = await joinRoom(plaza.name);
+    const markers = [...room.state.interactableMarkers];
+
+    const npcMarker = markers.find(
+      (marker) => marker.tileX === NPC.at.tiles[0]?.tileX && marker.tileY === NPC.at.tiles[0]?.tileY,
+    );
+    assert.ok(npcMarker, "precondition: the npc's marker is published");
+    assert.equal(npcMarker.kind, InteractableKind.Npc);
+    assert.equal(npcMarker.avatarSkin, NPC.avatarSkin, "marker avatarSkin must match the authored row");
+    assert.equal(NPC.avatarSkin, 21, "precondition: the authored table still uses skin 21");
+
+    for (const marker of markers) {
+      if (marker.kind === InteractableKind.Npc) {
+        continue;
+      }
+      assert.equal(
+        marker.avatarSkin,
+        undefined,
+        `non-npc marker at (${marker.tileX},${marker.tileY}) unexpectedly carries an avatarSkin`,
+      );
+    }
   });
 
   it("publishes no markers in the load-test room", async () => {
@@ -337,6 +369,28 @@ describe("MetaverseRoom — entering an object", () => {
     assert.ok(at);
     assert.deepEqual({ tileX: at.tileX, tileY: at.tileY }, tile, "the walker left the object tile");
     assert.equal(inbox.objects.length, 1, "standing still re-opened the panel");
+  });
+
+  it("delivers the npc's title and body like a notice, and only to the player who stepped on it", async () => {
+    const { room, client, inbox } = await joinRoom(plaza.name);
+    const bystander = (await testServer.connectTo(room, {
+      nickname: "bystander",
+      avatarSkin: 0,
+    })) as unknown as ClientRoom;
+    const bystanderInbox = collect(bystander);
+
+    await walkTo(room, client, tileOf(NPC));
+    await waitUntil(() => inbox.objects.length > 0, "the npc payload");
+
+    assert.deepEqual(inbox.objects, [
+      {
+        kind: InteractableKind.Npc,
+        objectId: NPC.id,
+        title: NPC.title,
+        body: NPC.body,
+      },
+    ]);
+    assert.deepEqual(bystanderInbox.objects, [], "an object is not broadcast to the room");
   });
 
   it("stays quiet on every tile that is not an object", async () => {
