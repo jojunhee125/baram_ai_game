@@ -5,6 +5,7 @@ import type { InventoryStore } from "./db/inventoryStore";
 import type { ProfileStore } from "./db/profileStore";
 import { validateInteractableDefinitions } from "./game/interactables";
 import { validateItemDefinitions } from "./game/items";
+import { validateLandmarkDefinitions } from "./game/landmarks";
 import { validatePortalDefinitions } from "./game/portals";
 import { TiledMapLoader } from "./game/tiledMap";
 import { markReady, markUnhealthy } from "./http/readiness";
@@ -14,6 +15,7 @@ import type { CollisionMap } from "./rooms/contracts";
 import { ROOM_DEFINITIONS } from "./rooms/definitions";
 import { INTERACTABLE_DEFINITIONS } from "./rooms/interactableDefinitions";
 import { ITEM_DEFINITIONS, MAX_DISTINCT_ITEMS } from "./rooms/itemDefinitions";
+import { LANDMARK_DEFINITIONS, LANDMARK_DESCRIPTORS } from "./rooms/landmarkDefinitions";
 import { MetaverseRoom } from "./rooms/metaverseRoom";
 import {
   MONSTER_SPAWN_DEFINITIONS,
@@ -183,6 +185,19 @@ async function validateRoomMaps(): Promise<void> {
   }
   if (monsters.errors.length > 0) {
     refuseBoot(`invalid monster spawn definitions: ${monsters.errors.join("; ")}`);
+  }
+
+  const landmarks = validateLandmarkDefinitions(
+    LANDMARK_DEFINITIONS,
+    LANDMARK_DESCRIPTORS,
+    mapsByRoom,
+    new Set(ITEM_DEFINITIONS.map((item) => item.key)),
+  );
+  for (const warning of landmarks.warnings) {
+    console.warn(`[zep-test] ${warning}`);
+  }
+  if (landmarks.errors.length > 0) {
+    refuseBoot(`invalid landmark definitions: ${landmarks.errors.join("; ")}`);
   }
 
   markReady();

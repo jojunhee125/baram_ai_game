@@ -40,7 +40,7 @@ interface SentMessage {
 interface FakeClient {
   sessionId: string;
   auth: { ssoNickname: string | null };
-  userData?: { lastMoveAt: number; lastHomeAt: number };
+  userData?: { lastMoveAt: number; lastWarpAt: number };
   /** Every `client.send()` the room made, in order — a unicast reaches the test no other way. */
   sent: SentMessage[];
 }
@@ -454,7 +454,7 @@ const FAR_FROM_HOME: TilePosition = { tileX: 80, tileY: 130 };
 
 function warpHome(room: MetaverseRoom, client: FakeClient): void {
   if (client.userData) {
-    client.userData.lastHomeAt = 0;
+    client.userData.lastWarpAt = 0;
   }
   room["handleReturnHome"](asRoomClient(client));
 }

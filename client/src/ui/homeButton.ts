@@ -6,7 +6,7 @@ const SHORTCUT_CODES: ReadonlySet<string> = new Set(["KeyH", "Home"]);
 
 /**
  * Module-scope, not instance: a cross-room hop destroys and reconstructs `HomeButton`, and the
- * cooldown this mirrors is a per-account rule (the server's `HOME_COOLDOWN_MS`/`lastHomeAt`), not
+ * cooldown this mirrors is a per-account rule (the server's `HOME_COOLDOWN_MS`/`lastWarpAt`), not
  * a per-instance one — surviving the hop is the point, otherwise a fresh instance starts enabled
  * mid-cooldown.
  */

@@ -142,6 +142,33 @@ export interface PortalIndex {
   requiredItemKeys(): ReadonlySet<string>;
 }
 
+/** One row of the landmark table, resolved for one room — {@link LandmarkIndex.resolve}'s answer. */
+export interface LandmarkArrival {
+  area: SpawnArea;
+  /** An {@link ItemDefinition.key} the account must hold for this landmark to resolve at all. */
+  requiresItemKey?: string;
+  /** Shown nowhere client-visible today (§8-2) — kept for symmetry with PortalDefinition and for
+   * a future denial-reason round trip, should one ever get built. */
+  deniedMessage?: string;
+}
+
+/**
+ * One room's view of the landmark table, narrowed at `onCreate` — the {@link PortalIndex}/
+ * {@link InteractableIndex} arrangement, for the same reason: a room only ever needs its own rows.
+ */
+export interface LandmarkIndex {
+  /**
+   * The tile (and item gate, if any) for a client naming `landmarkId`, or null when this room owns
+   * no such row — an unknown id, or one belonging to a landmark in another room.
+   *
+   * The gate is data here, not enforced here: this stays a synchronous, allocation-light lookup
+   * like every other index in this room. Only `MetaverseRoom.onJoin`/`handleWarpToLandmark` have
+   * what a real check needs — an inventory store call, and (cross-room only) the `await` that
+   * `onJoin` can take and this index's callers otherwise never would.
+   */
+  resolve(landmarkId: string): LandmarkArrival | null;
+}
+
 /**
  * A fixed interactive object of roadmap item 3: the author places it on tiles and fills in its
  * content, and the step that enters one of those tiles opens the matching panel.
@@ -322,14 +349,16 @@ export interface PlayerSession {
   lastMoveAt: number;
   lastChatAt: number;
   /**
-   * Server clock of the last accepted return-home request. Separate from `lastMoveAt` on
-   * purpose: a warp costs O(room population) where a step costs O(neighbours), so the two
-   * need different budgets and sharing one counter would let a walk buy a warp. See
-   * HOME_COOLDOWN_MS.
+   * Server clock of the last accepted warp — a return-home request or a landmark warp, which
+   * share one budget: both cost O(room population) via refreshViewsAround (docs/design-home-
+   * button.md §2.3), so a separate counter per warp type would let one buy the other's headroom.
+   * Separate from `lastMoveAt` on purpose: a warp costs O(room population) where a step costs
+   * O(neighbours), so the two need different budgets and sharing one counter would let a walk
+   * buy a warp. See HOME_COOLDOWN_MS.
    */
-  lastHomeAt: number;
+  lastWarpAt: number;
   /**
-   * Server clock of the last accepted attack, a third counter for `lastHomeAt`'s reason: walking
+   * Server clock of the last accepted attack, a third counter for `lastWarpAt`'s reason: walking
    * must not buy a swing. See ATTACK_COOLDOWN_MS.
    */
   lastAttackAt: number;

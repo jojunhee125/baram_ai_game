@@ -44,9 +44,11 @@ import {
   type QuizResult,
   type Teleported,
   type TilePosition,
+  type WarpToLandmarkRequest,
 } from "@zep-test/shared";
 import type { InventoryStore } from "../db/inventoryStore";
 import { TableInteractableIndex } from "../game/interactables";
+import { TableLandmarkIndex } from "../game/landmarks";
 import { rollLoot, type LootGrant } from "../game/loot";
 import {
   decideMonsterAction,
@@ -64,6 +66,7 @@ import type {
   CollisionMap,
   InteractableDefinition,
   InteractableIndex,
+  LandmarkIndex,
   MetaverseRoomOptions,
   PlayerSession,
   PortalIndex,
@@ -73,6 +76,7 @@ import type {
 } from "./contracts";
 import { INTERACTABLE_DEFINITIONS } from "./interactableDefinitions";
 import { ITEM_DEFINITIONS } from "./itemDefinitions";
+import { LANDMARK_DEFINITIONS } from "./landmarkDefinitions";
 import {
   MONSTER_SPAWN_DEFINITIONS,
   MONSTER_TYPES,
@@ -210,6 +214,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   /** {@link PortalIndex.requiredItemKeys} of this room, read once at `onCreate` and never rebuilt. */
   private gatedItemKeys!: ReadonlySet<string>;
   private interactableIndex!: InteractableIndex;
+  private landmarkIndex!: LandmarkIndex;
   private spawn!: SpawnArea;
   /**
    * Where "return home" lands: the spawn centre with the spawn's spread deliberately dropped.
@@ -227,6 +232,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.maxClients = options.maxClients;
     this.spawn = options.spawn;
     this.home = { tileX: options.spawn.tileX, tileY: options.spawn.tileY, spreadRadiusInTiles: 0 };
+    this.landmarkIndex = this.createLandmarkIndex(this.home);
     this.inventoryStore = options.inventoryStore ?? null;
     this.setPatchRate(PATCH_RATE_MS);
     this.maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
@@ -272,6 +278,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     });
     this.onMessage(ClientMessage.ChangeSkin, (client: RoomClient, message: ChangeSkinRequest) => {
       this.handleChangeSkin(client, message);
+    });
+    this.onMessage(ClientMessage.WarpToLandmark, (client: RoomClient, message: WarpToLandmarkRequest) => {
+      this.handleWarpToLandmark(client, message);
     });
 
     // Last, and only where there is something to simulate. A room with no monsters stays purely
@@ -347,6 +356,11 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     return new TableInteractableIndex(this.roomName, INTERACTABLE_DEFINITIONS, map);
   }
 
+  /** Overridable seam, the landmark twin of {@link createPortalIndex}/{@link createInteractableIndex}. */
+  protected createLandmarkIndex(home: SpawnArea): LandmarkIndex {
+    return new TableLandmarkIndex(this.roomName, LANDMARK_DEFINITIONS, home);
+  }
+
   /**
    * The room's one source of randomness, an overridable seam of the same family as
    * {@link createProximityIndex} and its siblings: a test subclass drops in a seeded generator and
@@ -375,7 +389,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     };
   }
 
-  onJoin(client: RoomClient, options?: JoinOptions): void {
+  async onJoin(client: RoomClient, options?: JoinOptions): Promise<void> {
     const nickname = normalizeNickname(client.auth?.ssoNickname ?? options?.nickname);
     if (nickname === null) {
       throw new Error("nickname is required");
@@ -386,10 +400,33 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // client whose portal row changed while its tab was open.
     const viaPortal = typeof options?.viaPortal === "string" ? options.viaPortal : undefined;
     const arrival = viaPortal === undefined ? null : this.portalIndex.arrivalFor(viaPortal);
+
+    // Checked only when no portal arrival won, so an ordinary join, a portal hop or a home hop
+    // never pays for this: the lookup below is one Map read, and the store round trip beneath it
+    // fires only for the one landmark row that is actually gated (today, only hunting-den's).
+    const arriveAtLandmark = typeof options?.arriveAtLandmark === "string" ? options.arriveAtLandmark : undefined;
+    let landmarkArrival: SpawnArea | null = null;
+    if (arrival === null && arriveAtLandmark !== undefined) {
+      const landmark = this.landmarkIndex.resolve(arriveAtLandmark);
+      if (landmark !== null) {
+        if (landmark.requiresItemKey === undefined || (await this.holdsItem(client, landmark.requiresItemKey))) {
+          landmarkArrival = landmark.area;
+        } else {
+          // Refuses the whole join rather than falling back to this room's plain spawn: a gated
+          // landmark is an access-control door exactly like the portal beside it
+          // (hunting-ground-north-door), and landing anywhere inside hunting-den without the pass
+          // would be exactly the bypass that door exists to prevent (design §2.4).
+          throw new Error(`landmark "${arriveAtLandmark}" requires item "${landmark.requiresItemKey}"`);
+        }
+      }
+      // landmark === null: unknown id, or one belonging to a landmark elsewhere — falls through to
+      // arriveAtHome/spawn below, the same "unowned id is not a refusal" rule viaPortal follows.
+    }
+
     // Portal beats home: it is the more specific request, and the only one of the two the
     // server itself issued. An unowned portal id falls through to home if home was asked for,
     // not to the spawn — the client asked for two things and only one of them was rejected.
-    const area = arrival ?? (options?.arriveAtHome === true ? this.home : this.spawn);
+    const area = arrival ?? landmarkArrival ?? (options?.arriveAtHome === true ? this.home : this.spawn);
 
     const spawnTile = this.pickSpawnTile(area);
     this.state.players.set(
@@ -407,7 +444,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       nickname,
       lastMoveAt: 0,
       lastChatAt: 0,
-      lastHomeAt: 0,
+      lastWarpAt: 0,
       lastAttackAt: 0,
       // Full health on every arrival, including one through a portal: there is no way to heal an
       // injury that outlived the room it happened in, so carrying one across would be a state
@@ -445,6 +482,26 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     if (this.hasMonsters && this.inventoryStore !== null) {
       void this.hydrateEquipmentCache(client.sessionId, ownerKey);
     }
+  }
+
+  /**
+   * On-demand possession check for a gated landmark. Not `session.ownedPossessionKeys`: that
+   * cache is only ever populated by `hydratePossessionCache`, which runs only in a room whose own
+   * *outgoing* portal is gated (`gatedItemKeys.size > 0`) — hunting-den has none, so a client
+   * landmark-warping straight into it would find that cache permanently, silently empty regardless
+   * of what it actually holds. A join is a low-frequency, human-triggered action, so one extra
+   * round trip here costs nothing the hot move path would notice.
+   */
+  private async holdsItem(client: RoomClient, itemKey: string): Promise<boolean> {
+    if (this.inventoryStore === null) {
+      // Same fail-closed rule handleMove's own portal gate already applies with no store
+      // configured — an unconfigured store can prove nothing is owned, so nothing gated ever
+      // gets through.
+      return false;
+    }
+    const ownerKey = client.auth?.ssoUserId ?? client.sessionId;
+    const rows = await this.inventoryStore.list(ownerKey);
+    return rows.some((row) => row.itemKey === itemKey);
   }
 
   /**
@@ -668,28 +725,56 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     }
 
     const now = Date.now();
-    if (now - session.lastHomeAt < HOME_COOLDOWN_MS) {
+    if (now - session.lastWarpAt < HOME_COOLDOWN_MS) {
       // Dropped in silence, unlike a throttled move: the client mirrors this window as the
       // button's disabled period, so anything arriving inside it is a duplicate rather than a
       // misprediction to correct — and the player is already standing where it would send them.
       return;
     }
-    session.lastHomeAt = now;
+    session.lastWarpAt = now;
 
-    this.warpHome(client, player);
+    this.warpTo(client, player, this.home);
   }
 
   /**
-   * Puts one player on the room's home tile and tells them so.
-   *
-   * Shared by the return-home request and by death, which is the same movement reached from a
-   * different place ({@link damagePlayer}). One copy rather than two on purpose: the ordering
-   * below is load-bearing and invisible, so a second copy of it is a second chance to get it
-   * wrong somewhere nobody is looking. The cooldown is the caller's business, not this one's —
-   * death does not consult it.
+   * One same-room landmark warp. The cross-room half of the landmark panel rejoins via
+   * `JoinOptions.arriveAtLandmark` instead ({@link onJoin}) — this handler only ever fires when
+   * the client is already in the room the chosen landmark belongs to.
    */
-  private warpHome(client: RoomClient, player: Player): void {
-    const destination = this.pickSpawnTile(this.home);
+  private handleWarpToLandmark(client: RoomClient, message: WarpToLandmarkRequest): void {
+    const session = client.userData;
+    const player = this.state.players.get(client.sessionId);
+    if (!session || !player) {
+      return;
+    }
+    const now = Date.now();
+    if (now - session.lastWarpAt < HOME_COOLDOWN_MS) {
+      return;
+    }
+    const landmarkId = message?.landmarkId;
+    if (typeof landmarkId !== "string") {
+      return;
+    }
+    const landmark = this.landmarkIndex.resolve(landmarkId);
+    if (landmark === null) {
+      return;
+    }
+    session.lastWarpAt = now;
+    this.warpTo(client, player, landmark.area);
+  }
+
+  /**
+   * Puts one player on `destinationArea` and tells them so.
+   *
+   * Shared by the return-home request, the same-room landmark warp and by death, which are all
+   * the same movement reached from a different place ({@link handleReturnHome},
+   * {@link handleWarpToLandmark}, {@link damagePlayer}). One copy rather than several on purpose:
+   * the ordering below is load-bearing and invisible, so a second copy of it is a second chance to
+   * get it wrong somewhere nobody is looking. The cooldown is the caller's business, not this
+   * one's — death does not consult it.
+   */
+  private warpTo(client: RoomClient, player: Player, destinationArea: SpawnArea): void {
+    const destination = this.pickSpawnTile(destinationArea);
     const from = { tileX: player.tileX, tileY: player.tileY };
     player.tileX = destination.tileX;
     player.tileY = destination.tileY;
@@ -1498,7 +1583,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // The existing message for "the server moved you without you walking", rather than a death
     // message of its own: the home warp already proved that path, and the client reads
     // `hpRemaining === 0` on the hit above as the death itself.
-    this.warpHome(client, player);
+    this.warpTo(client, player, this.home);
   }
 
   /**

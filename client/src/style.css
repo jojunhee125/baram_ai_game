@@ -1170,6 +1170,119 @@ body {
 }
 
 /*
+ * The landmark panel. Same HUD-column, non-modal treatment as .character-menu — the header/close/
+ * list styling below is a 1:1 clone of .character-menu's; rows here can additionally disable during
+ * the shared warp cooldown (.landmark-panel__item:disabled), which .character-menu__item never
+ * needed.
+ */
+.landmark-panel {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(20, 19, 26, 0.82);
+  color: #eceaf4;
+}
+
+.landmark-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.landmark-panel__title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.landmark-panel__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: rgba(236, 234, 244, 0.62);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.landmark-panel__close:hover {
+  background: rgba(236, 234, 244, 0.1);
+  border-color: rgba(236, 234, 244, 0.24);
+  color: #eceaf4;
+}
+
+.landmark-panel__close:active {
+  background: rgba(236, 234, 244, 0.04);
+}
+
+.landmark-panel__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.landmark-panel__close-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.landmark-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.landmark-panel__item {
+  display: block;
+  width: 100%;
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(236, 234, 244, 0.06);
+  color: #eceaf4;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.landmark-panel__item:hover:not(:disabled) {
+  background: rgba(236, 234, 244, 0.12);
+  border-color: rgba(236, 234, 244, 0.32);
+}
+
+.landmark-panel__item:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.landmark-panel__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.landmark-panel__item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/*
  * Fixed-object panel. Unlike .picker it sits *over* the world instead of standing in for it — the
  * player is still in the room, just reading something — so the stage stays visible behind a scrim
  * and the panel keeps the dark treatment .chat and .hud use over the canvas. The scrim also takes
@@ -1518,6 +1631,8 @@ body {
   .character-menu__item,
   .chat__input,
   .hud__button,
+  .landmark-panel__close,
+  .landmark-panel__item,
   .loot-table__close,
   .loot-table__retry,
   .object__choice,

@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import {
+  LANDMARK_DEFINITIONS,
   TILE_SIZE_PX,
   type ChatBroadcast,
   type JoinOptions,
@@ -20,6 +21,7 @@ import { ChatPanel } from "../ui/chatPanel";
 import { HomeButton } from "../ui/homeButton";
 import { InventoryPanel } from "../ui/inventoryPanel";
 import { ItemToasts } from "../ui/itemToasts";
+import { LandmarkPanel } from "../ui/landmarkPanel";
 import { LootTablePanel } from "../ui/lootTablePanel";
 import { Minimap, type MinimapView } from "../ui/minimap";
 import { buildMinimapTerrain } from "../ui/minimapTerrain";
@@ -69,20 +71,31 @@ interface BuiltWorld {
   collision: Phaser.Tilemaps.TilemapLayer;
 }
 
-/** Where the destination room should put us — the only thing a portal hop and a home hop differ by. */
-type Arrival = { readonly kind: "portal"; readonly portalId: string } | { readonly kind: "home" };
+/** Where the destination room should put us — the only thing a portal hop, a home hop and a landmark hop differ by. */
+type Arrival =
+  | { readonly kind: "portal"; readonly portalId: string }
+  | { readonly kind: "home" }
+  | { readonly kind: "landmark"; readonly landmarkId: string };
 
 function joinOptionsFor(arrival: Arrival): JoinOptions {
   const identity = resolveJoinOptions();
-  return arrival.kind === "portal"
-    ? { ...identity, viaPortal: arrival.portalId }
-    : { ...identity, arriveAtHome: true };
+  if (arrival.kind === "portal") {
+    return { ...identity, viaPortal: arrival.portalId };
+  }
+  if (arrival.kind === "landmark") {
+    return { ...identity, arriveAtLandmark: arrival.landmarkId };
+  }
+  return { ...identity, arriveAtHome: true };
 }
 
 function arrivalFailureNotice(arrival: Arrival): string {
-  return arrival.kind === "portal"
-    ? "문 너머로 이동하지 못했습니다. 잠시 후 다시 지나가 보세요."
-    : "홈으로 돌아가지 못했습니다. 잠시 후 다시 시도해 주세요.";
+  if (arrival.kind === "portal") {
+    return "문 너머로 이동하지 못했습니다. 잠시 후 다시 지나가 보세요.";
+  }
+  if (arrival.kind === "landmark") {
+    return "랜드마크로 이동하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+  }
+  return "홈으로 돌아가지 못했습니다. 잠시 후 다시 시도해 주세요.";
 }
 
 export class WorldScene extends Phaser.Scene {
@@ -105,6 +118,7 @@ export class WorldScene extends Phaser.Scene {
   private inventoryPanel: InventoryPanel | null = null;
   private lootTablePanel: LootTablePanel | null = null;
   private characterMenu: CharacterMenu | null = null;
+  private landmarkPanel: LandmarkPanel | null = null;
   private vitals: PlayerVitals | null = null;
   private toasts: ItemToasts | null = null;
   private portalDenialBanner: PortalDenialBanner | null = null;
@@ -141,6 +155,7 @@ export class WorldScene extends Phaser.Scene {
     this.inventoryPanel = null;
     this.lootTablePanel = null;
     this.characterMenu = null;
+    this.landmarkPanel = null;
     this.vitals = null;
     this.toasts = null;
     this.portalDenialBanner = null;
@@ -282,6 +297,7 @@ export class WorldScene extends Phaser.Scene {
     );
     this.lootTablePanel = new LootTablePanel(this.connection.roomName);
     this.characterMenu = new CharacterMenu(() => void this.openSkinPicker());
+    this.landmarkPanel = new LandmarkPanel((landmarkId) => this.warpToLandmark(landmarkId));
     this.toasts = new ItemToasts();
     this.portalDenialBanner = new PortalDenialBanner();
     this.attackKey = new AttackKey(() => this.swing());
@@ -467,6 +483,44 @@ export class WorldScene extends Phaser.Scene {
   }
 
   /**
+   * Takes the player to one of the four fixed landmarks
+   * (`docs/design-phase-m-landmark-teleport.md`): a warp inside this room, or a hop when the
+   * landmark is in another room. The destination room is resolved against the shared
+   * `LANDMARK_DEFINITIONS` table rather than anything the panel itself carries — the same
+   * "client never asserts coordinates" rule `returnHome()` already follows for home.
+   */
+  private warpToLandmark(landmarkId: string): void {
+    if (this.transitioning) {
+      return;
+    }
+    if (this.objectPanel?.isOpen === true) {
+      return;
+    }
+    if (this.skinPickerOpen) {
+      return;
+    }
+    let targetRoom: string | undefined;
+    for (const landmark of LANDMARK_DEFINITIONS) {
+      if (landmark.id === landmarkId) {
+        targetRoom = landmark.room;
+        break;
+      }
+    }
+    if (targetRoom === undefined) {
+      return;
+    }
+    if (targetRoom === this.connection.roomName) {
+      // Fire-and-forget and effectively always successful, so it stays optimistic — same
+      // reasoning as returnHome()'s same-room branch.
+      this.landmarkPanel?.beginCooldown();
+      this.connection.sendWarpToLandmark(landmarkId);
+      return;
+    }
+    // Cross-room: `hop()` starts the cooldown itself, only once the join has actually succeeded.
+    this.startHop(targetRoom, { kind: "landmark", landmarkId });
+  }
+
+  /**
    * The character menu's "스킨 변경" row: reopens the same picker BootScene runs, blocking
    * movement and the home warp for as long as it is up (`skinPickerOpen`, checked in `update()`
    * and `returnHome()`). No `destroy()`/cancel-on-scene-death is needed for this promise —
@@ -527,6 +581,8 @@ export class WorldScene extends Phaser.Scene {
     }
     if (arrival.kind === "home") {
       this.homeButton?.beginCooldown();
+    } else if (arrival.kind === "landmark") {
+      this.landmarkPanel?.beginCooldown();
     }
 
     await this.connection.leave();
@@ -540,6 +596,7 @@ export class WorldScene extends Phaser.Scene {
     this.inventoryPanel?.destroy();
     this.lootTablePanel?.destroy();
     this.characterMenu?.destroy();
+    this.landmarkPanel?.destroy();
     this.vitals?.destroy();
     this.toasts?.destroy();
     this.portalDenialBanner?.destroy();

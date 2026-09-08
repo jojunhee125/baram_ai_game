@@ -26,6 +26,7 @@ import {
   type QuizResult,
   type Teleported,
   type TilePosition,
+  type WarpToLandmarkRequest,
 } from "@zep-test/shared";
 import { resolveJoinOptions } from "./identity";
 
@@ -232,6 +233,15 @@ export class RoomConnection {
    */
   sendReturnHome(): void {
     this.room.send(ClientMessage.ReturnHome);
+  }
+
+  /**
+   * Same-room half of the landmark panel — asks to be warped to this landmark's tile. The
+   * cross-room half rejoins via `JoinOptions.arriveAtLandmark` instead of this message
+   * (`docs/design-phase-m-landmark-teleport.md` §2.1).
+   */
+  sendWarpToLandmark(landmarkId: string): void {
+    this.room.send(ClientMessage.WarpToLandmark, { landmarkId } satisfies WarpToLandmarkRequest);
   }
 
   /**

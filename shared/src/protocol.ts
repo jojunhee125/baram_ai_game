@@ -24,6 +24,17 @@ export interface JoinOptions {
    * it is the more specific request and the only one of the two the server itself issued.
    */
   arriveAtHome?: boolean;
+  /**
+   * Warp to this landmark id's tile instead of sampling the spawn area — the cross-room half of
+   * the landmark panel (`docs/design-phase-m-landmark-teleport.md`). Same non-assertion rule as
+   * `arriveAtHome`: only an id travels, and the destination room resolves it against its own
+   * table. `viaPortal` wins if both are present; this wins over `arriveAtHome` — a named landmark
+   * is the more specific request. An id this room does not own falls back to `arriveAtHome`/spawn,
+   * never to a refusal — the one exception is a landmark whose own row requires an item the
+   * account does not hold, which refuses the join entirely (§2.4): unlike every other unowned-id
+   * case here, that is not "unknown", it is "known and denied".
+   */
+  arriveAtLandmark?: string;
 }
 
 export const ClientMessage = {
@@ -42,6 +53,8 @@ export const ClientMessage = {
   UnequipItem: "equipment:unequip",
   /** Live re-skin from the in-game character menu. No ack: see ChangeSkinRequest. */
   ChangeSkin: "avatar:change-skin",
+  /** Same-room half of the landmark panel; the cross-room half rejoins via JoinOptions.arriveAtLandmark. */
+  WarpToLandmark: "landmark:warp",
 } as const;
 
 export type ClientMessage = (typeof ClientMessage)[keyof typeof ClientMessage];
@@ -82,6 +95,15 @@ export interface ChangeSkinRequest {
   skin: number;
 }
 
+/**
+ * Names a landmark by id (`LANDMARK_DEFINITIONS`). Ignored in silence if it belongs to a
+ * landmark in a different room — that case has no fallback destination worth sending, unlike a
+ * join, which always has a spawn to fall back to.
+ */
+export interface WarpToLandmarkRequest {
+  landmarkId: string;
+}
+
 export interface ClientMessagePayload {
   [ClientMessage.Move]: MoveRequest;
   [ClientMessage.Chat]: ChatRequest;
@@ -103,6 +125,7 @@ export interface ClientMessagePayload {
   /** No payload: there is at most one equipped item, so there is nothing to name. */
   [ClientMessage.UnequipItem]: undefined;
   [ClientMessage.ChangeSkin]: ChangeSkinRequest;
+  [ClientMessage.WarpToLandmark]: WarpToLandmarkRequest;
 }
 
 export const ServerMessage = {
