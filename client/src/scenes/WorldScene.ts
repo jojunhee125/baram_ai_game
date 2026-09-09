@@ -132,7 +132,7 @@ export class WorldScene extends Phaser.Scene {
    * True for as long as the avatar picker is reopened mid-session from the character menu
    * (`docs/design-phase-h-skin-skip-menu.md` §2.3). Unlike the bag and the drop-table window,
    * this picker is modal — it covers the stage — so movement and the home warp are blocked on
-   * the same footing as `objectPanel?.isOpen`, for as long as it is open.
+   * the same footing as `objectPanel?.blocksMovement`, for as long as it is open.
    */
   private skinPickerOpen = false;
 
@@ -337,7 +337,7 @@ export class WorldScene extends Phaser.Scene {
     // or drop odds is what gets you killed (docs/design-hunting-inventory.md §3.4). Attack used to
     // be swallowed while either was open; that gate is gone too (2026-09-03) — a fight in progress
     // should not stop just because a panel is up.
-    if (this.objectPanel?.isOpen === true) {
+    if (this.objectPanel?.blocksMovement === true) {
       return;
     }
     // The re-skin picker is modal, unlike the bag and the drop-table window (design §2.3): it
@@ -460,7 +460,7 @@ export class WorldScene extends Phaser.Scene {
     }
     // HomeButton owns its own window shortcut, so H fires whatever update()'s gate is doing —
     // without this the avatar warps out from under an open panel and the panel stays up.
-    if (this.objectPanel?.isOpen === true) {
+    if (this.objectPanel?.blocksMovement === true) {
       return;
     }
     // Same reasoning, for the re-skin picker (design §2.3): without this, a home warp mid-picker
@@ -493,7 +493,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.transitioning) {
       return;
     }
-    if (this.objectPanel?.isOpen === true) {
+    if (this.objectPanel?.blocksMovement === true) {
       return;
     }
     if (this.skinPickerOpen) {

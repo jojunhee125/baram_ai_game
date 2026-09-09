@@ -299,6 +299,7 @@ describe("MetaverseRoom — entering an object", () => {
         objectId: LINK.id,
         title: LINK.title,
         url: LINK.url,
+        blocksMovement: true,
       },
     ]);
     assert.deepEqual(bystanderInbox.objects, [], "an object is not broadcast to the room");
@@ -322,6 +323,7 @@ describe("MetaverseRoom — entering an object", () => {
         objectId: NOTICE.id,
         title: NOTICE.title,
         body,
+        blocksMovement: true,
       });
     }
   });
@@ -339,6 +341,7 @@ describe("MetaverseRoom — entering an object", () => {
       title: QUIZ.title,
       question: QUIZ.question,
       choices: QUIZ.choices,
+      blocksMovement: true,
     });
     // The one thing a quiz has. Asserted on the serialised payload too, because a field added
     // later would pass the shape check above only if someone also updated it.
@@ -388,6 +391,7 @@ describe("MetaverseRoom — entering an object", () => {
         objectId: NPC.id,
         title: NPC.title,
         body: NPC.body,
+        blocksMovement: false,
       },
     ]);
     assert.deepEqual(bystanderInbox.objects, [], "an object is not broadcast to the room");

@@ -200,6 +200,15 @@ interface InteractableBase {
   at: InteractableSource;
   /** Panel heading. */
   title: string;
+  /**
+   * Whether entering this object should hold movement (and the home/landmark warp) until the
+   * panel is closed. Omitted means `true` — the existing dead-end convention, unchanged for every
+   * row already in the table. An author sets `false` only for a tile knowingly placed on a
+   * through-route (docs/design-npc-movement-block-fix.md) — boot validation cannot check this
+   * against the collision layer the way it checks walkability; this is an authoring assertion,
+   * the same kind `NpcInteractable.avatarSkin` already is.
+   */
+  blocksMovement?: boolean;
 }
 
 /** Where an object is triggered. */

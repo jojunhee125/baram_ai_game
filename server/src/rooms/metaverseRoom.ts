@@ -1757,9 +1757,21 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
 function toInteraction(object: InteractableDefinition): InteractableEntered {
   switch (object.kind) {
     case InteractableKind.Link:
-      return { kind: object.kind, objectId: object.id, title: object.title, url: object.url };
+      return {
+        kind: object.kind,
+        objectId: object.id,
+        title: object.title,
+        url: object.url,
+        blocksMovement: object.blocksMovement ?? true,
+      };
     case InteractableKind.Notice:
-      return { kind: object.kind, objectId: object.id, title: object.title, body: object.body };
+      return {
+        kind: object.kind,
+        objectId: object.id,
+        title: object.title,
+        body: object.body,
+        blocksMovement: object.blocksMovement ?? true,
+      };
     case InteractableKind.Quiz:
       return {
         kind: object.kind,
@@ -1767,9 +1779,16 @@ function toInteraction(object: InteractableDefinition): InteractableEntered {
         title: object.title,
         question: object.question,
         choices: object.choices,
+        blocksMovement: object.blocksMovement ?? true,
       };
     case InteractableKind.Npc:
-      return { kind: object.kind, objectId: object.id, title: object.title, body: object.body };
+      return {
+        kind: object.kind,
+        objectId: object.id,
+        title: object.title,
+        body: object.body,
+        blocksMovement: object.blocksMovement ?? true,
+      };
   }
 }
 

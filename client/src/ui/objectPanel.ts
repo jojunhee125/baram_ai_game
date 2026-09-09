@@ -40,6 +40,7 @@ export class ObjectPanel {
   private readonly link = document.querySelector<HTMLAnchorElement>("#object-panel-link")!;
   private readonly closeButton = document.querySelector<HTMLButtonElement>("#object-panel-close")!;
   private quiz: OpenQuiz | null = null;
+  private currentBlocksMovement = true;
 
   constructor(private readonly sendAnswer: (objectId: string, choiceIndex: number) => void) {
     this.closeButton.addEventListener("click", this.handleClose);
@@ -54,7 +55,18 @@ export class ObjectPanel {
     return !this.root.hidden;
   }
 
+  /**
+   * Whether the currently-open panel (if any) should hold movement/the home-and-landmark warp.
+   * False both when nothing is open and when what is open was authored non-modal
+   * (`InteractableEntered.blocksMovement === false`) — one getter, so `WorldScene` never has to
+   * combine `isOpen` with a second field itself at three separate call sites.
+   */
+  get blocksMovement(): boolean {
+    return this.isOpen && this.currentBlocksMovement;
+  }
+
   open(payload: InteractableEntered): void {
+    this.currentBlocksMovement = payload.blocksMovement;
     this.quiz = null;
     this.body.replaceChildren();
     this.link.hidden = true;
@@ -132,6 +144,7 @@ export class ObjectPanel {
     this.kind.textContent = "";
     this.heading.textContent = "";
     this.quiz = null;
+    this.currentBlocksMovement = true; // back to the safe default for whatever opens next
   }
 
   /**

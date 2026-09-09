@@ -70,5 +70,11 @@ export const INTERACTABLE_DEFINITIONS: readonly InteractableDefinition[] = [
     title: "사냥터 안내",
     body: "여기는 사냥터입니다. 몬스터가 서식하니 전투를 준비하세요.\n\n공격은 스페이스바, 가방은 I 키로 엽니다.",
     avatarSkin: 21, // 백발 / 파랑 고글 / 주황 코트 (assets/README.md 스킨표) — 안내인 인상, 교체 쉬움
+    // On the north-door through-route, not a dead end (Phase T's own placement reasoning) — the
+    // BFS'd walk pattern client/e2e uses (pass-g/h/j specs) crosses this tile on every west-side
+    // detour around the fountain. Blocking movement here froze real travel, not just tests; this
+    // NPC is read-and-close only (no quiz-style follow-up state), so nothing is lost by letting a
+    // step carry straight through. docs/design-npc-movement-block-fix.md.
+    blocksMovement: false,
   },
 ];

@@ -238,6 +238,16 @@ interface InteractionBase {
   objectId: string;
   /** Panel heading, shown as written. */
   title: string;
+  /**
+   * Whether standing on this tile should hold the player in place — and block the home/landmark
+   * warp — until the panel is closed. True for every object placed in a genuine dead end (the
+   * existing convention, docs/design-fixed-objects.md); false only when an author has knowingly
+   * placed one on a through-route for visibility, e.g. the entrance NPC
+   * (docs/design-npc-movement-block-fix.md). Always a concrete boolean on the wire: the server
+   * resolves `InteractableBase.blocksMovement ?? true` once in `toInteraction`, so no client call
+   * site repeats that default.
+   */
+  blocksMovement: boolean;
 }
 
 export interface LinkInteraction extends InteractionBase {
