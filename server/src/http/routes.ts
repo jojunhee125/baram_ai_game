@@ -267,7 +267,7 @@ function presentInventory(rows: readonly InventoryRow[]): readonly {
       icon: definition.icon,
       quantity: row.quantity,
       equipped: row.equipped,
-      damageReductionRatio: definition.equipment?.damageReductionRatio,
+      damageReductionRatio: definition.equipment?.stats.damageReduction,
     });
   }
   return items;

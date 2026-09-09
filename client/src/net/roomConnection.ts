@@ -9,6 +9,7 @@ import {
   type Direction,
   type EquipItemRequest,
   type EquipmentChanged,
+  type EquipmentSlot,
   type InteractableEntered,
   type InteractableMarker,
   type ItemGranted,
@@ -26,6 +27,7 @@ import {
   type QuizResult,
   type Teleported,
   type TilePosition,
+  type UnequipItemRequest,
   type WarpToLandmarkRequest,
 } from "@zep-test/shared";
 import { resolveJoinOptions } from "./identity";
@@ -261,14 +263,14 @@ export class RoomConnection {
     this.room.send(ClientMessage.Attack);
   }
 
-  /** Requests the named item as the account's equipped item. */
-  sendEquipItem(itemKey: string): void {
-    this.room.send(ClientMessage.EquipItem, { itemKey } satisfies EquipItemRequest);
+  /** Requests the named item as the account's equipped item in `slot`. */
+  sendEquipItem(itemKey: string, slot: EquipmentSlot): void {
+    this.room.send(ClientMessage.EquipItem, { itemKey, slot } satisfies EquipItemRequest);
   }
 
-  /** Requests that the account go bare-handed, no matter what is currently equipped. */
-  sendUnequipItem(): void {
-    this.room.send(ClientMessage.UnequipItem);
+  /** Requests that `slot` be cleared, no matter what is currently equipped there. */
+  sendUnequipItem(slot: EquipmentSlot): void {
+    this.room.send(ClientMessage.UnequipItem, { slot } satisfies UnequipItemRequest);
   }
 
   /**

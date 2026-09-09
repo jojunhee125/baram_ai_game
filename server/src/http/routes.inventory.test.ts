@@ -8,6 +8,7 @@ import {
 import type { AddressInfo } from "node:net";
 import { after, before, beforeEach, describe, it } from "node:test";
 import express from "express";
+import type { EquipmentSlot } from "@zep-test/shared";
 import type { InventoryRow, InventoryStore } from "../db/inventoryStore";
 import { markDatabaseDegraded, resetDatabaseStatus } from "../db/status";
 import { ITEM_DEFINITIONS } from "../rooms/itemDefinitions";
@@ -68,7 +69,7 @@ class ScriptedInventoryStore implements InventoryStore {
     throw new Error("GET /api/inventory must never grant anything");
   }
 
-  getEquipped(): Promise<string | null> {
+  getEquippedSlots(): Promise<Partial<Record<EquipmentSlot, string>>> {
     throw new Error("GET /api/inventory must never touch equipment");
   }
 

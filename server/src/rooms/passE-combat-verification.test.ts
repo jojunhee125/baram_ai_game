@@ -10,6 +10,7 @@ import {
   PLAYER_MAX_HP,
   ServerMessage,
   VIEW_RADIUS_TILES,
+  type EquipmentSlot,
   type ItemGranted,
   type JoinOptions,
   type MonsterHit,
@@ -756,8 +757,8 @@ describe("VERIFY a store that actually throws (not just a full bag)", () => {
       return Promise.resolve(true);
     }
 
-    getEquipped(): Promise<string | null> {
-      return Promise.resolve(null);
+    getEquippedSlots(): Promise<Partial<Record<EquipmentSlot, string>>> {
+      return Promise.resolve({});
     }
 
     equip(): Promise<boolean> {

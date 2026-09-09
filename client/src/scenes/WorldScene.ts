@@ -292,8 +292,8 @@ export class WorldScene extends Phaser.Scene {
       connection.sendQuizAnswer(objectId, choiceIndex),
     );
     this.inventoryPanel = new InventoryPanel(
-      (itemKey) => connection.sendEquipItem(itemKey),
-      () => connection.sendUnequipItem(),
+      (itemKey, slot) => connection.sendEquipItem(itemKey, slot),
+      (slot) => connection.sendUnequipItem(slot),
     );
     this.lootTablePanel = new LootTablePanel(this.connection.roomName);
     this.characterMenu = new CharacterMenu(() => void this.openSkinPicker());

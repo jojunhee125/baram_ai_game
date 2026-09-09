@@ -1,4 +1,4 @@
-import type { EquipmentChanged, ItemGranted } from "@zep-test/shared";
+import { EQUIPMENT_SLOTS, EquipmentSlot, type EquipmentChanged, type ItemGranted } from "@zep-test/shared";
 import { loadInventory, type InventoryItem } from "../net/inventory";
 import { isTextEntry } from "../input/textEntry";
 
@@ -20,6 +20,19 @@ export const ITEM_ICON_ORDER = [
 
 /** One frame of items.png at 1x. The HUD column is CSS-sized, so this is CSS pixels. */
 const ICON_SIZE_PX = 32;
+
+/**
+ * The concrete slot each equippable item occupies — a client mirror of `ItemDefinition.equipment.slot`
+ * (design-phase-v-equipment-system.md §6.2), for the two items the catalogue actually equips today.
+ * `GET /api/inventory` sends only `equipped: boolean`, not which slot, so this table is what resolves
+ * a bag row to the slot its own 장착 button targets. A ring item would need to resolve to ring1 or
+ * ring2 rather than one fixed slot (§1.3) — moot today, since this table has no "ring" entry to
+ * resolve from.
+ */
+const EQUIPMENT_ITEM_SLOTS: Partial<Record<string, EquipmentSlot>> = {
+  "leather-armor": EquipmentSlot.Armor,
+  "old-dagger": EquipmentSlot.Weapon,
+};
 
 /**
  * Paints one column of `items.png` onto `node`, or leaves a visibly empty slot for an icon key
@@ -74,6 +87,16 @@ export class InventoryPanel {
   private readonly statusIcon = document.querySelector<HTMLElement>("#inventory-status-icon")!;
   private readonly statusText = document.querySelector<HTMLElement>("#inventory-status-text")!;
   private readonly statusHint = document.querySelector<HTMLElement>("#inventory-status-hint")!;
+  private readonly slots = document.querySelector<HTMLElement>("#inventory-slots")!;
+  /** Every slot row, keyed by its `data-slot`. Populated once in the constructor — the markup is
+   * static HTML, never rebuilt, unlike the bag rows below it. */
+  private readonly slotNodes = new Map<EquipmentSlot, HTMLElement>();
+  /**
+   * The slot rows' own 해제 buttons are as persistent as {@link button}/{@link closeButton} — a
+   * room hop's successor instance must remove its own listeners in {@link destroy}, or the shared
+   * static button fires every past instance's stale callback on one click.
+   */
+  private readonly slotUnequipHandlers = new Map<HTMLButtonElement, (event: MouseEvent) => void>();
   /**
    * Which read the DOM is allowed to belong to. Every reply checks it before drawing, so a slow
    * response cannot land in a bag that has since been closed, reopened, or handed to the successor
@@ -84,13 +107,14 @@ export class InventoryPanel {
   private view: PanelView = "loading";
 
   constructor(
-    private readonly onEquipItem: (itemKey: string) => void,
-    private readonly onUnequipItem: () => void,
+    private readonly onEquipItem: (itemKey: string, slot: EquipmentSlot) => void,
+    private readonly onUnequipItem: (slot: EquipmentSlot) => void,
   ) {
     this.button.addEventListener("click", this.handleToggleClick);
     this.closeButton.addEventListener("click", this.handleCloseClick);
     this.retryButton.addEventListener("click", this.handleRetryClick);
     window.addEventListener("keydown", this.handleKey);
+    this.bindSlots();
     this.button.hidden = false;
     this.applyOpenState();
   }
@@ -144,13 +168,16 @@ export class InventoryPanel {
    * Folds one equip/unequip verdict into an open bag. Dropped under the same conditions as
    * {@link applyGrant} — a reopen re-reads and picks up the true state either way — and also
    * when `applied` is false, since a denied request changed nothing for this row to reflect.
+   *
+   * Only the bag row(s) targeting `event.slot` are touched — each of the eight slots settles
+   * independently now (design §4.2), so an armor equip must not flip a weapon row's label.
    */
   applyEquipmentChange(event: EquipmentChanged): void {
     if (!event.applied || !panelOpen || this.view !== "items") {
       return;
     }
     for (const row of this.list.children) {
-      if (!(row instanceof HTMLElement)) {
+      if (!(row instanceof HTMLElement) || row.dataset.slot !== event.slot) {
         continue;
       }
       const equip = row.querySelector<HTMLButtonElement>(".bag__equip");
@@ -161,6 +188,7 @@ export class InventoryPanel {
       row.dataset.equipped = String(equipped);
       equip.textContent = equipped ? "해제" : "장착";
     }
+    this.applySlot(event.slot, this.resolveEquippedItem(event.itemKey));
   }
 
   /**
@@ -174,7 +202,33 @@ export class InventoryPanel {
     this.closeButton.removeEventListener("click", this.handleCloseClick);
     this.retryButton.removeEventListener("click", this.handleRetryClick);
     window.removeEventListener("keydown", this.handleKey);
+    for (const [button, handler] of this.slotUnequipHandlers) {
+      button.removeEventListener("click", handler);
+    }
     this.request += 1;
+  }
+
+  /** Wires each of the eight static slot rows once — see {@link slotNodes}'s own comment. */
+  private bindSlots(): void {
+    for (const slot of EQUIPMENT_SLOTS) {
+      const node = this.slots.querySelector<HTMLElement>(`[data-slot="${slot}"]`);
+      if (!node) {
+        continue;
+      }
+      this.slotNodes.set(slot, node);
+      const unequip = node.querySelector<HTMLButtonElement>(".bag__equip");
+      if (!unequip) {
+        continue;
+      }
+      const handleClick = (event: MouseEvent): void => {
+        this.onUnequipItem(slot);
+        if (event.detail > 0) {
+          unequip.blur();
+        }
+      };
+      unequip.addEventListener("click", handleClick);
+      this.slotUnequipHandlers.set(unequip, handleClick);
+    }
   }
 
   private readonly handleToggleClick = (event: MouseEvent): void => {
@@ -293,6 +347,7 @@ export class InventoryPanel {
 
   private showItems(items: readonly InventoryItem[]): void {
     this.list.setAttribute("aria-busy", "false");
+    this.renderSlots(items);
     if (items.length === 0) {
       this.view = "empty";
       this.list.replaceChildren();
@@ -324,14 +379,72 @@ export class InventoryPanel {
     this.status.hidden = false;
   }
 
+  /**
+   * One pass over `items`, sorting each equipped row into the slot its `itemKey` maps to
+   * (`EQUIPMENT_ITEM_SLOTS`) and rendering all eight rows from that — including the five that
+   * never get a hit this Phase, which render as the same empty state {@link applySlot} always
+   * falls back to.
+   */
+  private renderSlots(items: readonly InventoryItem[]): void {
+    const equippedBySlot = new Map<EquipmentSlot, InventoryItem>();
+    for (const item of items) {
+      const slot = item.equipped ? EQUIPMENT_ITEM_SLOTS[item.itemKey] : undefined;
+      if (slot !== undefined) {
+        equippedBySlot.set(slot, item);
+      }
+    }
+    for (const slot of EQUIPMENT_SLOTS) {
+      this.applySlot(slot, equippedBySlot.get(slot) ?? null);
+    }
+  }
+
+  /** Paints one slot row. `null` renders as `applyItemIcon`'s own unknown-icon fallback — the same empty box an unrecognised icon key already draws. */
+  private applySlot(slot: EquipmentSlot, item: { name: string; icon: string } | null): void {
+    const node = this.slotNodes.get(slot);
+    if (!node) {
+      return;
+    }
+    const icon = node.querySelector<HTMLElement>(".bag__icon");
+    const name = node.querySelector<HTMLElement>(".bag__slot-name");
+    const unequip = node.querySelector<HTMLButtonElement>(".bag__equip");
+    if (icon) {
+      applyItemIcon(icon, item?.icon ?? "");
+    }
+    if (name) {
+      name.textContent = item?.name ?? "비어 있음";
+    }
+    if (unequip) {
+      unequip.hidden = item === null;
+    }
+  }
+
+  /** What {@link applyEquipmentChange} paints a slot with — looked up from the row already in the open list, since `EquipmentChanged` carries only the bare `itemKey`. */
+  private resolveEquippedItem(itemKey: string | null): { name: string; icon: string } | null {
+    if (itemKey === null) {
+      return null;
+    }
+    const row = this.findRow(itemKey);
+    if (!row) {
+      return null;
+    }
+    return {
+      name: row.querySelector<HTMLElement>(".bag__name")?.textContent ?? "",
+      icon: row.dataset.icon ?? "",
+    };
+  }
+
   /** Looks the row up by walking the list rather than by selector: `itemKey` is server data. */
-  private findCount(itemKey: string): HTMLElement | null {
+  private findRow(itemKey: string): HTMLElement | null {
     for (const row of this.list.children) {
       if (row instanceof HTMLElement && row.dataset.itemKey === itemKey) {
-        return row.querySelector<HTMLElement>(".bag__count");
+        return row;
       }
     }
     return null;
+  }
+
+  private findCount(itemKey: string): HTMLElement | null {
+    return this.findRow(itemKey)?.querySelector<HTMLElement>(".bag__count") ?? null;
   }
 
   private buildRow(item: InventoryItem): HTMLLIElement {
@@ -339,6 +452,8 @@ export class InventoryPanel {
     row.className = "bag__row";
     // What `applyGrant` finds the row by, so a pickup lands on the item it belongs to.
     row.dataset.itemKey = item.itemKey;
+    // What `resolveEquippedItem` reads back for the slot grid once this row is equipped.
+    row.dataset.icon = item.icon;
 
     const icon = document.createElement("span");
     applyItemIcon(icon, item.icon);
@@ -357,8 +472,11 @@ export class InventoryPanel {
 
     row.append(icon, name, count, unit);
 
-    // Only equipment rows get a toggle; a possession like entry-pass has no slot to occupy.
-    if (item.damageReductionRatio !== undefined) {
+    // Only a row whose item maps to a concrete slot gets a toggle; a possession like entry-pass
+    // has no slot to occupy, and neither does an equipment item this Phase never gave a slot to.
+    const slot = EQUIPMENT_ITEM_SLOTS[item.itemKey];
+    if (slot !== undefined) {
+      row.dataset.slot = slot;
       row.dataset.equipped = String(item.equipped);
       const equip = document.createElement("button");
       equip.type = "button";
@@ -366,9 +484,9 @@ export class InventoryPanel {
       equip.textContent = item.equipped ? "해제" : "장착";
       equip.addEventListener("click", (event) => {
         if (row.dataset.equipped === "true") {
-          this.onUnequipItem();
+          this.onUnequipItem(slot);
         } else {
-          this.onEquipItem(item.itemKey);
+          this.onEquipItem(item.itemKey, slot);
         }
         if (event.detail > 0) {
           equip.blur();

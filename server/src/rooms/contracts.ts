@@ -3,6 +3,7 @@ import type { InventoryStore } from "../db/inventoryStore";
 // `InteractableKind` is imported as a value, not just as a type: the authored table's
 // discriminant and the wire union's have to be the same string, so both read it from one place.
 import {
+  EquipmentSlot,
   InteractableKind,
   type Direction,
   type RoomState,
@@ -347,9 +348,36 @@ export interface ItemDefinition {
   possession?: boolean;
   /** Present for an item that can be equipped, e.g. armor. Absent for everything else. */
   equipment?: {
-    /** Fraction of incoming monster damage removed, in (0, 1). Applied in `damagePlayer`. */
-    damageReductionRatio: number;
+    /** Which slot family (design §1.3) this item goes in — `slotFamily(request.slot)` must match. */
+    slot: EquipmentSlotFamily;
+    /**
+     * Axis-by-axis bonuses this item grants while equipped. A small record rather than one field
+     * per axis (design §6.1): at least two axes are already needed at once (damage reduction,
+     * attack damage, max HP), so opening a record now is what the current need already calls for,
+     * not speculative width. A missing axis means "this item does not touch that axis" — distinct
+     * from 0, which callers must not confuse when filtering.
+     */
+    stats: Partial<Record<"damageReduction" | "attackDamage" | "maxHp", number>>;
   };
+}
+
+/**
+ * The slot "kind" an item accepts — `ring1`/`ring2` both accept a `"ring"`-family item (design
+ * §1.3), so an item definition never has to know which of the two concrete ring slots it ends up
+ * in.
+ */
+export type EquipmentSlotFamily =
+  | "armor"
+  | "helmet"
+  | "ring"
+  | "necklace"
+  | "shoes"
+  | "weapon"
+  | "cloak";
+
+/** Narrows a concrete slot to the family an item definition is authored against (design §1.3). */
+export function slotFamily(slot: EquipmentSlot): EquipmentSlotFamily {
+  return slot === EquipmentSlot.Ring1 || slot === EquipmentSlot.Ring2 ? "ring" : slot;
 }
 
 /** Data attached to `client.userData`; never synced to clients. */
@@ -421,24 +449,29 @@ export interface PlayerSession {
    */
   pendingPossessionGrants: Map<string, number>;
   /**
-   * {@link ItemDefinition.key} of the account's equipped item, or null. Cached the way
-   * {@link ownedPossessionKeys} is: `damagePlayer` reads it on every hit, which is too hot a path
-   * for a store round trip.
+   * {@link ItemDefinition.key} values the account has equipped, by slot. Cached the way
+   * {@link ownedPossessionKeys} is: `damagePlayer`/attack damage read it on every hit, which is
+   * too hot a path for a store round trip. An empty slot has no key at all — a `Partial` map,
+   * never a `null` value — matching the possession set's own "absence, not falsy" convention.
    */
-  equippedItemKey: string | null;
+  equippedItemKeys: Partial<Record<EquipmentSlot, string>>;
   /**
-   * Optimistic-concurrency counter for {@link equippedItemKey}. Bumped by every write that
-   * actually changes the cache (hydration, a confirmed equip, a confirmed unequip), and compared
-   * before applying any of them: a write that started before a still-in-flight one but resolves
-   * after it must not clobber the newer result with a stale one.
+   * Optimistic-concurrency counter, **one per slot** — not shared across all eight. A single
+   * shared counter would make two genuinely independent equips (different slots) each mistake the
+   * other's write for a conflicting one and drop its own result (design §4.1); splitting the
+   * counter per slot is what keeps same-slot races caught while different-slot requests never see
+   * each other at all. Bumped by every write that actually changes that slot's cache (hydration, a
+   * confirmed equip, a confirmed unequip) and compared before applying any of them.
    */
-  equipCacheVersion: number;
+  equipCacheVersions: Record<EquipmentSlot, number>;
   /**
-   * True while an equip/unequip request for this session is awaiting the store. A second request
-   * arriving before the first resolves is dropped rather than queued — correctness already comes
-   * from {@link equipCacheVersion}, so this exists only to save the redundant round trip.
+   * Slots with an equip/unequip request for this session awaiting the store. A second request for
+   * a slot already in this set is dropped rather than queued — correctness already comes from
+   * {@link equipCacheVersions}, so this exists only to save the redundant round trip. Per-slot for
+   * the same reason the version counter is: a request on one slot must never block a request on
+   * another.
    */
-  equipRequestPending: boolean;
+  equipRequestPendingSlots: Set<EquipmentSlot>;
 }
 
 /**

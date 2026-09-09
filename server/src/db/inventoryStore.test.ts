@@ -289,7 +289,7 @@ describe("PostgresInventoryStore — the statements it sends", () => {
     assert.equal(queries.length, 1);
     assert.match(
       queries[0]?.sql ?? "",
-      /SELECT item_key, quantity, equipped FROM inventory_item WHERE owner_key = \$1/,
+      /SELECT item_key, quantity, equipped_slot IS NOT NULL AS equipped FROM inventory_item WHERE owner_key = \$1/,
     );
     assert.deepEqual(queries[0]?.values, [OWNER]);
   });
@@ -492,9 +492,9 @@ function ownerScopedStore(pool: Pool): InventoryStore {
     list: (ownerKey) => inner.list(resolve(ownerKey)),
     add: (ownerKey, itemKey, quantity) => inner.add(resolve(ownerKey), itemKey, quantity),
     grantOnce: (ownerKey, itemKey) => inner.grantOnce(resolve(ownerKey), itemKey),
-    getEquipped: (ownerKey) => inner.getEquipped(resolve(ownerKey)),
-    equip: (ownerKey, itemKey) => inner.equip(resolve(ownerKey), itemKey),
-    unequip: (ownerKey) => inner.unequip(resolve(ownerKey)),
+    getEquippedSlots: (ownerKey) => inner.getEquippedSlots(resolve(ownerKey)),
+    equip: (ownerKey, itemKey, slot) => inner.equip(resolve(ownerKey), itemKey, slot),
+    unequip: (ownerKey, slot) => inner.unequip(resolve(ownerKey), slot),
   };
 }
 
@@ -644,13 +644,18 @@ describe("PostgresInventoryStore — against a real server", { skip: REAL_DATABA
     );
   });
 
-  describe("PostgresInventoryStore.equip — concurrent equip of two different items", () => {
+  describe("PostgresInventoryStore.equip — concurrent equip of two different items into the same slot", () => {
     it("the partial unique index lets exactly one row end up equipped, and the loser's call resolves false rather than rejecting", async () => {
       // Phase F's own atomicity claim, forced rather than assumed: two genuinely concurrent
-      // connections racing `equip()` for two *different* items on one owner. The CTE's own
-      // "cleared" step only clears rows it can see in its own snapshot, so the real guarantee
-      // has to come from `inventory_item_owner_equipped_uidx` itself — this proves it does, and
-      // that `equip()` now catches the loser's own `23505` off that index and resolves `false`
+      // connections racing `equip()` for two *different* items **into the same slot** on one
+      // owner — the only case `inventory_item_owner_equipped_slot_uidx` (design §2.1) can still
+      // contend on now that the index is `(owner_key, equipped_slot)` rather than `(owner_key)`.
+      // Both items are equipped into "armor" here regardless of their own catalogue slot, since
+      // this drives `InventoryStore.equip` directly and it enforces no slot-family match itself
+      // (that check lives in `MetaverseRoom.handleEquipItem`) — the point under test is the index,
+      // not the catalogue. The CTE's own "cleared" step only clears rows it can see in its own
+      // snapshot, so the real guarantee has to come from the index itself — this proves it does,
+      // and that `equip()` now catches the loser's own `23505` off that index and resolves `false`
       // (Bug 1 fix) instead of letting it reject: an uncaught rejection there left
       // `settleEquipRequest`'s catch block sending nothing at all to the losing session, which
       // looked like a dropped click rather than a denied request.
@@ -661,8 +666,8 @@ describe("PostgresInventoryStore — against a real server", { skip: REAL_DATABA
         await store.add(owner, "old-dagger", 1);
 
         const results = await Promise.allSettled([
-          store.equip(owner, "leather-armor"),
-          store.equip(owner, "old-dagger"),
+          store.equip(owner, "leather-armor", "armor"),
+          store.equip(owner, "old-dagger", "armor"),
         ]);
 
         const rows = await store.list(owner);

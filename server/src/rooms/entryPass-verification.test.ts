@@ -6,6 +6,7 @@ import {
   MONSTER_TICK_MS,
   PLAYER_ATTACK_DAMAGE,
   ServerMessage,
+  type EquipmentSlot,
   type JoinOptions,
   type PortalDenied,
   type PortalEntered,
@@ -273,7 +274,7 @@ describe("VERIFY hydration race: a pending list() must not corrupt state, and a 
       },
       add: () => Promise.resolve(null),
       grantOnce: () => Promise.resolve(false),
-      getEquipped: () => Promise.resolve(null),
+      getEquippedSlots: () => Promise.resolve({}),
       equip: () => Promise.resolve(false),
       unequip: () => Promise.resolve(false),
     };
@@ -369,7 +370,7 @@ describe("VERIFY grand-plaza pays zero cost for a gate it does not have", () => 
     // A store that only counts, so a call the room should never make is caught rather than
     // silently answering something plausible.
     const listCalls: string[] = [];
-    const getEquippedCalls: string[] = [];
+    const getEquippedSlotsCalls: string[] = [];
     const countingStore: InventoryStore = {
       list: (ownerKey: string) => {
         listCalls.push(ownerKey);
@@ -377,15 +378,15 @@ describe("VERIFY grand-plaza pays zero cost for a gate it does not have", () => 
       },
       add: () => Promise.resolve(null),
       grantOnce: () => Promise.resolve(false),
-      getEquipped: (ownerKey: string) => {
-        getEquippedCalls.push(ownerKey);
-        return Promise.resolve(null);
+      getEquippedSlots: (ownerKey: string) => {
+        getEquippedSlotsCalls.push(ownerKey);
+        return Promise.resolve({});
       },
       equip: () => Promise.resolve(false),
       unequip: () => Promise.resolve(false),
     };
     (globalThis as { __listCalls?: string[] }).__listCalls = listCalls;
-    (globalThis as { __getEquippedCalls?: string[] }).__getEquippedCalls = getEquippedCalls;
+    (globalThis as { __getEquippedSlotsCalls?: string[] }).__getEquippedSlotsCalls = getEquippedSlotsCalls;
     const gameServer = createGameServer(undefined, countingStore);
     await gameServer.listen(PORT);
     testServer = new ColyseusTestServer(gameServer);
@@ -418,11 +419,12 @@ describe("VERIFY grand-plaza pays zero cost for a gate it does not have", () => 
     );
     const listCalls = (globalThis as { __listCalls?: string[] }).__listCalls ?? [];
     assert.equal(listCalls.length, 0, "onJoin must not touch the store at all for this room");
-    const getEquippedCalls = (globalThis as { __getEquippedCalls?: string[] }).__getEquippedCalls ?? [];
+    const getEquippedSlotsCalls =
+      (globalThis as { __getEquippedSlotsCalls?: string[] }).__getEquippedSlotsCalls ?? [];
     assert.equal(
-      getEquippedCalls.length,
+      getEquippedSlotsCalls.length,
       0,
-      "the equipment cache (Phase F) must also stay gated on hasMonsters for this room",
+      "the equipment cache (Phase F/V) must also stay gated on hasMonsters for this room",
     );
     assert.ok(room.state.players.get(client.sessionId), "the join itself still succeeded");
   });
@@ -453,8 +455,8 @@ describe("VERIFY concurrent same-key grants settle correctly regardless of resol
       });
     }
 
-    getEquipped(): Promise<string | null> {
-      return Promise.resolve(null);
+    getEquippedSlots(): Promise<Partial<Record<EquipmentSlot, string>>> {
+      return Promise.resolve({});
     }
 
     equip(): Promise<boolean> {

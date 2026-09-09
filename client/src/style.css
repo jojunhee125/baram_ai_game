@@ -802,6 +802,57 @@ body {
   outline-offset: 2px;
 }
 
+.bag__section-title {
+  margin: 0;
+  color: rgba(236, 234, 244, 0.62);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+/*
+ * The eight equipment slots. Unlike .bag__list this never scrolls or shrinks — on a short window
+ * the item list below gives back space first (.bag__list's own comment documents that order).
+ */
+.bag__slots {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0 0 var(--space-2);
+  border-bottom: 1px solid rgba(236, 234, 244, 0.1);
+  list-style: none;
+}
+
+.bag__slot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-1) 0;
+  border-radius: 6px;
+}
+
+.bag__slot-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.bag__slot-label {
+  color: rgba(236, 234, 244, 0.55);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.bag__slot-name {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
 /* Loading, empty and failure share this block; exactly one of them is ever on screen. */
 .bag__status {
   display: flex;

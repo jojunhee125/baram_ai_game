@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import type { EquipmentSlot } from "@zep-test/shared";
 import { MAX_DISTINCT_ITEMS } from "../rooms/itemDefinitions";
 import { markDatabaseDegraded, markDatabaseOk } from "./status";
 
@@ -41,27 +42,34 @@ export interface InventoryStore {
    */
   grantOnce(ownerKey: string, itemKey: string): Promise<boolean>;
 
-  /** The account's equipped item, or null when nothing is equipped or the key is unheld. */
-  getEquipped(ownerKey: string): Promise<string | null>;
+  /**
+   * Everything this account has equipped, by slot, in **one round trip** — not eight. This is the
+   * join-time hydration's only call (design §3, §4.3): a room with `hasMonsters` must pay a cost
+   * that is independent of the number of slots, the same reason `hydratePossessionCache` reads
+   * every gated key in a single `list()`.
+   */
+  getEquippedSlots(ownerKey: string): Promise<Partial<Record<EquipmentSlot, string>>>;
 
   /**
-   * Equips `itemKey`, unequipping whatever else this account had equipped first — at most one
-   * item is ever equipped, and the caller does not have to unequip before equipping.
+   * Equips `itemKey` into `slot`, unequipping whatever else this account had in that same slot
+   * first — at most one item is ever equipped per slot, and the caller does not have to unequip
+   * before equipping. An item already equipped in a *different* slot is untouched: Phase F's
+   * "account-wide max one" narrows to "slot-wide max one" (design §3).
    *
    * Answers `false`, and changes nothing, when the account does not hold `itemKey` — and also
-   * when a concurrent `equip` call for a *different* item on the same account committed first:
-   * `inventory_item_owner_equipped_uidx` (design §7.2) lets only one of the two ever win, and the
-   * loser reports it the same way a not-held item does, rather than throwing.
+   * when a concurrent `equip` call for a *different* item into the *same* slot on the same account
+   * committed first: `inventory_item_owner_equipped_slot_uidx` (design §2.1) lets only one of the
+   * two ever win, and the loser reports it the same way a not-held item does, rather than throwing.
    */
-  equip(ownerKey: string, itemKey: string): Promise<boolean>;
+  equip(ownerKey: string, itemKey: string, slot: EquipmentSlot): Promise<boolean>;
 
   /**
-   * Unequips whatever this account has equipped. A no-op, not an error, if nothing is — and
-   * `true`/`false` says which of those two happened, so a caller whose own cache of "what was
+   * Unequips whatever this account has in `slot`. A no-op, not an error, if it was already empty —
+   * and `true`/`false` says which of those two happened, so a caller whose own cache of "what was
    * equipped before this call" might already be stale has the store's real answer to act on
    * instead.
    */
-  unequip(ownerKey: string): Promise<boolean>;
+  unequip(ownerKey: string, slot: EquipmentSlot): Promise<boolean>;
 }
 
 export interface InventoryRow {
@@ -112,9 +120,10 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 /**
  * `23505` is Postgres's own code for a unique-constraint violation — unlike the `23514`/`22P02`
  * this file already refuses to guess at (design intent: those two are caller bugs that should
- * never reach a query), a `unique_violation` off `inventory_item_owner_equipped_uidx` is a normal,
- * expected outcome of two sessions of one account equipping different items at once, so `equip`
- * needs to tell it apart from every other failure rather than let it read as a dropped connection.
+ * never reach a query), a `unique_violation` off `inventory_item_owner_equipped_slot_uidx` is a
+ * normal, expected outcome of two sessions of one account equipping different items into the same
+ * slot at once, so `equip` needs to tell it apart from every other failure rather than let it read
+ * as a dropped connection.
  */
 function isUniqueViolation(cause: unknown): boolean {
   return typeof cause === "object" && cause !== null && (cause as { code?: unknown }).code === "23505";
@@ -126,16 +135,16 @@ function isUniqueViolation(cause: unknown): boolean {
  */
 export class InMemoryInventoryStore implements InventoryStore {
   private readonly bagsByOwner = new Map<string, Map<string, number>>();
-  private readonly equippedByOwner = new Map<string, string>();
+  private readonly equippedByOwner = new Map<string, Map<EquipmentSlot, string>>();
 
   list(ownerKey: string): Promise<readonly InventoryRow[]> {
     const bag = this.bagsByOwner.get(ownerKey);
     if (bag === undefined) {
       return Promise.resolve([]);
     }
-    const equipped = this.equippedByOwner.get(ownerKey);
+    const equippedKeys = new Set(this.equippedByOwner.get(ownerKey)?.values() ?? []);
     return Promise.resolve(
-      [...bag].map(([itemKey, quantity]) => ({ itemKey, quantity, equipped: itemKey === equipped })),
+      [...bag].map(([itemKey, quantity]) => ({ itemKey, quantity, equipped: equippedKeys.has(itemKey) })),
     );
   }
 
@@ -175,21 +184,28 @@ export class InMemoryInventoryStore implements InventoryStore {
     return Promise.resolve(true);
   }
 
-  getEquipped(ownerKey: string): Promise<string | null> {
-    return Promise.resolve(this.equippedByOwner.get(ownerKey) ?? null);
+  getEquippedSlots(ownerKey: string): Promise<Partial<Record<EquipmentSlot, string>>> {
+    const slots = this.equippedByOwner.get(ownerKey);
+    return Promise.resolve(slots === undefined ? {} : Object.fromEntries(slots));
   }
 
-  equip(ownerKey: string, itemKey: string): Promise<boolean> {
+  equip(ownerKey: string, itemKey: string, slot: EquipmentSlot): Promise<boolean> {
     const bag = this.bagsByOwner.get(ownerKey);
     if (bag === undefined || !bag.has(itemKey)) {
       return Promise.resolve(false);
     }
-    this.equippedByOwner.set(ownerKey, itemKey);
+    let slots = this.equippedByOwner.get(ownerKey);
+    if (slots === undefined) {
+      slots = new Map<EquipmentSlot, string>();
+      this.equippedByOwner.set(ownerKey, slots);
+    }
+    slots.set(slot, itemKey);
     return Promise.resolve(true);
   }
 
-  unequip(ownerKey: string): Promise<boolean> {
-    return Promise.resolve(this.equippedByOwner.delete(ownerKey));
+  unequip(ownerKey: string, slot: EquipmentSlot): Promise<boolean> {
+    const slots = this.equippedByOwner.get(ownerKey);
+    return Promise.resolve(slots?.delete(slot) ?? false);
   }
 }
 
@@ -200,8 +216,12 @@ export class PostgresInventoryStore implements InventoryStore {
     assertUuidOwnerKey(ownerKey);
     // No ORDER BY: the caller orders against ITEM_DEFINITIONS, and an ordering here would be a
     // second answer to that question that nobody is keeping in step with the first.
+    //
+    // `equipped_slot IS NOT NULL AS equipped` keeps `InventoryRow.equipped` a plain boolean (design
+    // §3: list()'s own shape is unchanged by the slot expansion) while the underlying column is now
+    // which slot, not whether.
     const result = await this.query<{ item_key: string; quantity: number; equipped: boolean }>(
-      "SELECT item_key, quantity, equipped FROM inventory_item WHERE owner_key = $1",
+      "SELECT item_key, quantity, equipped_slot IS NOT NULL AS equipped FROM inventory_item WHERE owner_key = $1",
       [ownerKey],
     );
     return result.rows.map((row) => ({
@@ -264,31 +284,35 @@ export class PostgresInventoryStore implements InventoryStore {
     return result.rows.length > 0;
   }
 
-  async equip(ownerKey: string, itemKey: string): Promise<boolean> {
+  async equip(ownerKey: string, itemKey: string, slot: EquipmentSlot): Promise<boolean> {
     assertUuidOwnerKey(ownerKey);
     // The `item_key <> $2` guard on `cleared` is required, not cosmetic: without it, equipping an
-    // already-equipped item would have `cleared` and the final UPDATE both target the same row in
-    // the same statement, which Postgres defines as an error (or, worse, an unspecified result).
+    // already-equipped item back into the same slot would have `cleared` and the final UPDATE both
+    // target the same row in the same statement, which Postgres defines as an error (or, worse, an
+    // unspecified result). `cleared` is scoped to `equipped_slot = $3` (design §3) — it clears only
+    // whatever this account had in *this* slot, so an item equipped in a different slot is never
+    // touched.
     //
     // Bypasses the shared `query` helper deliberately: two sessions of the same account equipping
-    // two different items at once both pass the `target` CTE (each holds its own item), and only
-    // the final UPDATE discovers the conflict, as a `23505` off `inventory_item_owner_equipped_uidx`
-    // — the loser's connection is fine, so routing that through `query`'s catch would call
-    // `markDatabaseDegraded` (and log a scary "database degraded" line) for a race that is normal,
-    // expected concurrent usage, not a fault.
+    // two different items into the *same* slot at once both pass the `target` CTE (each holds its
+    // own item), and only the final UPDATE discovers the conflict, as a `23505` off
+    // `inventory_item_owner_equipped_slot_uidx` — the loser's connection is fine, so routing that
+    // through `query`'s catch would call `markDatabaseDegraded` (and log a scary "database
+    // degraded" line) for a race that is normal, expected concurrent usage, not a fault. Two
+    // sessions equipping into *different* slots never contend on this index at all (design §4).
     try {
       const result = await this.pool.query<{ item_key: string }>(
         `WITH target AS (
            SELECT 1 FROM inventory_item WHERE owner_key = $1 AND item_key = $2
          ),
          cleared AS (
-           UPDATE inventory_item SET equipped = false
-           WHERE owner_key = $1 AND equipped = true AND item_key <> $2 AND EXISTS (SELECT 1 FROM target)
+           UPDATE inventory_item SET equipped_slot = NULL
+           WHERE owner_key = $1 AND equipped_slot = $3 AND item_key <> $2 AND EXISTS (SELECT 1 FROM target)
          )
-         UPDATE inventory_item SET equipped = true
+         UPDATE inventory_item SET equipped_slot = $3
          WHERE owner_key = $1 AND item_key = $2 AND EXISTS (SELECT 1 FROM target)
          RETURNING item_key`,
-        [ownerKey, itemKey],
+        [ownerKey, itemKey, slot],
       );
       markDatabaseOk();
       return result.rows.length > 0;
@@ -302,22 +326,28 @@ export class PostgresInventoryStore implements InventoryStore {
     }
   }
 
-  async unequip(ownerKey: string): Promise<boolean> {
+  async unequip(ownerKey: string, slot: EquipmentSlot): Promise<boolean> {
     assertUuidOwnerKey(ownerKey);
     const result = await this.query<{ item_key: string }>(
-      `UPDATE inventory_item SET equipped = false WHERE owner_key = $1 AND equipped = true RETURNING item_key`,
-      [ownerKey],
+      `UPDATE inventory_item SET equipped_slot = NULL WHERE owner_key = $1 AND equipped_slot = $2 RETURNING item_key`,
+      [ownerKey, slot],
     );
     return result.rows.length > 0;
   }
 
-  async getEquipped(ownerKey: string): Promise<string | null> {
+  async getEquippedSlots(ownerKey: string): Promise<Partial<Record<EquipmentSlot, string>>> {
     assertUuidOwnerKey(ownerKey);
-    const result = await this.query<{ item_key: string }>(
-      `SELECT item_key FROM inventory_item WHERE owner_key = $1 AND equipped = true`,
+    // One round trip for all eight slots (design §3, §4.3) — the same shape `list()` already has,
+    // just narrowed to the rows that are equipped at all.
+    const result = await this.query<{ item_key: string; equipped_slot: EquipmentSlot }>(
+      `SELECT item_key, equipped_slot FROM inventory_item WHERE owner_key = $1 AND equipped_slot IS NOT NULL`,
       [ownerKey],
     );
-    return result.rows[0]?.item_key ?? null;
+    const equipped: Partial<Record<EquipmentSlot, string>> = {};
+    for (const row of result.rows) {
+      equipped[row.equipped_slot] = row.item_key;
+    }
+    return equipped;
   }
 
   /**

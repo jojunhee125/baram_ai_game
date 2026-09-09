@@ -43,13 +43,25 @@ export const ITEM_DEFINITIONS: readonly ItemDefinition[] = [
   { key: "carrot", name: "당근", icon: "carrot" },
   { key: "copper-coin", name: "구리 동전", icon: "copper-coin" },
   { key: "herb", name: "약초", icon: "herb" },
-  { key: "old-dagger", name: "낡은 단검", icon: "old-dagger" },
+  // Promoted to a weapon-slot equipment item (design-phase-v-equipment-system.md §5.5): the `key`/
+  // `icon`/`name` are unchanged, so the Pass G swing visual keyed on `old-dagger` still applies —
+  // only the `equipment` field is new. Left without `possession: true`, unlike the design doc's
+  // §6.4 assumption ("old-dagger는 기존부터 이미 possession: true"): that premise does not match
+  // this table as shipped (Pass G never set it), and switching the loot-grant path from `add` to
+  // `grantOnce` here would be a real behaviour change to drop repeatability, not the field-shape
+  // migration `leather-armor` below is. Equip does not care about stack size either way.
+  {
+    key: "old-dagger",
+    name: "낡은 단검",
+    icon: "old-dagger",
+    equipment: { slot: "weapon", stats: { attackDamage: 2 } },
+  },
   { key: "entry-pass", name: "입장권", icon: "entry-pass", possession: true },
   {
     key: "leather-armor",
     name: "가죽 갑옷",
     icon: "leather-armor",
     possession: true,
-    equipment: { damageReductionRatio: 0.2 },
+    equipment: { slot: "armor", stats: { damageReduction: 0.2 } },
   },
 ];

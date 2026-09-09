@@ -8,6 +8,7 @@ import {
   PLAYER_ATTACK_DAMAGE,
   ServerMessage,
   type EquipmentChanged,
+  type EquipmentSlot,
   type ItemGranted,
   type JoinOptions,
   type RoomState,
@@ -56,7 +57,7 @@ describe("INDEPENDENT — Bug1: PostgresInventoryStore.equip() error discriminat
       throw Object.assign(new Error("connection terminated unexpectedly"), { code: "57P01" });
     });
     const store = new PostgresInventoryStore(pool);
-    await assert.rejects(() => store.equip(VALID_OWNER, "leather-armor"), /connection terminated/);
+    await assert.rejects(() => store.equip(VALID_OWNER, "leather-armor", "armor"), /connection terminated/);
     assert.equal(getDatabaseStatus(), "degraded", "a real fault must still surface as degraded");
   });
 
@@ -65,7 +66,7 @@ describe("INDEPENDENT — Bug1: PostgresInventoryStore.equip() error discriminat
       throw Object.assign(new Error("violates foreign key constraint"), { code: "23503" });
     });
     const store = new PostgresInventoryStore(pool);
-    await assert.rejects(() => store.equip(VALID_OWNER, "leather-armor"), /foreign key/);
+    await assert.rejects(() => store.equip(VALID_OWNER, "leather-armor", "armor"), /foreign key/);
     assert.equal(getDatabaseStatus(), "degraded");
   });
 
@@ -74,7 +75,7 @@ describe("INDEPENDENT — Bug1: PostgresInventoryStore.equip() error discriminat
       throw "socket hang up";
     });
     const store = new PostgresInventoryStore(pool);
-    await assert.rejects(() => store.equip(VALID_OWNER, "leather-armor"));
+    await assert.rejects(() => store.equip(VALID_OWNER, "leather-armor", "armor"));
     assert.equal(getDatabaseStatus(), "degraded");
   });
 
@@ -84,7 +85,7 @@ describe("INDEPENDENT — Bug1: PostgresInventoryStore.equip() error discriminat
       throw null;
     });
     const store = new PostgresInventoryStore(pool);
-    await assert.rejects(() => store.equip(VALID_OWNER, "leather-armor"));
+    await assert.rejects(() => store.equip(VALID_OWNER, "leather-armor", "armor"));
     assert.equal(getDatabaseStatus(), "degraded");
   });
 
@@ -93,7 +94,7 @@ describe("INDEPENDENT — Bug1: PostgresInventoryStore.equip() error discriminat
       throw Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" });
     });
     const store = new PostgresInventoryStore(pool);
-    const applied = await store.equip(VALID_OWNER, "leather-armor");
+    const applied = await store.equip(VALID_OWNER, "leather-armor", "armor");
     assert.equal(applied, false);
     assert.equal(getDatabaseStatus(), "ok", "a losing race is not a database fault");
   });
@@ -101,7 +102,7 @@ describe("INDEPENDENT — Bug1: PostgresInventoryStore.equip() error discriminat
   it("marks the database ok on a genuine success too, despite bypassing the shared query() helper", async () => {
     const pool = stubPool(() => ({ rows: [{ item_key: "leather-armor" }] }));
     const store = new PostgresInventoryStore(pool);
-    const applied = await store.equip(VALID_OWNER, "leather-armor");
+    const applied = await store.equip(VALID_OWNER, "leather-armor", "armor");
     assert.equal(applied, true);
     assert.equal(getDatabaseStatus(), "ok");
   });
@@ -113,7 +114,7 @@ describe("INDEPENDENT — Bug1: PostgresInventoryStore.equip() error discriminat
       throw Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" });
     });
     const store = new PostgresInventoryStore(pool);
-    await assert.rejects(() => store.unequip(VALID_OWNER));
+    await assert.rejects(() => store.unequip(VALID_OWNER, "armor"));
     assert.equal(
       getDatabaseStatus(),
       "degraded",
@@ -126,15 +127,15 @@ describe("INDEPENDENT — Bug2: InventoryStore.unequip() returns a real boolean,
   it("InMemoryInventoryStore.unequip answers true for the call that actually clears an equip, false after", async () => {
     const store = new InMemoryInventoryStore();
     await store.add(VALID_OWNER, "leather-armor", 1);
-    assert.equal(await store.equip(VALID_OWNER, "leather-armor"), true, "precondition: equip succeeded");
+    assert.equal(await store.equip(VALID_OWNER, "leather-armor", "armor"), true, "precondition: equip succeeded");
 
-    assert.equal(await store.unequip(VALID_OWNER), true, "the first unequip really did clear something");
-    assert.equal(await store.unequip(VALID_OWNER), false, "nothing was left to clear the second time");
+    assert.equal(await store.unequip(VALID_OWNER, "armor"), true, "the first unequip really did clear something");
+    assert.equal(await store.unequip(VALID_OWNER, "armor"), false, "nothing was left to clear the second time");
   });
 
   it("InMemoryInventoryStore.unequip answers false for an owner who was never equipped at all", async () => {
     const store = new InMemoryInventoryStore();
-    assert.equal(await store.unequip(randomUUID()), false);
+    assert.equal(await store.unequip(randomUUID(), "armor"), false);
   });
 });
 
@@ -152,9 +153,9 @@ describe("INDEPENDENT — Bug2: InventoryStore.unequip() returns a real boolean,
  */
 describe("INDEPENDENT — Bug3 consequence: a same-answer hydration must never cause a concurrently in-flight equip/unequip response to be dropped", () => {
   interface FakeSession {
-    equippedItemKey: string | null;
-    equipCacheVersion: number;
-    equipRequestPending: boolean;
+    equippedItemKeys: Partial<Record<EquipmentSlot, string>>;
+    equipCacheVersions: Record<EquipmentSlot, number>;
+    equipRequestPendingSlots: Set<EquipmentSlot>;
     lastMoveAt: number;
     lastAttackAt: number;
     hp: number;
@@ -196,9 +197,9 @@ describe("INDEPENDENT — Bug3 consequence: a same-answer hydration must never c
     return client.sent.filter((message) => message.type === type).map((message) => message.payload as T);
   }
 
-  /** Controls exactly two calls: the join-time `getEquipped` and one `equip`/`unequip` call. */
+  /** Controls exactly two calls: the join-time `getEquippedSlots` and one `equip`/`unequip` call. */
   class ControlledStore implements InventoryStore {
-    private getEquippedResolve: ((value: string | null) => void) | undefined;
+    private getEquippedSlotsResolve: ((value: Partial<Record<EquipmentSlot, string>>) => void) | undefined;
     private equipResolve: ((value: boolean) => void) | undefined;
     private unequipResolve: ((value: boolean) => void) | undefined;
 
@@ -211,9 +212,9 @@ describe("INDEPENDENT — Bug3 consequence: a same-answer hydration must never c
     grantOnce(): Promise<boolean> {
       return Promise.resolve(false);
     }
-    getEquipped(): Promise<string | null> {
+    getEquippedSlots(): Promise<Partial<Record<EquipmentSlot, string>>> {
       return new Promise((resolve) => {
-        this.getEquippedResolve = resolve;
+        this.getEquippedSlotsResolve = resolve;
       });
     }
     equip(): Promise<boolean> {
@@ -226,9 +227,10 @@ describe("INDEPENDENT — Bug3 consequence: a same-answer hydration must never c
         this.unequipResolve = resolve;
       });
     }
+    /** Every test in this suite equips only the armor slot, so `null` means "no slots equipped". */
     settleGetEquipped(value: string | null): void {
-      assert.ok(this.getEquippedResolve, "getEquipped was never called");
-      this.getEquippedResolve(value);
+      assert.ok(this.getEquippedSlotsResolve, "getEquippedSlots was never called");
+      this.getEquippedSlotsResolve(value === null ? {} : { armor: value });
     }
     settleEquip(value: boolean): void {
       assert.ok(this.equipResolve, "equip was never called");
@@ -309,14 +311,14 @@ describe("INDEPENDENT — Bug3 consequence: a same-answer hydration must never c
     const store = new ControlledStore();
     const room = await createRoom(store);
     try {
-      // onJoin fires hydrateEquipmentCache's getEquipped call; the session cache starts at null.
+      // onJoin fires hydrateEquipmentCache's getEquippedSlots call; the session cache starts empty.
       const client = join(room, "s1", "sso-bug3-a");
 
       // A client message arrives before the hydration answers — same session, ordinary timing.
-      room["handleEquipItem"](asRoomClient(client), { itemKey: "leather-armor" });
+      room["handleEquipItem"](asRoomClient(client), { itemKey: "leather-armor", slot: "armor" });
 
       // The hydration resolves first, with the answer that matches what the cache already holds
-      // (null): the single most common case, since most sessions equipped nothing last visit.
+      // (empty): the single most common case, since most sessions equipped nothing last visit.
       store.settleGetEquipped(null);
       await flush();
 
@@ -325,13 +327,13 @@ describe("INDEPENDENT — Bug3 consequence: a same-answer hydration must never c
       await flush();
 
       assert.equal(
-        client.userData?.equippedItemKey,
+        client.userData?.equippedItemKeys.armor,
         "leather-armor",
         "the equip must still have been applied to the cache",
       );
       assert.deepEqual(
         sentOfType<EquipmentChanged>(client, ServerMessage.EquipmentChanged),
-        [{ itemKey: "leather-armor", applied: true }],
+        [{ slot: "armor", itemKey: "leather-armor", applied: true }],
         "an unconditional-bump hydration would have made this equip's own version check fail, " +
           "dropping the response entirely — the client would see nothing at all for a request " +
           "that actually succeeded",
@@ -347,7 +349,7 @@ describe("INDEPENDENT — Bug3 consequence: a same-answer hydration must never c
     try {
       const client = join(room, "s1", "sso-bug3-b");
 
-      room["handleUnequipItem"](asRoomClient(client));
+      room["handleUnequipItem"](asRoomClient(client), { slot: "armor" });
 
       store.settleGetEquipped(null);
       await flush();
@@ -355,10 +357,10 @@ describe("INDEPENDENT — Bug3 consequence: a same-answer hydration must never c
       store.settleUnequip(true);
       await flush();
 
-      assert.equal(client.userData?.equippedItemKey, null);
+      assert.equal(client.userData?.equippedItemKeys.armor, undefined);
       assert.deepEqual(
         sentOfType<EquipmentChanged>(client, ServerMessage.EquipmentChanged),
-        [{ itemKey: null, applied: true }],
+        [{ slot: "armor", itemKey: null, applied: true }],
         "same regression, on the unequip path that shares settleEquipRequest",
       );
     } finally {
@@ -375,9 +377,9 @@ describe("INDEPENDENT — Bug3 consequence: a same-answer hydration must never c
     try {
       const client = join(room, "s1", "sso-bug3-c");
 
-      room["handleEquipItem"](asRoomClient(client), { itemKey: "leather-armor" });
+      room["handleEquipItem"](asRoomClient(client), { itemKey: "leather-armor", slot: "armor" });
 
-      // This time the hydration's answer genuinely differs from the null the cache started at —
+      // This time the hydration's answer genuinely differs from the empty cache it started at —
       // a sibling tab equipped something in an earlier visit that this session never learned of.
       store.settleGetEquipped("old-dagger");
       await flush();
@@ -388,7 +390,7 @@ describe("INDEPENDENT — Bug3 consequence: a same-answer hydration must never c
       await flush();
 
       assert.equal(
-        client.userData?.equippedItemKey,
+        client.userData?.equippedItemKeys.armor,
         "old-dagger",
         "the changed hydration answer must win here — this is real Bug3 protection, not a bypass",
       );
@@ -414,7 +416,7 @@ describe("INDEPENDENT — Bug4 over a real socket: ItemGranted.damageReductionRa
   const PLAIN_MONSTER = { tileX: OPEN_CENTRE.tileX, tileY: OPEN_CENTRE.tileY + 6 };
 
   const LEATHER_ARMOR_REDUCTION = ITEM_DEFINITIONS.find((item) => item.key === "leather-armor")?.equipment
-    ?.damageReductionRatio;
+    ?.stats.damageReduction;
   assert.equal(LEATHER_ARMOR_REDUCTION, 0.2, "precondition: this file's assertion assumes the catalogue's own ratio");
 
   const WIRE_FIXTURE_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([

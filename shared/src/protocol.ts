@@ -80,9 +80,39 @@ export interface QuizAnswerRequest {
   choiceIndex: number;
 }
 
-/** Names the item to equip. An unknown key, or one with no `equipment` stats, is ignored. */
+/**
+ * The eight equipment slots (design-phase-v-equipment-system.md §1.1). `Ring1`/`Ring2` are two
+ * concrete slots of the same "ring" family (§1.3) — a request names the concrete slot it wants,
+ * never just "a ring", so a client with two rings never leaves the server to guess which one it
+ * meant.
+ */
+export const EquipmentSlot = {
+  Armor: "armor",
+  Helmet: "helmet",
+  Ring1: "ring1",
+  Ring2: "ring2",
+  Necklace: "necklace",
+  Shoes: "shoes",
+  Weapon: "weapon",
+  Cloak: "cloak",
+} as const;
+export type EquipmentSlot = (typeof EquipmentSlot)[keyof typeof EquipmentSlot];
+
+/** Every concrete slot, in the order `EquipmentSlot` declares them. */
+export const EQUIPMENT_SLOTS: readonly EquipmentSlot[] = Object.values(EquipmentSlot);
+
+/**
+ * Names the item to equip and the slot to put it in. An unknown key, one with no `equipment`
+ * stats, or a slot whose family does not match the item's (design §1.3) is ignored.
+ */
 export interface EquipItemRequest {
   itemKey: string;
+  slot: EquipmentSlot;
+}
+
+/** Names the slot to clear. A slot that is already empty is a no-op (`applied: false`), not an error. */
+export interface UnequipItemRequest {
+  slot: EquipmentSlot;
 }
 
 /**
@@ -122,8 +152,7 @@ export interface ClientMessagePayload {
    */
   [ClientMessage.Attack]: undefined;
   [ClientMessage.EquipItem]: EquipItemRequest;
-  /** No payload: there is at most one equipped item, so there is nothing to name. */
-  [ClientMessage.UnequipItem]: undefined;
+  [ClientMessage.UnequipItem]: UnequipItemRequest;
   [ClientMessage.ChangeSkin]: ChangeSkinRequest;
   [ClientMessage.WarpToLandmark]: WarpToLandmarkRequest;
 }
@@ -397,7 +426,9 @@ export interface ItemGranted {
  * same rule as {@link PlayerHit}: what somebody else has equipped is their own business.
  */
 export interface EquipmentChanged {
-  /** What is equipped after this request, or null if nothing is. */
+  /** Which of the eight slots this verdict is about. */
+  slot: EquipmentSlot;
+  /** What is equipped in `slot` after this request, or null if nothing is. */
   itemKey: string | null;
   /**
    * False when an equip named an item the account does not hold, or lost a same-account,

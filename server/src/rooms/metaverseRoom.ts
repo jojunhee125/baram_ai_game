@@ -9,6 +9,8 @@ import {
   COMBAT_RECOVERY_HP_PER_TICK,
   ClientMessage,
   Direction,
+  EQUIPMENT_SLOTS,
+  EquipmentSlot,
   HOME_COOLDOWN_MS,
   InteractableKind,
   InteractableMarker,
@@ -44,6 +46,7 @@ import {
   type QuizResult,
   type Teleported,
   type TilePosition,
+  type UnequipItemRequest,
   type WarpToLandmarkRequest,
 } from "@zep-test/shared";
 import type { InventoryStore } from "../db/inventoryStore";
@@ -74,6 +77,7 @@ import type {
   RoomCreateOptions,
   SpawnArea,
 } from "./contracts";
+import { slotFamily } from "./contracts";
 import { INTERACTABLE_DEFINITIONS } from "./interactableDefinitions";
 import { ITEM_DEFINITIONS } from "./itemDefinitions";
 import { LANDMARK_DEFINITIONS } from "./landmarkDefinitions";
@@ -273,8 +277,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.onMessage(ClientMessage.EquipItem, (client: RoomClient, message: EquipItemRequest) => {
       this.handleEquipItem(client, message);
     });
-    this.onMessage(ClientMessage.UnequipItem, (client: RoomClient) => {
-      this.handleUnequipItem(client);
+    this.onMessage(ClientMessage.UnequipItem, (client: RoomClient, message: UnequipItemRequest) => {
+      this.handleUnequipItem(client, message);
     });
     this.onMessage(ClientMessage.ChangeSkin, (client: RoomClient, message: ChangeSkinRequest) => {
       this.handleChangeSkin(client, message);
@@ -455,9 +459,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       ownedPossessionKeys: new Set(),
       confirmedPossessionKeys: new Set(),
       pendingPossessionGrants: new Map(),
-      equippedItemKey: null,
-      equipCacheVersion: 0,
-      equipRequestPending: false,
+      equippedItemKeys: {},
+      equipCacheVersions: initialEquipCacheVersions(),
+      equipRequestPendingSlots: new Set(),
     };
     client.view = new StateView();
     this.viewedBySession.set(client.sessionId, new Set());
@@ -475,10 +479,11 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     if (this.gatedItemKeys.size > 0 && this.inventoryStore !== null) {
       void this.hydratePossessionCache(client.sessionId, ownerKey);
     }
-    // Same reasoning as the possession gate above: equippedItemKey is only ever read by
-    // damagePlayer, which never runs outside a hasMonsters room, so hydrating it in grand-plaza
-    // is a pure-waste DB round trip on the 500 CCU join path (PoC #2). Equip/unequip itself
-    // still works in any room — that path writes the cache directly, it never depends on hydration.
+    // Same reasoning as the possession gate above: equippedItemKeys is only ever read by
+    // damagePlayer/handleAttack, neither of which ever runs outside a hasMonsters room, so
+    // hydrating it in grand-plaza is a pure-waste DB round trip on the 500 CCU join path (PoC #2).
+    // Equip/unequip itself still works in any room — that path writes the cache directly, it
+    // never depends on hydration.
     if (this.hasMonsters && this.inventoryStore !== null) {
       void this.hydrateEquipmentCache(client.sessionId, ownerKey);
     }
@@ -534,15 +539,18 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   }
 
   /**
-   * Fills a freshly joined session's {@link PlayerSession.equippedItemKey} from the store — the
-   * one-time catch-up read for an item equipped in an earlier room visit. Never awaited by its
-   * caller, for {@link hydratePossessionCache}'s reason.
+   * Fills a freshly joined session's {@link PlayerSession.equippedItemKeys} from the store, all
+   * eight slots in one round trip (`getEquippedSlots`, design §3, §4.3) — the one-time catch-up
+   * read for whatever was equipped in an earlier room visit. Never awaited by its caller, for
+   * {@link hydratePossessionCache}'s reason.
    *
-   * Guarded by `equipCacheVersion` rather than only by the session still existing: an equip or
-   * unequip request issued right after join can resolve before this read does, and that request
-   * is the newer, more specific action — this stale answer must not overwrite it. The compare is
-   * enough on its own, whichever of the two actually resolves first, because a request that wins
-   * the race always bumps the version itself (see {@link handleEquipItem}).
+   * Guarded by `equipCacheVersions`, per slot, rather than only by the session still existing: an
+   * equip or unequip request issued right after join can resolve before this read does, and that
+   * request is the newer, more specific action for *its* slot — this stale answer must not
+   * overwrite it. Comparing per slot rather than as one shared version is what lets a request on
+   * one slot win while this hydration still applies its answer to every other slot normally
+   * (design §4.2) — a shared counter would have let that request's resolution invalidate the
+   * other seven slots' hydration too, for no reason at all.
    */
   private async hydrateEquipmentCache(sessionId: string, ownerKey: string): Promise<void> {
     const store = this.inventoryStore;
@@ -553,21 +561,33 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     if (!session) {
       return;
     }
-    const versionAtStart = session.equipCacheVersion;
-    const equipped = await store.getEquipped(ownerKey);
+    const versionsAtStart = { ...session.equipCacheVersions };
+    const equipped = await store.getEquippedSlots(ownerKey);
     const current = this.clientsBySession.get(sessionId)?.userData;
-    if (!current || current.equipCacheVersion !== versionAtStart) {
+    if (!current) {
       return;
     }
-    // Bumped only when this actually changes the cache — matching `equipCacheVersion`'s own doc
-    // comment ("bumped by every write that actually changes the cache") literally, rather than
-    // unconditionally on every hydration: an unconditional bump would let a same-answer hydration
-    // (the common case — nothing has happened between join and this read resolving) invalidate a
-    // same-session equip/unequip request that is still in flight for no reason at all, since that
-    // request's own `versionAtStart` was captured before this hydration started.
-    if (current.equippedItemKey !== equipped) {
-      current.equippedItemKey = equipped;
-      current.equipCacheVersion += 1;
+    for (const slot of EQUIPMENT_SLOTS) {
+      if (current.equipCacheVersions[slot] !== versionsAtStart[slot]) {
+        // A newer write for this slot already landed; its answer stands, same as `handleEquip
+        // Item`'s own compare.
+        continue;
+      }
+      const itemKey = equipped[slot];
+      // Bumped only when this actually changes the cache — matching `equipCacheVersions`'s own
+      // doc comment ("bumped by every write that actually changes the cache") literally, rather
+      // than unconditionally on every hydration: an unconditional bump would let a same-answer
+      // hydration (the common case — nothing has happened between join and this read resolving)
+      // invalidate a same-slot equip/unequip request that is still in flight for no reason at all,
+      // since that request's own `versionAtStart` was captured before this hydration started.
+      if (current.equippedItemKeys[slot] !== itemKey) {
+        if (itemKey === undefined) {
+          delete current.equippedItemKeys[slot];
+        } else {
+          current.equippedItemKeys[slot] = itemKey;
+        }
+        current.equipCacheVersions[slot] += 1;
+      }
     }
   }
 
@@ -846,6 +866,26 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   }
 
   /**
+   * `PLAYER_ATTACK_DAMAGE` plus every equipped item's `stats.attackDamage`, summed across whichever
+   * slots happen to carry that axis (design §5.1, §5.5 — today only the weapon slot's `old-dagger`,
+   * but the loop costs nothing extra the day a ring picks up the same axis). Looked up by key on
+   * every swing rather than cached, `damagePlayer`'s own reasoning: `ITEM_DEFINITIONS` is a handful
+   * of rows and `equippedItemKeys` is the hot value.
+   */
+  private equippedAttackDamage(session: PlayerSession): number {
+    let bonus = 0;
+    for (const slot of EQUIPMENT_SLOTS) {
+      const itemKey = session.equippedItemKeys[slot];
+      if (itemKey === undefined) {
+        continue;
+      }
+      const definition = ITEM_DEFINITIONS.find((item) => item.key === itemKey);
+      bonus += definition?.equipment?.stats.attackDamage ?? 0;
+    }
+    return PLAYER_ATTACK_DAMAGE + bonus;
+  }
+
+  /**
    * One swing. The client names no target: the server picks what the blow lands on from the
    * attacker's own position and facing, so a monster that is not there cannot be named.
    *
@@ -885,7 +925,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       return;
     }
 
-    runtime.hp -= PLAYER_ATTACK_DAMAGE;
+    const damage = this.equippedAttackDamage(session);
+    runtime.hp -= damage;
     // Overwritten on every hit, not only the killing one: the last person to connect is who the
     // drops belong to, and holding the account as well as the session is what makes the grant
     // survive them walking out of the room before it lands.
@@ -896,7 +937,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     const hit: MonsterHit = {
       monsterId,
       bySessionId: client.sessionId,
-      damage: PLAYER_ATTACK_DAMAGE,
+      damage,
       hpRemaining,
       hpMax: runtime.type.maxHp,
     };
@@ -964,35 +1005,55 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
 
   /**
    * One equip request. Ignored outright — no store call, no `EquipmentChanged` — for a request
-   * naming no equipment item at all (an unknown key, or one that is not `equipment`): unlike a
-   * held-or-not question, that is not something the store has any way to answer.
+   * naming no equipment item at all (an unknown key, one that is not `equipment`, or a slot whose
+   * family does not match the item's, design §1.3): unlike a held-or-not question, that is not
+   * something the store has any way to answer.
    */
   private handleEquipItem(client: RoomClient, message: EquipItemRequest): void {
     const session = client.userData;
-    if (!session || this.inventoryStore === null || session.equipRequestPending) {
+    if (!session || this.inventoryStore === null) {
       return;
     }
     const itemKey = message?.itemKey;
-    if (typeof itemKey !== "string") {
+    const slot = message?.slot;
+    if (typeof itemKey !== "string" || !isEquipmentSlot(slot) || session.equipRequestPendingSlots.has(slot)) {
       return;
     }
     const definition = ITEM_DEFINITIONS.find((item) => item.key === itemKey);
-    if (definition === undefined || definition.equipment === undefined) {
+    if (
+      definition === undefined ||
+      definition.equipment === undefined ||
+      definition.equipment.slot !== slotFamily(slot)
+    ) {
       return;
     }
-    void this.settleEquipRequest(client, () => this.inventoryStore!.equip(this.equipOwnerKey(client), itemKey), itemKey);
+    void this.settleEquipRequest(
+      client,
+      slot,
+      () => this.inventoryStore!.equip(this.equipOwnerKey(client), itemKey, slot),
+      itemKey,
+    );
   }
 
-  private handleUnequipItem(client: RoomClient): void {
+  private handleUnequipItem(client: RoomClient, message: UnequipItemRequest): void {
     const session = client.userData;
-    if (!session || this.inventoryStore === null || session.equipRequestPending) {
+    if (!session || this.inventoryStore === null) {
+      return;
+    }
+    const slot = message?.slot;
+    if (!isEquipmentSlot(slot) || session.equipRequestPendingSlots.has(slot)) {
       return;
     }
     // Whether this un-equips anything at all is the store's own answer, not the session's cache
     // of what it was before the call: that cache can already be stale (a sibling session's equip
     // the store has recorded but this session's own cache has no way to have learned about), and
     // reporting `applied` off it would tell a client nothing changed when the store just did.
-    void this.settleEquipRequest(client, () => this.inventoryStore!.unequip(this.equipOwnerKey(client)), null);
+    void this.settleEquipRequest(
+      client,
+      slot,
+      () => this.inventoryStore!.unequip(this.equipOwnerKey(client), slot),
+      null,
+    );
   }
 
   private equipOwnerKey(client: RoomClient): string {
@@ -1018,19 +1079,22 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
 
   /**
    * Shared tail of {@link handleEquipItem} and {@link handleUnequipItem}: run one store call, then
-   * decide whether its answer is still the newest thing to have happened to this session.
+   * decide whether its answer is still the newest thing to have happened to this session's `slot`.
    *
    * `applyTo` is what the cache becomes on a change — the item just equipped, or null for an
    * unequip — supplied by the caller rather than re-derived here, because only the caller knows
    * which of the two requests this is.
    *
-   * `equipRequestPending` only saves a duplicate request its own round trip; correctness comes
-   * entirely from the `equipCacheVersion` compare below, which is what lets a slower, still-in-
-   * flight `hydrateEquipmentCache` or a second overlapping request lose without corrupting the
-   * cache — the same discipline `settlePossessionGrant` applies to possession grants.
+   * `equipRequestPendingSlots` only saves a duplicate request its own round trip; correctness
+   * comes entirely from the `equipCacheVersions[slot]` compare below, which is what lets a slower,
+   * still-in-flight `hydrateEquipmentCache` or a second overlapping request on the *same* slot
+   * lose without corrupting the cache — the same discipline `settlePossessionGrant` applies to
+   * possession grants. A request on a *different* slot never reaches this compare at all, since it
+   * runs its own, independent call to this same method (design §4.2).
    */
   private async settleEquipRequest(
     client: RoomClient,
+    slot: EquipmentSlot,
     run: () => Promise<boolean>,
     applyTo: string | null,
   ): Promise<void> {
@@ -1038,8 +1102,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     if (!session) {
       return;
     }
-    session.equipRequestPending = true;
-    const versionAtStart = session.equipCacheVersion;
+    session.equipRequestPendingSlots.add(slot);
+    const versionAtStart = session.equipCacheVersions[slot];
 
     let applied: boolean;
     try {
@@ -1048,7 +1112,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       console.warn(`[zep-test] could not update equipment for ${this.equipOwnerKey(client)}`, cause);
       const current = this.clientsBySession.get(client.sessionId)?.userData;
       if (current) {
-        current.equipRequestPending = false;
+        current.equipRequestPendingSlots.delete(slot);
       }
       return;
     }
@@ -1059,18 +1123,23 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     if (!current) {
       return;
     }
-    current.equipRequestPending = false;
-    if (current.equipCacheVersion !== versionAtStart) {
-      // A newer write already landed while this one was in flight; that one's answer stands, and
-      // this one's is neither applied nor announced.
+    current.equipRequestPendingSlots.delete(slot);
+    if (current.equipCacheVersions[slot] !== versionAtStart) {
+      // A newer write for this slot already landed while this one was in flight; that one's
+      // answer stands, and this one's is neither applied nor announced.
       return;
     }
     if (applied) {
-      current.equippedItemKey = applyTo;
-      current.equipCacheVersion += 1;
+      if (applyTo === null) {
+        delete current.equippedItemKeys[slot];
+      } else {
+        current.equippedItemKeys[slot] = applyTo;
+      }
+      current.equipCacheVersions[slot] += 1;
     }
     this.clientsBySession.get(client.sessionId)?.send(ServerMessage.EquipmentChanged, {
-      itemKey: current.equippedItemKey,
+      slot,
+      itemKey: current.equippedItemKeys[slot] ?? null,
       applied,
     } satisfies EquipmentChanged);
   }
@@ -1185,7 +1254,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         // Present only for an equipment item, same as `GET /api/inventory` — without it, the row
         // this grant builds (`InventoryPanel.buildRow`) has no equip button until the bag is
         // closed and reopened, since that button is gated on this field being defined.
-        damageReductionRatio: definition.equipment?.damageReductionRatio,
+        damageReductionRatio: definition.equipment?.stats.damageReduction,
       } satisfies ItemGranted);
     }
   }
@@ -1536,6 +1605,30 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   }
 
   /**
+   * Every equipped slot's `stats.damageReduction`, combined multiplicatively (design §5.4:
+   * `1 - Π(1-rᵢ)`) rather than summed — a plain sum of several slots' ratios can exceed 1.0 and
+   * make the wearer literally unkillable, the exact state `damagePlayer`'s own floor-to-1 guard
+   * below exists to prevent for a *single* slot. Each `rᵢ < 1` keeps the combined result `< 1` too,
+   * however many slots contribute, so armor/helmet/cloak can share this one pool safely once any
+   * of them actually carries the axis (today, only `leather-armor`'s armor slot does).
+   */
+  private equippedDamageReduction(session: PlayerSession): number {
+    let remainingFraction = 1;
+    for (const slot of EQUIPMENT_SLOTS) {
+      const itemKey = session.equippedItemKeys[slot];
+      if (itemKey === undefined) {
+        continue;
+      }
+      const definition = ITEM_DEFINITIONS.find((item) => item.key === itemKey);
+      const ratio = definition?.equipment?.stats.damageReduction;
+      if (ratio !== undefined) {
+        remainingFraction *= 1 - ratio;
+      }
+    }
+    return 1 - remainingFraction;
+  }
+
+  /**
    * One monster's blow landing on one player.
    *
    * The number goes to the victim and to nobody else — the discipline that kept monster health
@@ -1550,14 +1643,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       return;
     }
 
-    // The reduction, if any, is looked up by key on every hit rather than cached alongside it:
-    // `session.equippedItemKey` is the hot value and `ITEM_DEFINITIONS` is a handful of rows, so
-    // this `find` costs nothing a second cache would be worth carrying.
-    const equippedDefinition =
-      session.equippedItemKey === null
-        ? undefined
-        : ITEM_DEFINITIONS.find((item) => item.key === session.equippedItemKey);
-    const reduction = equippedDefinition?.equipment?.damageReductionRatio ?? 0;
+    const reduction = this.equippedDamageReduction(session);
     // Floored rather than rounded, and never below 1: a hit that reduces to nothing would make an
     // equipped player literally unkillable, which is a different feature than "hits less hard".
     const appliedDamage = reduction > 0 ? Math.max(1, Math.floor(damage * (1 - reduction))) : damage;
@@ -1812,4 +1898,17 @@ function normalizeAvatarSkin(avatarSkin: unknown): number {
     return 0;
   }
   return avatarSkin >= 0 && avatarSkin < AVATAR_SKIN_COUNT ? avatarSkin : 0;
+}
+
+/** Narrows an untrusted wire value to one of the eight known slots, same treatment `isDirection` gives a move. */
+function isEquipmentSlot(value: unknown): value is EquipmentSlot {
+  return typeof value === "string" && (EQUIPMENT_SLOTS as readonly string[]).includes(value);
+}
+
+/** Every slot's optimistic-concurrency counter, starting at 0 (design §1.2) — built with `.reduce` rather than eight literal fields, so a ninth slot would never need this touched. */
+function initialEquipCacheVersions(): Record<EquipmentSlot, number> {
+  return EQUIPMENT_SLOTS.reduce(
+    (versions, slot) => ({ ...versions, [slot]: 0 }),
+    {} as Record<EquipmentSlot, number>,
+  );
 }
