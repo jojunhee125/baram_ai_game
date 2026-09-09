@@ -311,7 +311,7 @@ const base = (skin * 4 + direction) * 3;
 
 ## sprites/monster.png
 
-- **96 x 256 px**, frame **32 x 32**, `margin 0` / `spacing 0` → 3 columns x 8 rows = 24 frames
+- **96 x 512 px**, frame **32 x 32**, `margin 0` / `spacing 0` → 3 columns x 16 rows = 48 frames, **4종**(Phase S가 사슴 추가로 24→32프레임, Phase I이 보스 추가로 32→48프레임으로 두 차례 확장됨)
 - 행 배치: **`row = kindIndex * 4 + direction`** — `avatar.png`와 **글자 그대로 같은 규약**이다. 그래서 `client/src/world/monsterSprites.ts`가 `playerSprites.ts`의 프레임 계산식을 `skin` → `kindIndex` 치환만으로 그대로 쓴다.
   - `direction`: shared `Direction` enum 값 그대로 — `Down 0, Left 1, Right 2, Up 3`
 - 열 배치: **`0` = stepA, `1` = idle, `2` = stepB** (아바타와 동일)
@@ -319,8 +319,10 @@ const base = (skin * 4 + direction) * 3;
 
 | kindIndex | kind | 행 | idle 프레임(Down/Left/Right/Up) | 아트 |
 |---|---|---|---|---|
-| 0 | `squirrel` | 0–3 | 1 / 4 / 7 / 10 | 주황빛 갈색 다람쥐. 등 뒤로 크게 말려 올라간 꼬리 + 작고 둥근 귀. 보행 = 웅크림/직립/홉, 방향은 눈 위치(Up은 눈 없음) |
-| 1 | `rabbit` | 4–7 | 13 / 16 / 19 / 22 | 흰색/크림색 토끼. 머리 위로 곧게 솟은 긴 귀 + 작고 동그란 꼬리. 보행 = 웅크림/직립/홉, 방향은 눈 위치(Up은 눈 없음) |
+| 0 | `squirrel` | 0–3 | 1 / 4 / 7 / 10 | 주황빛 갈색 다람쥐(`#c97c3f`). 등 뒤로 크게 말려 올라간 꼬리 + 작고 둥근 귀. 보행 = 웅크림/직립/홉, 방향은 눈 위치(Up은 눈 없음) |
+| 1 | `rabbit` | 4–7 | 13 / 16 / 19 / 22 | 흰색/크림색 토끼(`#f5f0e6`). 머리 위로 곧게 솟은 긴 귀 + 작고 동그란 꼬리. 보행 = 웅크림/직립/홉, 방향은 눈 위치(Up은 눈 없음) |
+| 2 | `deer` | 8–11 | 25 / 28 / 31 / 34 | 갈색 사슴(`#8a5a34`, Phase S). 실루엣의 핵심은 두 갈래 뿔(다람쥐의 작고 둥근 귀·토끼의 길고 곧은 귀보다 확실히 큰 특징) + 다른 두 종보다 크고 좁은 몸통(최대 폭 10–12px, 토끼는 14–16px). 보행 = 방목(뿔 낮춤+몸 최대폭)/직립/홉(뿔 벌림+몸 최대로 좁고 높음) |
+| 3 | `boss` | 12–15 | 37 / 40 / 43 / 46 | 슬레이트색(`#5b5566`/`#3d3946`, Phase I) — 시트에서 유일한 차가운 팔레트, 나머지 3종(전부 따뜻한 갈색·흰색)과 색만으로 즉시 구분됨. 2×2 적색 눈(`monsterHealthBars.ts`의 `BAR_FILL`과 동일 색), 셀 경계에서 1px 여유를 둔 긴 창백한 뿔. 실루엣은 "작은 머리 → 어두운 어깨 띠 → 넓은 몸통"(동물 3종은 전부 "귀 달린 둥근 덩어리 하나") |
 
 ```ts
 const base = (kindIndex * 4 + direction) * 3;
@@ -328,16 +330,17 @@ const base = (kindIndex * 4 + direction) * 3;
 // walk  = [base, base + 1, base + 2, base + 1]  (loop)
 ```
 
-**`kindIndex`는 선언 순서에 의존하지 않는다.** 정본은 `client/src/world/monsterSprites.ts`의 `MONSTER_SPRITE_ORDER`이고 생성기가 그 배열을 읽어 대조한다(위 "몬스터 + 아이템 아이콘" 항목). **재정렬 금지** — 순서를 바꾸면 다람쥐가 토끼 프레임을 그린다.
+**`kindIndex`는 선언 순서에 의존하지 않는다.** 정본은 `client/src/world/monsterSprites.ts`의 `MONSTER_SPRITE_ORDER`이고 생성기가 그 배열을 읽어 대조한다(위 "몬스터 + 아이템 아이콘" 항목). **재정렬 금지** — 순서를 바꾸면 다른 종의 프레임을 그린다.
 
-- 두 종 모두 지상형이다: 바닥 접지(프레임 아래 여백 없음)이고, 몸통은 4방향 행 전부에 동일하게 그려지며 얼굴만 방향별로 다르다. 아바타와 같은 관례라 **말풍선·이름표 오프셋과 무관하다** — 몬스터에는 둘 다 붙지 않는다.
-- 사람과 혼동되지 않는 실루엣이 이 두 종을 고른 이유다(설계 부록 D-1). 공격 대상을 서버가 자동 선정하므로 "저게 때릴 수 있는 것인가"가 한눈에 보여야 한다. 귀 모양·크기(다람쥐=작고 둥근, 토끼=길고 곧음)와 꼬리 위치(다람쥐=등 위로 크게, 토끼=뒤쪽에 살짝)가 두 종을 구분하는 핵심이다.
+- 4종 전부 지상형이다: 바닥 접지(프레임 아래 여백 없음)이고, 몸통은 4방향 행 전부에 동일하게 그려지며 얼굴만 방향별로 다르다. 아바타와 같은 관례라 **말풍선·이름표 오프셋과 무관하다** — 몬스터에는 둘 다 붙지 않는다.
+- 사람과 혼동되지 않는 실루엣이 처음 두 종을 고른 이유다(설계 부록 D-1). 공격 대상을 서버가 자동 선정하므로 "저게 때릴 수 있는 것인가"가 한눈에 보여야 한다. 귀/뿔 모양·크기와 꼬리 위치가 종을 구분하는 핵심이고, 보스는 아예 다른 팔레트로 한 단계 더 구분된다.
 
 ## sprites/items.png
 
-- **160 x 32 px**, frame **32 x 32**, `margin 0` / `spacing 0` → 5 columns x 1 row = 5 frames
+- **256 x 32 px**, frame **32 x 32**, `margin 0` / `spacing 0` → 8 columns x 1 row = 8 frames
 - 열 배치: `frameIndex = ITEM_ICON_ORDER.indexOf(definition.icon)`
-- 스프라이트시트가 아니라 **DOM 배경 이미지**로 쓰인다(`client/src/style.css`의 `.bag__icon`, `background-position`으로 열 선택). 가방 창이 DOM이라 Phaser 로더를 타지 않는다
+- 가방 창은 스프라이트시트가 아니라 **DOM 배경 이미지**로 쓴다(`client/src/style.css`의 `.bag__icon`, `background-position`으로 열 선택). 가방 창이 DOM이라 Phaser 로더를 타지 않는다. **시트 전체 폭(`background-size`)은 CSS에 없다** — `applyItemIcon`이 `ITEM_ICON_ORDER.length`로 계산해 인라인으로 넣는다(CSS에 박아두면 열이 늘 때 시트 전체가 축소되고 모든 아이콘이 이웃 그림을 물고 그려진다)
+- 무기 스윙 오버레이(`client/src/world/weaponVisual.ts`)는 같은 파일을 Phaser 스프라이트시트로 한 번 더 읽는다. 이쪽은 프레임 단위라 열 수가 늘어도 손댈 곳이 없다
 
 | frame | icon | 아트 |
 |---|---|---|
@@ -346,8 +349,13 @@ const base = (kindIndex * 4 + direction) * 3;
 | 2 | `copper-coin` | 구리 동전 |
 | 3 | `herb` | 약초 |
 | 4 | `old-dagger` | 낡은 단검 |
+| 5 | `entry-pass` | 입장권(황금 테두리 흰 카드) |
+| 6 | `leather-armor` | 가죽 갑옷(깃 + 흉갑 + 어깨끈) |
+| 7 | `golden-helmet` | 황금투구(정수리 장식 + 2행 시야구멍 + 벌어진 챙) |
 
-정본은 `client/src/ui/inventoryPanel.ts`의 `ITEM_ICON_ORDER`이고 생성기가 대조한다. `ItemDefinition.icon`이 이 목록에 없는 값이면 가방 창은 **빈 슬롯(점선 테두리)** 을 그린다 — 서버 카탈로그가 번들보다 새로울 수 있으므로 다른 아이템 그림을 대신 쓰지 않는다.
+정본은 `client/src/ui/inventoryPanel.ts`의 `ITEM_ICON_ORDER`이고 생성기가 대조한다. **추가는 항상 말미에** — 프레임 번호가 배열 위치라서 중간에 끼우면 뒤 아이템 전부가 다른 그림을 그린다.
+
+`ItemDefinition.icon`이 이 목록에 없는 값이면 가방 창은 **빈 슬롯(점선 테두리)** 을 그린다 — 서버 카탈로그가 번들보다 새로울 수 있으므로 다른 아이템 그림을 대신 쓰지 않는다. 이 폴백은 구버전 번들을 위한 것이고, **같이 배포되는 서버·클라이언트가 어긋난 상태는 버그다**(Phase I `golden-helmet`이 이 표에 빠진 채로 배포 직전까지 갔다). `server/src/game/items.test.ts`의 "against the client's mirror tables"가 세 가지를 막는다: `ITEM_DEFINITIONS`의 모든 `icon`이 `ITEM_ICON_ORDER`에 있는지, 장비 아이템마다 `EQUIPMENT_ITEM_SLOTS` 항목이 있는지(없으면 장착 버튼이 안 생겨 못 입는다), 그리고 이 PNG의 실제 폭이 열 수와 맞는지(생성기를 다시 안 돌린 경우).
 
 ## 뷰포트 / 카메라 설정값
 

@@ -440,6 +440,91 @@ body {
 }
 
 /*
+ * Boss health, top-centre. Over the canvas, so the same fixed dark treatment .vitals uses in both
+ * schemes, and click-through for the same reason: it is a readout.
+ *
+ * The whole first row of the top edge is already taken: .notice and #portal-denial-banner in the
+ * centre, .hud__controls on the right (which overflows .hud's own width, so it reaches further
+ * left than the column below it does). This sits a full control row plus a gap under all of them,
+ * which is also the order of precedence — those two notices are transient and assertive while
+ * this is persistent, so a boss fight must not be what hides "이동하지 못했습니다".
+ *
+ * The width is a share of the stage like .hud's, so it scales exactly as Phaser's Scale.FIT
+ * scales the world; on the second row its only neighbours are .vitals (fixed 160 of 1024, left)
+ * and the HUD column's panels (23.4375%, right), and 39.0625% centred clears both.
+ */
+.boss-vitals {
+  position: absolute;
+  top: calc(var(--space-3) + var(--control-height) + var(--space-2));
+  left: 50%;
+  width: 39.0625%;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(20, 19, 26, 0.72);
+  color: #eceaf4;
+  transform: translateX(-50%);
+  /* One short drop, so a boss engaging registers without pulling the eye off the fight. */
+  animation: boss-vitals-in 160ms ease-out;
+  pointer-events: none;
+}
+
+/* Carries the centring offset through, or the panel would slide in from half its width away. */
+@keyframes boss-vitals-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+}
+
+.boss-vitals__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-1);
+}
+
+/* Larger than .vitals__label: this is the only thing on screen naming what you are fighting. */
+.boss-vitals__name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Tabular figures: four digits move on every hit and must not reflow the row as they do. */
+.boss-vitals__count {
+  color: rgba(236, 234, 244, 0.62);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Taller than .vitals__track's 8px: thousands of points move the fill in slivers, and a bar this
+   wide reads as thin at 8. */
+.boss-vitals__track {
+  overflow: hidden;
+  height: 12px;
+  border-radius: 6px;
+  background: rgba(236, 234, 244, 0.14);
+}
+
+/*
+ * MonsterHealthBars' own BAR_FILL, so a monster's health reads in one hostile colour whether it
+ * is drawn here or over its head — deliberately not the player bar's green, and outside the
+ * interface's single accent hue. scaleX, never width, like .vitals__fill.
+ */
+.boss-vitals__fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+  background: #d4674f;
+  transform-origin: left center;
+  transform: scaleX(1);
+  transition: transform 160ms ease;
+}
+
+/*
  * Drop notices, bottom-right: the corner the chat log and the HUD column both leave alone. The
  * newest sits closest to the corner and older ones ride up above it. Click-through like .chat's
  * wrapper — a toast that swallowed a click meant for the world would be worse than one you
@@ -734,6 +819,8 @@ body {
 /*
  * One frame of assets/sprites/items.png; inventoryPanel.ts sets the column. Fixed 32px because
  * the HUD's controls are fixed px too, so an icon here never has to match the canvas scale.
+ * `background-size` is set inline by `applyItemIcon` — it is the sheet's total width, which only
+ * ITEM_ICON_ORDER knows.
  */
 .bag__icon {
   flex: none;
@@ -741,7 +828,6 @@ body {
   height: 32px;
   background-image: url("/sprites/items.png");
   background-repeat: no-repeat;
-  background-size: 224px 32px;
   image-rendering: pixelated;
 }
 
@@ -1678,6 +1764,7 @@ body {
   .bag__equip,
   .bag__retry,
   .boot__retry,
+  .boss-vitals__fill,
   .character-menu__close,
   .character-menu__item,
   .chat__input,
@@ -1703,7 +1790,8 @@ body {
    * listed because its duration is an inline style — playerVitals.ts reads the same media query
    * and snaps the bar instead.
    */
-  .toast {
+  .toast,
+  .boss-vitals {
     animation: none;
   }
 }

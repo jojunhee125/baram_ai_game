@@ -404,24 +404,25 @@ describe("hunting-den — monster population", () => {
   const DEN_SPAWNS = MONSTER_SPAWN_DEFINITIONS.filter((spawn) => spawn.room === HUNTING_DEN);
   const GROUND_SPAWNS = MONSTER_SPAWN_DEFINITIONS.filter((spawn) => spawn.room === HUNTING_GROUND);
 
-  it("has exactly ten rows, an interleaved 5:5 rabbit/deer mix — Phase S's second kind", () => {
-    assert.equal(DEN_SPAWNS.length, 10);
-    assert.ok(
-      DEN_SPAWNS.every((spawn) => spawn.kind === MonsterKind.Rabbit || spawn.kind === MonsterKind.Deer),
-      "every den spawn must be a rabbit or a deer, no other kind",
+  it("has exactly ten rabbit/deer rows (5:5) plus Phase I's one boss row", () => {
+    const rabbitOrDeer = DEN_SPAWNS.filter(
+      (spawn) => spawn.kind === MonsterKind.Rabbit || spawn.kind === MonsterKind.Deer,
     );
-    assert.equal(DEN_SPAWNS.filter((spawn) => spawn.kind === MonsterKind.Rabbit).length, 5);
-    assert.equal(DEN_SPAWNS.filter((spawn) => spawn.kind === MonsterKind.Deer).length, 5);
+    assert.equal(rabbitOrDeer.length, 10);
+    assert.equal(rabbitOrDeer.filter((spawn) => spawn.kind === MonsterKind.Rabbit).length, 5);
+    assert.equal(rabbitOrDeer.filter((spawn) => spawn.kind === MonsterKind.Deer).length, 5);
+    assert.equal(DEN_SPAWNS.filter((spawn) => spawn.kind === MonsterKind.Boss).length, 1);
+    assert.equal(DEN_SPAWNS.length, 11);
   });
 
-  it("keeps the two hunting rooms at 20 + 10 = 30, the PoC #3 cap, with no overlap", () => {
-    assert.equal(GROUND_SPAWNS.length, 20);
-    assert.equal(GROUND_SPAWNS.length + DEN_SPAWNS.length, 30);
+  it("keeps the two hunting rooms at 21 + 11 = 32, the PoC #3 cap after Phase I's bosses, with no overlap", () => {
+    assert.equal(GROUND_SPAWNS.length, 21);
+    assert.equal(GROUND_SPAWNS.length + DEN_SPAWNS.length, 32);
     const groundIds = new Set(GROUND_SPAWNS.map((spawn) => spawn.id));
     assert.ok(DEN_SPAWNS.every((spawn) => !groundIds.has(spawn.id)), "spawn ids must be unique across rooms");
   });
 
-  it("builds one monster per spawn row of the real table, only rabbits and deer, 5:5", async () => {
+  it("builds one monster per spawn row of the real table, only rabbits, deer and the boss, 5:5:1", async () => {
     const room = await createRoom(HUNTING_DEN);
     await join(room, "hunter");
     assert.equal(
@@ -431,11 +432,14 @@ describe("hunting-den — monster population", () => {
     );
     const kinds = [...room.state.monsters.values()].map((monster) => monster.kind);
     assert.ok(
-      kinds.every((kind) => kind === MonsterKind.Rabbit || kind === MonsterKind.Deer),
-      "every built monster must be a rabbit or a deer, no other kind (e.g. no stray squirrel)",
+      kinds.every(
+        (kind) => kind === MonsterKind.Rabbit || kind === MonsterKind.Deer || kind === MonsterKind.Boss,
+      ),
+      "every built monster must be a rabbit, a deer or the boss, no other kind (e.g. no stray squirrel)",
     );
     assert.equal(kinds.filter((kind) => kind === MonsterKind.Rabbit).length, 5);
     assert.equal(kinds.filter((kind) => kind === MonsterKind.Deer).length, 5);
+    assert.equal(kinds.filter((kind) => kind === MonsterKind.Boss).length, 1);
   });
 
   it("runs the simulation loop: the field is not frozen on its spawn tiles", async () => {

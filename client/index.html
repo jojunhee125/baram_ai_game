@@ -76,6 +76,35 @@
         </div>
 
         <!--
+          Boss health. Top-centre and fixed to the screen rather than floating over the boss's
+          head, because a fight measured in minutes has to stay readable while the camera follows
+          the player (docs/design-phase-i-boss-monster.md §10-3).
+
+          Hidden until the first exchange with a boss — the same hit-to-reveal rule the floating
+          monster bars follow, for the same reason: HP is not in the room state, so a `MonsterHit`
+          is the only place a monster's health ever comes from. bossVitals.ts reveals it. Both
+          readouts start empty: the client holds no monster stat table, so there is no maximum to
+          print until the server sends one.
+        -->
+        <div class="boss-vitals" id="boss-vitals" hidden>
+          <p class="boss-vitals__head">
+            <span class="boss-vitals__name" id="boss-vitals-name"></span>
+            <span class="boss-vitals__count" id="boss-vitals-count"></span>
+          </p>
+          <div
+            class="boss-vitals__track"
+            id="boss-vitals-track"
+            role="progressbar"
+            aria-label="보스 체력"
+            aria-valuemin="0"
+            aria-valuemax="0"
+            aria-valuenow="0"
+          >
+            <span class="boss-vitals__fill" id="boss-vitals-fill"></span>
+          </div>
+        </div>
+
+        <!--
           Drop notices. Bottom-right, clear of the chat log and of the HUD column, and a live
           region so a pickup is announced and not only drawn. Click-through: a toast that ate a
           click meant for the world would be worse than one you cannot dismiss.

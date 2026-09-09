@@ -49,6 +49,7 @@ import {
   type UnequipItemRequest,
   type WarpToLandmarkRequest,
 } from "@zep-test/shared";
+import type { BossStateStore } from "../db/bossStateStore";
 import type { InventoryStore } from "../db/inventoryStore";
 import { TableInteractableIndex } from "../game/interactables";
 import { TableLandmarkIndex } from "../game/landmarks";
@@ -82,6 +83,7 @@ import { INTERACTABLE_DEFINITIONS } from "./interactableDefinitions";
 import { ITEM_DEFINITIONS } from "./itemDefinitions";
 import { LANDMARK_DEFINITIONS } from "./landmarkDefinitions";
 import {
+  BOSS_RESPAWN_MS,
   MONSTER_SPAWN_DEFINITIONS,
   MONSTER_TYPES,
   type MonsterKind,
@@ -101,6 +103,15 @@ const MAX_MESSAGES_PER_SECOND = 60;
 
 /** Retry cap for spawn rejection sampling; past it the centre tile is used, which boot validates. */
 const SPAWN_SAMPLE_ATTEMPTS = 16;
+
+/**
+ * Grace window after a boss fight's last combatant dies before an empty {@link BossCombatTracker}
+ * counts as a wipe (design-phase-i-boss-monster.md §6.6, §11.4). Short on purpose: this absorbs
+ * the same-tick race between the last death and the next reinforcement's first hit, not the walk
+ * back from home — 5s is enough for someone already mid-fight to land another hit and cancel it,
+ * not enough to make a genuine wipe feel like it lingers.
+ */
+const WIPE_RESET_GRACE_MS = 5000;
 
 /**
  * Grid cell size for the proximity index. One more than the view radius because that is the
@@ -133,6 +144,25 @@ interface MonsterRuntime {
   hp: number;
   /** Null until somebody hits it, and null again on respawn. */
   lastHitBy: LastHit | null;
+  /**
+   * Only meaningful for `type.isBoss` — null for every other kind. Kept on `MonsterRuntime`
+   * itself rather than split into a separate boss-only runtime type: this interface already mixes
+   * always-present-but-situationally-meaningful fields (`lastHitBy`, `respawnAt`), and
+   * `monsterRuntimes` is one `Map` of one type populated by one loop ({@link populateMonsters}).
+   */
+  combat: BossCombatTracker | null;
+}
+
+/**
+ * Participant tracking for the boss-only "wipe resets HP" rule (design §6.6). `combatants` is
+ * who has hit, or been hit by, this boss and has not since died or left; `wipeResetAt` is null
+ * while that set is non-empty or while nobody has emptied it yet.
+ */
+interface BossCombatTracker {
+  /** sessionId. Added by {@link handleAttack}/{@link damagePlayer}, removed by {@link leaveBossCombat}. */
+  combatants: Set<string>;
+  /** Set the instant the last combatant leaves the fight; cleared to null by a new combatant or by {@link tick}. */
+  wipeResetAt: number | null;
 }
 
 /**
@@ -212,6 +242,10 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
    * credits nothing.
    */
   private inventoryStore: InventoryStore | null = null;
+  /** Where a boss's defeat time is filed. Null in every room built without one — see {@link RoomCreateOptions.bossStateStore}. */
+  private bossStateStore: BossStateStore | null = null;
+  /** The enforced join cap — {@link RoomCreateOptions.realCapacity}, falling back to `maxClients`. */
+  private realCapacity!: number;
   private collisionMap!: CollisionMap;
   private proximityIndex!: ProximityIndex;
   private portalIndex!: PortalIndex;
@@ -234,10 +268,12 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.state.roomType = options.roomType;
     this.state.mapKey = options.mapKey;
     this.maxClients = options.maxClients;
+    this.realCapacity = options.realCapacity ?? options.maxClients;
     this.spawn = options.spawn;
     this.home = { tileX: options.spawn.tileX, tileY: options.spawn.tileY, spreadRadiusInTiles: 0 };
     this.landmarkIndex = this.createLandmarkIndex(this.home);
     this.inventoryStore = options.inventoryStore ?? null;
+    this.bossStateStore = options.bossStateStore ?? null;
     this.setPatchRate(PATCH_RATE_MS);
     this.maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
 
@@ -257,7 +293,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       this.state.interactableMarkers.push(new InteractableMarker(tile));
     }
 
-    this.populateMonsters();
+    await this.populateMonsters();
 
     this.onMessage(ClientMessage.Move, (client: RoomClient, message: MoveRequest) => {
       this.handleMove(client, message);
@@ -287,11 +323,18 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       this.handleWarpToLandmark(client, message);
     });
 
-    // Last, and only where there is something to simulate. A room with no monsters stays purely
-    // message-driven, which is what it was before this feature existed. Colyseus disposes an
-    // empty room, so monster state is never persisted either — the last player to leave resets
+    // Last, and only where there is something to simulate. A room with no monster *rows* stays
+    // purely message-driven, which is what it was before this feature existed. Colyseus disposes
+    // an empty room, so monster state is never persisted either — the last player to leave resets
     // the health of whatever they were fighting, which is the documented specification.
-    if (this.state.monsters.size > 0) {
+    //
+    // Gated on `monsterRuntimes.size`, not `state.monsters.size` (design-phase-i-boss-monster.md
+    // §6.4): a boss row can start dead (§2.4) with nothing in `state.monsters` yet, and that must
+    // not be mistaken for "this room owns no monsters at all" — the tick loop is what counts its
+    // respawn down. Equivalent for every room today (hunting-ground/hunting-den always have a
+    // living squirrel/rabbit/deer alongside any dead boss), but this is the check that stays
+    // correct if a future room ever holds a boss and nothing else.
+    if (this.monsterRuntimes.size > 0) {
       this.setSimulationInterval(() => {
         this.tick(Date.now());
       }, MONSTER_TICK_MS);
@@ -394,6 +437,14 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   }
 
   async onJoin(client: RoomClient, options?: JoinOptions): Promise<void> {
+    // `maxClients` no longer bounds hunting-ground/hunting-den — raised past reach so a full room
+    // never spins up a second instance (design-phase-i-boss-monster.md §1.2, one boss per zone
+    // depends on there only ever being one room instance). The real 40/20 gameplay cap is enforced
+    // here instead, the same "throw refuses the whole join" shape the landmark gate below uses.
+    if (this.state.players.size >= this.realCapacity) {
+      throw new Error(`"${this.roomName}" is full`);
+    }
+
     const nickname = normalizeNickname(client.auth?.ssoNickname ?? options?.nickname);
     if (nickname === null) {
       throw new Error("nickname is required");
@@ -431,6 +482,15 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // server itself issued. An unowned portal id falls through to home if home was asked for,
     // not to the spawn — the client asked for two things and only one of them was rejected.
     const area = arrival ?? landmarkArrival ?? (options?.arriveAtHome === true ? this.home : this.spawn);
+
+    // Re-checked immediately before the seat is taken, because the gated-landmark branch above is
+    // an await: the check at the top of this method ran before it, so concurrent gated joins would
+    // every one of them have seen the same pre-await count and every one of them would have been
+    // admitted. hunting-den's 20 is the cap this protects — its landmark is the only gated one, and
+    // that landmark is the only way in.
+    if (this.state.players.size >= this.realCapacity) {
+      throw new Error(`"${this.roomName}" is full`);
+    }
 
     const spawnTile = this.pickSpawnTile(area);
     this.state.players.set(
@@ -475,9 +535,16 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
 
     // Fire-and-forget, and only where a portal could even ask: a room with no gated door never
     // touches the store on join, which is every room but hunting-ground today.
+    //
+    // Caught rather than left to the process: an unhandled rejection is fatal under Node's default
+    // `--unhandled-rejections=throw`, so a Postgres hiccup here would take the whole server down
+    // with it — awardLoot's own rule (design-phase-i-boss-monster.md §2.5). A lost hydration only
+    // costs this session its catch-up read; `holdsItem` asks the store directly anyway.
     const ownerKey = client.userData.ownerKey ?? client.sessionId;
     if (this.gatedItemKeys.size > 0 && this.inventoryStore !== null) {
-      void this.hydratePossessionCache(client.sessionId, ownerKey);
+      void this.hydratePossessionCache(client.sessionId, ownerKey).catch((cause) => {
+        console.warn(`[zep-test] could not hydrate possessions for ${ownerKey}`, cause);
+      });
     }
     // Same reasoning as the possession gate above: equippedItemKeys is only ever read by
     // damagePlayer/handleAttack, neither of which ever runs outside a hasMonsters room, so
@@ -485,7 +552,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // Equip/unequip itself still works in any room — that path writes the cache directly, it
     // never depends on hydration.
     if (this.hasMonsters && this.inventoryStore !== null) {
-      void this.hydrateEquipmentCache(client.sessionId, ownerKey);
+      void this.hydrateEquipmentCache(client.sessionId, ownerKey).catch((cause) => {
+        console.warn(`[zep-test] could not hydrate equipment for ${ownerKey}`, cause);
+      });
     }
   }
 
@@ -608,6 +677,10 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.monstersViewedBySession.delete(client.sessionId);
     this.clientsBySession.delete(client.sessionId);
     this.moveThrottleNotified.delete(client.sessionId);
+    // Disconnecting mid-fight leaves a boss fight exactly as a death does, and by the same
+    // judgement (design §6.6) — see {@link leaveBossCombat}, which both paths share.
+    // `monsterRuntimes` is empty in a room with no monsters, so this costs nothing there.
+    this.leaveBossCombat(client.sessionId, Date.now());
   }
 
   private handleMove(client: RoomClient, message: MoveRequest): void {
@@ -932,6 +1005,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // survive them walking out of the room before it lands.
     const lastHit: LastHit = { sessionId: client.sessionId, ownerKey: session.ownerKey };
     runtime.lastHitBy = lastHit;
+    this.addBossCombatant(runtime, client.sessionId);
 
     const hpRemaining = Math.max(0, runtime.hp);
     const hit: MonsterHit = {
@@ -1452,8 +1526,12 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
    * "Nothing at all" is the contract, not an optimisation: no second index is constructed, no
    * simulation loop is started, and no monster code runs on any later path. The rooms this
    * feature must not slow down are the ones PoC #2 measured.
+   *
+   * Async, and `onCreate` awaits it, for a boss row's sake only (design-phase-i-boss-monster.md
+   * §2.4): every other row still spawns synchronously within this same call, since nothing else
+   * here ever awaits.
    */
-  private populateMonsters(): void {
+  private async populateMonsters(): Promise<void> {
     const spawns = this.monsterSpawns();
     if (spawns.length === 0) {
       return;
@@ -1477,11 +1555,41 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         respawnAt: 0,
         hp: type.maxHp,
         lastHitBy: null,
+        combat: type.isBoss === true ? { combatants: new Set(), wipeResetAt: null } : null,
       };
       this.monsterRuntimes.set(definition.id, runtime);
+
+      if (type.isBoss === true && this.bossStateStore !== null) {
+        // The one DB read this feature makes, and only once per boss row per room creation — the
+        // tick loop never touches the store (§6.5).
+        //
+        // A store that cannot answer costs this one row its start state and nothing else: the boss
+        // starts alive, exactly as it does in a room built with no store at all. Letting the
+        // rejection out would fail `onCreate` itself, taking hunting-ground's other 20 monsters —
+        // and its movement and its chat — down with a Postgres hiccup, which is precisely what
+        // `db/status.ts` says must not happen. (Boot-time failure is still fatal by design; that
+        // decision belongs to `index.ts`, not to a room already being built.)
+        let defeatedAt: number | null = null;
+        try {
+          defeatedAt = await this.bossStateStore.getLastDefeatedAt(definition.id);
+        } catch (cause) {
+          console.warn(`[zep-test] could not read ${definition.id}'s defeat time`, cause);
+        }
+        const now = Date.now();
+        if (defeatedAt !== null && now - defeatedAt < BOSS_RESPAWN_MS) {
+          runtime.state = MonsterAiState.Dead;
+          runtime.respawnAt = defeatedAt + BOSS_RESPAWN_MS;
+          // Not spawnMonster(): this row starts outside state.monsters, exactly as a normal kill
+          // leaves it, and the tick loop's own Dead-state handling (decideMonsterAction) counts
+          // the remainder of BOSS_RESPAWN_MS down and respawns it the same way a normal respawn
+          // delay does.
+          continue;
+        }
+      }
       this.spawnMonster(definition.id, runtime);
     }
-    this.hasMonsters = this.state.monsters.size > 0;
+    // monsterRuntimes.size, not state.monsters.size — see the tick-loop gate in onCreate for why.
+    this.hasMonsters = this.monsterRuntimes.size > 0;
   }
 
   /**
@@ -1504,6 +1612,15 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // A respawn is a new monster: it arrives whole, and it owes its drops to nobody.
     runtime.hp = runtime.type.maxHp;
     runtime.lastHitBy = null;
+    if (runtime.combat !== null) {
+      // And it is nobody's fight yet. Without this the new boss inherits the previous one's
+      // roster, so anybody who hit that boss and is still in the room holds a seat this fight can
+      // never free — its wipe would be undeclarable for the rest of the room's life. `wipeResetAt`
+      // is cleared rather than armed: an empty roster here means "no fight has started", not "the
+      // group was wiped".
+      runtime.combat.combatants.clear();
+      runtime.combat.wipeResetAt = null;
+    }
   }
 
   /**
@@ -1529,6 +1646,65 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.state.monsters.delete(monsterId);
     runtime.state = MonsterAiState.Dead;
     runtime.respawnAt = now + runtime.type.respawnDelayMs;
+
+    if (runtime.type.isBoss === true && this.bossStateStore !== null) {
+      // Fire-and-forget, exactly as `awardLoot`'s own store calls are — the tick loop must not
+      // stall on a database round trip (design §2.5, §6.5). `runtime.respawnAt` above already
+      // covers this room's own respawn for as long as it stays alive; this write is only for a
+      // room instance created later, which reads it back in `populateMonsters`.
+      //
+      // Caught where it happens, for the reason `onJoin`'s hydration calls are: an unhandled
+      // rejection would kill the process, and the worst a lost record can do is start the boss
+      // alive in some later room instance.
+      void this.bossStateStore.recordDefeat(monsterId, now).catch((cause) => {
+        console.warn(`[zep-test] could not record ${monsterId}'s defeat`, cause);
+      });
+    }
+  }
+
+  /**
+   * Marks `sessionId` as fighting `runtime`'s boss — a no-op for every non-boss runtime, since
+   * `combat` is null there. Cancels a pending wipe reset too: a fresh combatant is exactly what
+   * "the group is still going" means (design §6.6), whether they are the one swinging or the one
+   * just hit.
+   */
+  private addBossCombatant(runtime: MonsterRuntime, sessionId: string): void {
+    if (runtime.combat === null) {
+      return;
+    }
+    runtime.combat.combatants.add(sessionId);
+    runtime.combat.wipeResetAt = null;
+  }
+
+  /**
+   * Drops `sessionId` out of every boss's combat roster and arms the wipe-reset grace timer on
+   * each roster their departure emptied (design §6.6). The one exit from a boss fight, called by
+   * both ways out of one: dying, and leaving the room.
+   *
+   * *Every* boss rather than only the one involved: a player who dies to a squirrel while fighting
+   * the boss has left that fight exactly as completely as one killed by the boss itself, and a
+   * corpse left enrolled could never be brought down to zero again — the wipe would be
+   * undeclarable for as long as the room lived.
+   *
+   * A disconnect arms the timer on the same terms as a death, deliberately: the rule is "the group
+   * that was fighting this boss is all gone", and it cannot depend on *how* they went, or leaving
+   * would be strictly better than dying — a lone attacker could whittle a boss down over several
+   * visits, never risking the reset that dying costs, and take the 25% drop cheaply.
+   *
+   * A departure that leaves somebody behind arms nothing, which is what keeps one death from
+   * resetting a fight the rest of the group is still in. Nor does the departure of somebody who
+   * was not on the roster: re-arming an already-empty roster's timer would push a pending reset
+   * out of reach every time a passer-by left the room.
+   */
+  private leaveBossCombat(sessionId: string, now: number): void {
+    for (const { combat } of this.monsterRuntimes.values()) {
+      if (combat === null || !combat.combatants.delete(sessionId)) {
+        continue;
+      }
+      if (combat.combatants.size === 0) {
+        combat.wipeResetAt = now + WIPE_RESET_GRACE_MS;
+      }
+    }
   }
 
   /**
@@ -1543,6 +1719,14 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
    */
   private tick(now: number): void {
     for (const [monsterId, runtime] of this.monsterRuntimes) {
+      // Boss wipe reset (design §6.6): the whole group that was fighting this boss died and the
+      // grace window has passed with nobody rejoining. `killMonster` is not called — this is a
+      // full-heal, not a kill, so `respawnAt` and the DB record are both left untouched.
+      if (runtime.combat !== null && runtime.combat.wipeResetAt !== null && now >= runtime.combat.wipeResetAt) {
+        runtime.hp = runtime.type.maxHp;
+        runtime.combat.wipeResetAt = null;
+      }
+
       const monster = this.state.monsters.get(monsterId);
       const { at } = runtime.definition;
       const snapshot: MonsterSnapshot = {
@@ -1642,6 +1826,10 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     if (!client || !session || !player) {
       return;
     }
+    const runtime = this.monsterRuntimes.get(monsterId);
+    if (runtime !== undefined) {
+      this.addBossCombatant(runtime, sessionId);
+    }
 
     const reduction = this.equippedDamageReduction(session);
     // Floored rather than rounded, and never below 1: a hit that reduces to nothing would make an
@@ -1665,6 +1853,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     if (hpRemaining > 0) {
       return;
     }
+    this.leaveBossCombat(sessionId, now);
     session.hp = PLAYER_MAX_HP;
     // The existing message for "the server moved you without you walking", rather than a death
     // message of its own: the home warp already proved that path, and the client reads

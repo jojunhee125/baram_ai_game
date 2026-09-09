@@ -13,7 +13,7 @@ const DIRECTIONS_PER_KIND = 4;
  * reads this array, compares it against its own KINDS table and refuses to bake the sheet if they
  * have drifted, the same guard import-avatar.mjs puts on AVATAR_SKIN_COUNT.
  */
-export const MONSTER_SPRITE_ORDER = ["squirrel", "rabbit", "deer"] as const;
+export const MONSTER_SPRITE_ORDER = ["squirrel", "rabbit", "deer", "boss"] as const;
 
 /**
  * One tile of monster movement. Sized like STEP_TWEEN_MS — the shortest step interval any kind
@@ -55,12 +55,31 @@ function kindIndexOf(kind: string): number {
   return index === -1 ? 0 : index;
 }
 
+/**
+ * The wire value of the server's `MonsterKind.Boss`. Matched as a string rather than imported,
+ * for {@link MONSTER_DISPLAY_NAMES}' reason: only `kind` crosses the wire (design §5.2), and the
+ * monster type table it belongs to is server-side.
+ */
+const BOSS_KIND = "boss";
+
 /** Wire string to Korean display label, for the name tag drawn above a monster's head. */
 const MONSTER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   squirrel: "다람쥐",
   rabbit: "토끼",
   deer: "사슴",
+  [BOSS_KIND]: "보스",
 };
+
+/**
+ * The boss's label, or null for every other kind — and for `undefined`, which is what reading the
+ * kind of a monster no longer in view gives. The one place the boss is told apart from the rest,
+ * because it is the only difference the client makes: its health is drawn by `BossVitals` at the
+ * top of the screen instead of by a bar over its head (`docs/design-phase-i-boss-monster.md`
+ * §10-3), and that call needs the label anyway.
+ */
+export function bossDisplayName(kind: string | undefined): string | null {
+  return kind === BOSS_KIND ? monsterDisplayName(BOSS_KIND) : null;
+}
 
 /**
  * Unlike {@link kindIndexOf}'s index-0 fallback (which has to pick *some* body to draw), an

@@ -27,10 +27,17 @@ export const ROOM_DEFINITIONS: readonly RoomDefinition[] = [
     roomType: "hunting-ground",
     mapKey: "hunting-ground",
     /**
-     * Shares a Node process with grand-plaza, so the cap is a load budget rather than a room
-     * size (`docs/design-hunting-inventory.md` §4.2). Conservative until PoC #3 measures one.
+     * Raised from 40 to grand-plaza's own value (design-phase-i-boss-monster.md §1.2): a boss's
+     * defeat time is scoped to a spawn row and read back per *room instance*, so two instances of
+     * this room would let it be killed twice for two payouts. `maxClients` at 40 let Colyseus's
+     * matchmaker open a second instance the moment this room filled up; raised here, it never
+     * will. `realCapacity` below still enforces the real 40-person gameplay cap that PoC #3's load
+     * budget (`docs/design-hunting-inventory.md` §4.2) was measured against — nothing about how
+     * many people can be in this room at once has changed, only who enforces it.
      */
-    maxClients: 40,
+    maxClients: 500,
+    /** The actual gameplay cap, enforced by `onJoin` now that `maxClients` no longer is. */
+    realCapacity: 40,
     /**
      * Two tiles further north than the door itself: at tileY 29 with radius 2 this square's
      * southern edge (y 31) landed exactly on the south door's own trigger row (`hunting-ground-south-door`,
@@ -47,19 +54,24 @@ export const ROOM_DEFINITIONS: readonly RoomDefinition[] = [
     roomType: "hunting-den",
     mapKey: "hunting-den",
     /**
-     * Sized narratively rather than off a load measurement: this room is one layer deeper than
-     * hunting-ground and reached only by walking through it, so fewer hunters are expected here
-     * at once (`docs/design-phase-e-second-hunting-ground.md` §5).
+     * Raised from 20, for `hunting-ground`'s own reason (design-phase-i-boss-monster.md §1.2):
+     * `maxClients` no longer bounds this room, `realCapacity` below does.
      */
-    maxClients: 20,
+    maxClients: 500,
+    /**
+     * The actual gameplay cap — sized narratively rather than off a load measurement, since this
+     * room is one layer deeper than hunting-ground and reached only by walking through it, so
+     * fewer hunters are expected here at once (`docs/design-phase-e-second-hunting-ground.md` §5).
+     */
+    realCapacity: 20,
     /**
      * Mirrored hunting-ground's own spawn placement closely enough to copy its bug: at tileY 25
      * with radius 2 this square's southern edge (y 27) landed exactly on `hunting-den-south-door`'s
      * trigger row (`portalDefinitions.ts`), the same ~20%-of-joins/one-step-fires-the-door failure
      * mode (tester-reproduced, Phase E review). tileY 24 keeps a clear row (y 26) between the
      * spread's max (25) and the trigger (27); the radius also drops from 2 to 1 because a radius-2
-     * square here (x 29-33) clips hd-rabbit-07's wander box (`monsterDefinitions.ts`, spawn (26,20)
-     * radius 3 -> x 23-29/y 17-23) at its x=29 edge, and hd-rabbit-08's at its x=32/y=21 corner.
+     * square here (x 29-33) clips hd-rabbit-04's wander box (`monsterDefinitions.ts`, spawn (26,20)
+     * radius 3 -> x 23-29/y 17-23) at its x=29 edge, and hd-deer-04's at its x=32/y=21 corner.
      * Confirmed against `assets/maps/hunting-den.json`: x 30-32 / y 23-25 is open ground and clear
      * of every monster's spawn-plus-wander box.
      */

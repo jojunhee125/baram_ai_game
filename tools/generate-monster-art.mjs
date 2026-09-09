@@ -368,6 +368,120 @@ const DEER_FACES = {
   up: ["......", ".a..a.", "..aa..", "......"],
 };
 
+/* --------------------------------------------------------------- boss ---- */
+
+/**
+ * The only cold palette on the sheet. The other three kinds are warm woodland fur (squirrel
+ * #c97c3f, rabbit #f5f0e6, deer #8a5a34) and read as variations of one another at 32px, so slate
+ * is what makes this one legible as "not another critter" before its silhouette is even parsed.
+ * The eye reuses the health bars' own hostile colour (`monsterHealthBars.ts` BAR_FILL / the boss
+ * panel's `.boss-vitals__fill`), which is the one warm accent on the body.
+ */
+const BOSS_PALETTE = {
+  ".": null,
+  o: hex("#17141c"),
+  s: hex("#5b5566"),
+  S: hex("#3d3946"),
+  h: hex("#cfc7b4"),
+  e: hex("#d4674f"),
+};
+
+/**
+ * Plod / stand / stride. The other three kinds animate by moving the whole body up and down
+ * (crouch, stand, hop) — this one deliberately does not: the head holds one height in all three
+ * poses and the horns, the collar and the base do the moving. A 5000-HP body that bounced like a
+ * rabbit would read as light, and keeping the head at a fixed height is also what lets its face
+ * band sit at rows 5-8 instead of the low fur band the animals use.
+ *
+ * What separates this silhouette from the animals' is not size — the squirrel's crouch is just as
+ * wide — but the read: a small head, a dark collar (row 9), then a slab, against three kinds that
+ * are each one rounded blob with ears on top. The horns stay a pixel clear of the cell edge in
+ * every pose, so two of these side by side never look joined.
+ */
+const BOSS_BODIES = {
+  stepA: [
+    "................",
+    ".hh..........hh.",
+    "..hh........hh..",
+    "..hho......ohh..",
+    "....oooooooo....",
+    "....osssssso....",
+    "....osssssso....",
+    "....osssssso....",
+    "....osssssso....",
+    "..oooossssoooo..",
+    "osssssssssssssso",
+    "osssssssssssssso",
+    "oSSSSSSSSSSSSSSo",
+    "oSSSSSSSSSSSSSSo",
+    "oSSSSSSSSSSSSSSo",
+    "oooooooooooooooo",
+  ],
+  idle: [
+    "..hh........hh..",
+    "..hh........hh..",
+    "..hh........hh..",
+    "...ho......oh...",
+    "....oooooooo....",
+    "....osssssso....",
+    "....osssssso....",
+    "....osssssso....",
+    "....osssssso....",
+    "..oooossssoooo..",
+    "osssssssssssssso",
+    "osssssssssssssso",
+    "osssssssssssssso",
+    "oSSSSSSSSSSSSSSo",
+    "oSSSSSSSSSSSSSSo",
+    "oooooooooooooooo",
+  ],
+  stepB: [
+    ".hh..........hh.",
+    ".hh..........hh.",
+    "..hh........hh..",
+    "...ho......oh...",
+    "....oooooooo....",
+    "....osssssso....",
+    "....osssssso....",
+    "....osssssso....",
+    "....osssssso....",
+    "..oooossssoooo..",
+    ".osssssssssssso.",
+    ".osssssssssssso.",
+    ".osssssssssssso.",
+    ".oSSSSSSSSSSSSo.",
+    "..oSSSSSSSSSSo..",
+    "..oooooooooooo..",
+  ],
+};
+
+const BOSS_FACE_WIDTH = 6;
+const BOSS_FACE_X = 5;
+/**
+ * Rows 5-8 are the head's own fill in all three poses (BOSS_BODIES keeps rows 4-8 identical
+ * across them by construction), which is what a fixed band needs — the same reasoning as
+ * SQUIRREL_FACE_Y, arrived at from the opposite direction.
+ */
+const BOSS_FACE_Y = () => 5;
+
+const BOSS_FACE_LEFT = ["ee....", "ee....", "......", "oo...."];
+
+/**
+ * Up has no eyes, the convention the other three kinds share; what it shows instead is the pair
+ * of horn roots in the shadow tone, the way the deer's row shows antler bases.
+ *
+ * The eyes are 2x2 rather than the animals' single pixel, and they are the palette's one warm
+ * colour. On a 32px tile that pair is the fastest thing on screen to read as "this one is not
+ * prey" — which matters because the top panel it drives (`bossVitals.ts`) only appears once you
+ * have already swung at it.
+ */
+const BOSS_FACES = {
+  down: ["ee..ee", "ee..ee", "......", ".oooo."],
+  left: BOSS_FACE_LEFT,
+  right: mirror(BOSS_FACE_LEFT),
+  up: ["......", ".S..S.", "..SS..", "......"],
+};
+
 /* -------------------------------------------------------------- kinds ---- */
 
 /**
@@ -402,6 +516,15 @@ const KINDS = [
     faceWidth: DEER_FACE_WIDTH,
     faceX: DEER_FACE_X,
     faceY: DEER_FACE_Y,
+  },
+  {
+    kind: "boss",
+    palette: BOSS_PALETTE,
+    bodies: BOSS_BODIES,
+    faces: BOSS_FACES,
+    faceWidth: BOSS_FACE_WIDTH,
+    faceX: BOSS_FACE_X,
+    faceY: BOSS_FACE_Y,
   },
 ];
 
@@ -612,6 +735,37 @@ const ITEMS = [
       "....occcccco....",
       ".....occcco.....",
       "......oooo......",
+      "................",
+    ],
+  },
+  {
+    /**
+     * Appended, never inserted: a frame's column index is its position here, so a new row in the
+     * middle would silently repaint all seven items after it.
+     *
+     * A great helm — finial, sheened dome, two-row visor slit with a gold nasal between them, and
+     * a flared brim. Built from the palette's existing warm tones (y/g/G, the same ramp
+     * copper-coin's face uses) rather than a new gold hue, with old-dagger's cool `w` reused for
+     * the specular streak down the upper-left of the dome: a metal highlight reads as desaturated
+     * even on gold, and one more palette key would have to justify itself against that.
+     */
+    icon: "golden-helmet",
+    rows: [
+      "................",
+      ".......oo.......",
+      "......owwo......",
+      ".....oooooo.....",
+      "....owwyyyyo....",
+      "...owyyyyyggo...",
+      "..owyyyyyyggGo..",
+      "..owyyyyyyygGo..",
+      "..oyoooyyoooGo..",
+      "..oyyooyyoogGo..",
+      "...oyyyyyggGo...",
+      "...oyyyyggGGo...",
+      "...oyggggGGGo...",
+      ".ogggggggGGGGGo.",
+      ".oooooooooooooo.",
       "................",
     ],
   },

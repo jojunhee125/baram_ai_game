@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { Encoder } from "@colyseus/schema";
 import { Server, WebSocketTransport } from "colyseus";
+import type { BossStateStore } from "./db/bossStateStore";
 import type { InventoryStore } from "./db/inventoryStore";
 import type { ProfileStore } from "./db/profileStore";
 import { validateInteractableDefinitions } from "./game/interactables";
@@ -27,13 +28,14 @@ import { PORTAL_DEFINITIONS } from "./rooms/portalDefinitions";
 export const DEFAULT_PORT = 2567;
 
 /**
- * Both stores are resolved at boot by `index.ts` — Postgres when `DATABASE_URL` is set and
+ * All three stores are resolved at boot by `index.ts` — Postgres when `DATABASE_URL` is set and
  * process memory when it is not. Omitting them takes the same in-memory path, which is what a
  * test or a local `npm run dev` runs on.
  */
 export function createGameServer(
   profileStore?: ProfileStore,
   inventoryStore?: InventoryStore,
+  bossStateStore?: BossStateStore,
 ): Server {
   // Has to be set explicitly: the 8 KB default is nowhere near one patch of a 500-view room.
   // Every client's view is appended to one shared buffer, so a patch needs the sum of all 500
@@ -79,11 +81,26 @@ export function createGameServer(
   });
 
   for (const definition of ROOM_DEFINITIONS) {
-    // The store is injected here rather than authored into `ROOM_DEFINITIONS`, which stays a data
-    // table: this is the one thing a room needs that is a live object. Rooms and
-    // `GET /api/inventory` therefore share one instance, so a drop is visible in the bag the
-    // moment it is credited.
-    gameServer.define(definition.name, MetaverseRoom, { ...definition, inventoryStore });
+    // The stores are injected here rather than authored into `ROOM_DEFINITIONS`, which stays a
+    // data table: these are the live objects a room needs. Rooms and `GET /api/inventory` share
+    // one `inventoryStore` instance, so a drop is visible in the bag the moment it is credited.
+    //
+    // `realCapacity` is resolved to a value here rather than left to `onCreate`'s own `??`
+    // fallback, and that is a security boundary, not a style choice: `onCreate` is handed
+    // `merge({}, clientOptions, handler.options)` (Colyseus `MatchMaker.createRoom`), and that
+    // merge copies only the keys this object actually *has*. A row that omits `realCapacity`
+    // would therefore leave the join cap standing at whatever the client that happened to create
+    // the instance asked for — `realCapacity: 1` in the join options of the first client into
+    // grand-plaza refuses every later join of a room `maxClients` says is nearly empty, so the
+    // matchmaker opens no second instance and nobody else gets in until that client disconnects.
+    // Present-and-undefined is enough to close it (the stores rely on the same thing), but a
+    // number is what the field means.
+    gameServer.define(definition.name, MetaverseRoom, {
+      ...definition,
+      realCapacity: definition.realCapacity ?? definition.maxClients,
+      inventoryStore,
+      bossStateStore,
+    });
   }
   return gameServer;
 }

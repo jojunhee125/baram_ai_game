@@ -182,6 +182,11 @@ async function assertNoAggroAtMargin(
  * standing right now (re-read every attempt, since it keeps wandering independently), then
  * confirms a real chase step follows -- proof the real `aggroRadiusTiles: 2` does engage the FSM
  * over the wire, not just in `monsterAi.test.ts`'s decoupled fixture.
+ *
+ * All four Chebyshev-2 tiles are tried, not just `+x`: the monster wanders freely inside its
+ * radius, so on any attempt where it has stepped beside one of the map's rock clusters the single
+ * `+x` candidate is a wall -- `shortestPath` then throws, which the retry loop cannot absorb
+ * unless the failure is caught here (measured: 1 run in 12 solo, 3 in 5 when batched).
  */
 async function assertAggroEngagesAtTwo(
   room: AnyRoom,
@@ -193,9 +198,31 @@ async function assertAggroEngagesAtTwo(
   let distance = -1;
   for (let attempt = 0; attempt < 6; attempt++) {
     const live = monsterTile(room, monsterId);
-    const target = { tileX: live.tileX + 2, tileY: live.tileY };
-    const path = shortestPath((x, y) => map.isWalkable(x, y), tileOf(room, hunter), target);
-    await walk(hunter, room, path);
+    const candidates = [
+      { tileX: live.tileX + 2, tileY: live.tileY },
+      { tileX: live.tileX - 2, tileY: live.tileY },
+      { tileX: live.tileX, tileY: live.tileY + 2 },
+      { tileX: live.tileX, tileY: live.tileY - 2 },
+    ];
+    let walked = false;
+    for (const target of candidates) {
+      if (!map.isWalkable(target.tileX, target.tileY)) continue;
+      let path: Direction[];
+      try {
+        path = shortestPath((x, y) => map.isWalkable(x, y), tileOf(room, hunter), target);
+      } catch {
+        // Walkable but unreachable (walled off from the hunter's side) -- try the next tile.
+        continue;
+      }
+      await walk(hunter, room, path);
+      walked = true;
+      break;
+    }
+    if (!walked) {
+      // Every candidate was a wall this attempt. Give the monster a wander step and re-read.
+      await sleep(MOVE_COOLDOWN_MS);
+      continue;
+    }
     distance = chebyshev(monsterTile(room, monsterId), tileOf(room, hunter));
     if (distance === 2) break;
   }

@@ -64,4 +64,15 @@ export const ITEM_DEFINITIONS: readonly ItemDefinition[] = [
     possession: true,
     equipment: { slot: "armor", stats: { damageReduction: 0.2 } },
   },
+  // Phase I (design-phase-i-boss-monster.md §7, §11.3): the boss's only drop, one per account.
+  // damageReduction sits below leather-armor's 0.2 on purpose — this stacks with it multiplicatively
+  // (equippedDamageReduction, metaverseRoom.ts), so armor stays the primary defensive slot and this
+  // is the bonus layered on top (0.2 armor + 0.15 helmet = 32% combined).
+  {
+    key: "golden-helmet",
+    name: "황금투구",
+    icon: "golden-helmet",
+    possession: true,
+    equipment: { slot: "helmet", stats: { damageReduction: 0.15 } },
+  },
 ];

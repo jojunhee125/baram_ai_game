@@ -16,6 +16,7 @@ export const ITEM_ICON_ORDER = [
   "old-dagger",
   "entry-pass",
   "leather-armor",
+  "golden-helmet",
 ] as const;
 
 /** One frame of items.png at 1x. The HUD column is CSS-sized, so this is CSS pixels. */
@@ -23,15 +24,20 @@ const ICON_SIZE_PX = 32;
 
 /**
  * The concrete slot each equippable item occupies — a client mirror of `ItemDefinition.equipment.slot`
- * (design-phase-v-equipment-system.md §6.2), for the two items the catalogue actually equips today.
+ * (design-phase-v-equipment-system.md §6.2), for the three items the catalogue actually equips today.
  * `GET /api/inventory` sends only `equipped: boolean`, not which slot, so this table is what resolves
  * a bag row to the slot its own 장착 button targets. A ring item would need to resolve to ring1 or
  * ring2 rather than one fixed slot (§1.3) — moot today, since this table has no "ring" entry to
  * resolve from.
+ *
+ * A row missing here is not a drawing bug but a dead item: {@link InventoryPanel.buildRow} hands out
+ * no 장착 button without a slot, so the item can be carried and never worn. `items.test.ts` reads this
+ * table out of this file and fails if any `ITEM_DEFINITIONS` row with `equipment` is absent from it.
  */
 const EQUIPMENT_ITEM_SLOTS: Partial<Record<string, EquipmentSlot>> = {
   "leather-armor": EquipmentSlot.Armor,
   "old-dagger": EquipmentSlot.Weapon,
+  "golden-helmet": EquipmentSlot.Helmet,
 };
 
 /**
@@ -50,6 +56,10 @@ export function applyItemIcon(node: HTMLElement, icon: string): void {
     return;
   }
   node.className = "bag__icon";
+  // Sized here rather than in `.bag__icon`, where it was a literal `224px` that a Phase adding an
+  // eighth column had no reason to look at — the whole sheet then scaled to 224/256 and every icon
+  // drew a sliver of its neighbour. Derived from the array, it cannot fall behind the sheet again.
+  node.style.backgroundSize = `${ITEM_ICON_ORDER.length * ICON_SIZE_PX}px ${ICON_SIZE_PX}px`;
   node.style.backgroundPosition = `-${frame * ICON_SIZE_PX}px 0`;
 }
 

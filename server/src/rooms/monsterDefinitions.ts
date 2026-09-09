@@ -16,9 +16,18 @@ export const MonsterKind = {
   Squirrel: "squirrel",
   Rabbit: "rabbit",
   Deer: "deer",
+  Boss: "boss",
 } as const;
 
 export type MonsterKind = (typeof MonsterKind)[keyof typeof MonsterKind];
+
+/**
+ * 6 hours, ms (design-phase-i-boss-monster.md §7). The gap from the other kinds'
+ * `respawnDelayMs` (at most 16000) is deliberate: the size difference is what says "this one
+ * needs its state remembered across room instances" (§1), which {@link MonsterType.isBoss} and
+ * {@link MonsterSpawnDefinition.persistentRespawn} carry into the code that actually persists it.
+ */
+export const BOSS_RESPAWN_MS = 6 * 60 * 60 * 1000;
 
 /**
  * One line of a kind's drop table. Rolled independently of the other lines, so a kill can yield
@@ -59,6 +68,13 @@ export interface MonsterType {
   leashRadiusTiles: number;
   respawnDelayMs: number;
   loot: readonly LootEntry[];
+  /**
+   * True only for the boss kind. Boot validation requires every spawn row with
+   * {@link MonsterSpawnDefinition.persistentRespawn} to name a kind with this set, and vice versa
+   * (design §7) — the pairing is what stops a typo from silently giving a squirrel row DB-backed
+   * persistence, or leaving a boss row without it.
+   */
+  isBoss?: boolean;
 }
 
 /**
@@ -168,6 +184,33 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       ],
     },
   ],
+  [
+    MonsterKind.Boss,
+    {
+      kind: MonsterKind.Boss,
+      isBoss: true,
+      /**
+       * ~180x the existing top HP (deer, 28) — the same "the delay is a bigger number in the same
+       * field" move `respawnDelayMs` makes, applied to HP (design §11.1). Solo TTK is ~8.3 minutes
+       * with `old-dagger` and the boss never missing a swing back; a 6-10 person group clears in
+       * 1-2 minutes. Group play is a side effect of the number, not a separate rule.
+       */
+      maxHp: 5000,
+      /** Above the existing top (rabbit/deer, 7) — DPS 18/1.4 = 12.86, above rabbit's 8.75. */
+      damage: 18,
+      attackCooldownMs: 1400,
+      /** Slower than deer's 2000 — the biggest body wanders the slowest. */
+      wanderStepIntervalMs: 2400,
+      /** Slower than every existing kind (400-600) — about 1/6.6 of a walking player; fleeing always wins. */
+      chaseStepIntervalMs: 800,
+      /** Unchanged from every other kind — a room-wide aggro radius would be a new mechanic, not a stat (design §4). */
+      aggroRadiusTiles: 2,
+      /** Rabbit/deer's own value, reused rather than inventing a new one. */
+      leashRadiusTiles: 10,
+      respawnDelayMs: BOSS_RESPAWN_MS,
+      loot: [{ itemKey: "golden-helmet", chance: 0.25, quantity: 1 }],
+    },
+  ],
 ]);
 
 /**
@@ -192,11 +235,22 @@ export interface MonsterSpawnDefinition {
   at: TilePosition;
   /** Chebyshev half-extent the monster wanders inside. 0 pins it to its spawn tile. */
   wanderRadiusTiles: number;
+  /**
+   * True only for a boss row (design-phase-i-boss-monster.md §2, §7). Routes `populateMonsters()`
+   * through a `BossStateStore` read at room creation and `killMonster()` through a fire-and-forget
+   * write on death — every other row (squirrel/rabbit/deer) takes neither path, which is what
+   * keeps "monster state lives only in room memory" true for everything but this one flag. Boot
+   * validation requires this to agree with {@link MonsterType.isBoss} of the row's own kind, in
+   * both directions.
+   */
+  persistentRespawn?: boolean;
 }
 
 /**
  * Every hunting room's monster placement, one contiguous table across both rooms. hunting-ground
- * holds 20 rows, hunting-den (Phase E) holds 10 more - 30 total, the PoC #3 population cap.
+ * holds 20 rows + a boss, hunting-den (Phase E) holds 10 more + a boss - 32 total, the PoC #3
+ * population cap as of Phase I (design-phase-i-boss-monster.md §5; both bosses were added inside
+ * the range PoC #3 already measured safe, so the cap moved from 30 to 32 without a new load test).
  *
  * Nothing spawns at y >= 25 in hunting-ground or y >= 24 in hunting-den. Someone coming through a
  * room's entrance door must not arrive into a fight already in progress, and with the wander
@@ -259,6 +313,23 @@ export const MONSTER_SPAWN_DEFINITIONS: readonly MonsterSpawnDefinition[] = [
   { id: "hd-deer-04", room: "hunting-den", kind: MonsterKind.Deer, at: { tileX: 35, tileY: 18 }, wanderRadiusTiles: 3 },
   { id: "hd-rabbit-05", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 38, tileY: 20 }, wanderRadiusTiles: 3 },
   { id: "hd-deer-05", room: "hunting-den", kind: MonsterKind.Deer, at: { tileX: 43, tileY: 19 }, wanderRadiusTiles: 3 },
+  // -- Bosses (Phase I, design-phase-i-boss-monster.md §3, §11.2). One per room, `wanderRadiusTiles`
+  // matched to rabbit/deer's own 3. Coordinates were checked against the actual map files
+  // (`assets/maps/hunting-ground.json` / `assets/maps/hunting-den.json`): each sits at least 6
+  // tiles (Chebyshev) from *every* tile a player can arrive on in its own room — portal trigger and
+  // arrival tiles, the room's whole join-spawn spread square, its `home` (the death-warp target,
+  // `metaverseRoom.ts`), and any landmark tile — and its wander box is fully open (hg-boss-01) or
+  // open but for two tiles (hd-boss-01: 28,16 and 28,17).
+  //
+  // The arrival set has to be the full one, not just the portals: hd-boss-01 launched at (31,20),
+  // which cleared every portal tile but stood 4 tiles from home (31,24) — inside wander(3) +
+  // aggro(2) = 5. A solo player killed there warps home and is re-aggroed on arrival, which
+  // cancels the §6.6 wipe reset the death just armed, so the boss keeps the group's damage
+  // forever. 6 is exactly that reach plus one: at 6 a freely wandering boss can never aggro a
+  // player standing on an arrival tile. `passI-boss-independent-reverification.test.ts` REVERIFY B
+  // asserts all three properties for every `persistentRespawn` row.
+  { id: "hg-boss-01", room: "hunting-ground", kind: MonsterKind.Boss, at: { tileX: 34, tileY: 16 }, wanderRadiusTiles: 3, persistentRespawn: true },
+  { id: "hd-boss-01", room: "hunting-den", kind: MonsterKind.Boss, at: { tileX: 31, tileY: 17 }, wanderRadiusTiles: 3, persistentRespawn: true },
 ];
 
 /** Boot-validation outcome. Every error refuses boot; warnings are authoring smells only. */
@@ -353,8 +424,19 @@ export function validateMonsterSpawnDefinitions(
       seenIds.add(spawn.id);
     }
 
-    if (!types.has(spawn.kind)) {
+    const type = types.get(spawn.kind);
+    if (type === undefined) {
       errors.push(`${label} is of kind "${spawn.kind}", which has no entry in MONSTER_TYPES`);
+    } else {
+      // Both directions (design §7): a boss row missing the flag would never persist its state,
+      // and a non-boss row carrying it would read a table this store was never meant to hold.
+      const isBossKind = type.isBoss === true;
+      const isPersistentSpawn = spawn.persistentRespawn === true;
+      if (isPersistentSpawn && !isBossKind) {
+        errors.push(`${label} sets persistentRespawn but its kind "${spawn.kind}" is not a boss type`);
+      } else if (isBossKind && !isPersistentSpawn) {
+        errors.push(`${label} is of boss kind "${spawn.kind}" but does not set persistentRespawn`);
+      }
     }
 
     if (!Number.isInteger(spawn.wanderRadiusTiles) || spawn.wanderRadiusTiles < 0) {

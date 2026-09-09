@@ -16,6 +16,7 @@ import { RoomConnection, type PlayerSnapshot } from "../net/roomConnection";
 import { resolveHomeRoomName } from "../net/roomTarget";
 import { fadeFromBlack, fadeToBlack, showTransitionNotice } from "../transitionOverlay";
 import { chooseAvatarSkin } from "../ui/avatarPicker";
+import { BossVitals } from "../ui/bossVitals";
 import { CharacterMenu } from "../ui/characterMenu";
 import { ChatPanel } from "../ui/chatPanel";
 import { HomeButton } from "../ui/homeButton";
@@ -36,6 +37,7 @@ import { MonsterHealthBars } from "../world/monsterHealthBars";
 import {
   MONSTER_TEXTURE,
   MonsterSprites,
+  bossDisplayName,
   monsterDisplayName,
   registerMonsterAnimations,
 } from "../world/monsterSprites";
@@ -120,6 +122,7 @@ export class WorldScene extends Phaser.Scene {
   private characterMenu: CharacterMenu | null = null;
   private landmarkPanel: LandmarkPanel | null = null;
   private vitals: PlayerVitals | null = null;
+  private bossVitals: BossVitals | null = null;
   private toasts: ItemToasts | null = null;
   private portalDenialBanner: PortalDenialBanner | null = null;
   private localPlayer: LocalPlayer | null = null;
@@ -157,6 +160,7 @@ export class WorldScene extends Phaser.Scene {
     this.characterMenu = null;
     this.landmarkPanel = null;
     this.vitals = null;
+    this.bossVitals = null;
     this.toasts = null;
     this.portalDenialBanner = null;
     this.localPlayer = null;
@@ -226,6 +230,9 @@ export class WorldScene extends Phaser.Scene {
     // an HP panel, not just one that's been attach()'d into sight of a monster.
     this.vitals = new PlayerVitals();
     this.vitals.reveal();
+    // Not revealed here, unlike the panel above: a boss bar is hit-to-reveal, so a room with a
+    // boss standing in it shows nothing until somebody trades a blow with it.
+    this.bossVitals = new BossVitals();
 
     this.connection.attach({
       onPlayerAdd: (sessionId, snapshot) => this.addPlayer(sessionId, snapshot),
@@ -239,12 +246,16 @@ export class WorldScene extends Phaser.Scene {
         const sprite = this.monsters.add(monsterId, snapshot);
         // A respawn reuses the id, and whatever stands there now has not been hit yet.
         this.monsterHealth.remove(monsterId);
+        this.bossVitals?.release(monsterId);
         this.monsterNames.add(monsterId, sprite, monsterDisplayName(snapshot.kind));
       },
       onMonsterChange: (monsterId, snapshot) => this.monsters.update(monsterId, snapshot),
       onMonsterRemove: (monsterId) => {
         this.monsters.remove(monsterId);
         this.monsterHealth.remove(monsterId);
+        // Death and walking out of the view radius arrive the same way, and a boss bar left up
+        // for a boss that is no longer on screen would read as a fight still in progress.
+        this.bossVitals?.release(monsterId);
         this.monsterNames.remove(monsterId);
       },
       onMonsterHit: (event) => this.showMonsterHit(event),
@@ -403,6 +414,10 @@ export class WorldScene extends Phaser.Scene {
    * A monster in view took a hit. Its bar appears here rather than on its arrival because this
    * message is the only thing that ever carries a monster's health (design §5.2), so a monster
    * nobody has swung at genuinely has no number to draw.
+   *
+   * A boss is the same trigger drawn somewhere else: the fixed top panel instead of a bar over
+   * its head (`docs/design-phase-i-boss-monster.md` §10-3). Exactly one of the two ever holds a
+   * given monster, so a boss never carries both readouts.
    */
   private showMonsterHit(event: MonsterHit): void {
     const sprite = this.monsters.get(event.monsterId);
@@ -415,13 +430,21 @@ export class WorldScene extends Phaser.Scene {
     this.effects.flash(sprite);
     this.effects.damage(sprite, event.damage, tone);
     this.effects.impact(sprite, tone);
+    // The kind is only in the room state, never on this message — read from the same map the
+    // sprite above came from, so the two can never disagree about what was hit.
+    const bossName = bossDisplayName(this.connection.monsters.get(event.monsterId)?.kind);
     if (event.hpRemaining > 0) {
-      this.monsterHealth.applyHit(event.monsterId, sprite, event.hpRemaining, event.hpMax);
+      if (bossName === null) {
+        this.monsterHealth.applyHit(event.monsterId, sprite, event.hpRemaining, event.hpMax);
+      } else {
+        this.bossVitals?.applyHit(event.monsterId, bossName, event.hpRemaining, event.hpMax);
+      }
       return;
     }
     // `hpRemaining === 0` is the death notice. Removing the sprite is not this handler's job:
     // the `state.monsters` deletion already does it, which is why the puff is a detached object.
     this.monsterHealth.remove(event.monsterId);
+    this.bossVitals?.release(event.monsterId);
     this.effects.death(sprite);
   }
 
@@ -598,6 +621,7 @@ export class WorldScene extends Phaser.Scene {
     this.characterMenu?.destroy();
     this.landmarkPanel?.destroy();
     this.vitals?.destroy();
+    this.bossVitals?.destroy();
     this.toasts?.destroy();
     this.portalDenialBanner?.destroy();
     this.scene.start(WorldScene.KEY, { connection: next } satisfies WorldSceneData);

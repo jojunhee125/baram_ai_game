@@ -1,4 +1,5 @@
 import type { Client } from "colyseus";
+import type { BossStateStore } from "../db/bossStateStore";
 import type { InventoryStore } from "../db/inventoryStore";
 // `InteractableKind` is imported as a value, not just as a type: the authored table's
 // discriminant and the wire union's have to be the same string, so both read it from one place.
@@ -43,6 +44,23 @@ export interface RoomCreateOptions {
    * overwritten by whatever was registered — including by `undefined`.
    */
   inventoryStore?: InventoryStore;
+  /**
+   * Where a boss's last-defeat time is filed, injected the same way and for the same reason as
+   * {@link inventoryStore}. Optional for the same reason too: the tests, the load-test harness and
+   * `npm run dev` all build rooms without one, and a room with no store still runs its bosses —
+   * every one of them just starts alive on every room creation, since there is nowhere to read a
+   * defeat time back from (design-phase-i-boss-monster.md §2.4).
+   */
+  bossStateStore?: BossStateStore;
+  /**
+   * The real gameplay population cap, enforced by `onJoin` throwing past it — distinct from
+   * `maxClients`, which only bounds when Colyseus's own matchmaker opens a second instance of this
+   * room (design-phase-i-boss-monster.md §1.2). Undefined means `maxClients` doubles as the real
+   * cap too, which is every room but hunting-ground/hunting-den today: those two raise `maxClients`
+   * to a value neither ever reaches, so this field is the only thing actually bounding how many
+   * players share one instance — and therefore one boss.
+   */
+  realCapacity?: number;
 }
 
 /** A registered room type. The `name` is the matchmaking name clients join by. */

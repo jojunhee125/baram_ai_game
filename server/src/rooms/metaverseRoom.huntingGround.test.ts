@@ -468,7 +468,9 @@ describe("hunting-ground — monsters over the wire", () => {
       );
       const monster = decodedMonsterOf(hunter, monsterId);
       assert.ok(
-        monster.kind === MonsterKind.Squirrel || monster.kind === MonsterKind.Rabbit,
+        monster.kind === MonsterKind.Squirrel ||
+          monster.kind === MonsterKind.Rabbit ||
+          monster.kind === MonsterKind.Boss,
         `decoded kind "${monster.kind}", which the client has no sprite for`,
       );
     }

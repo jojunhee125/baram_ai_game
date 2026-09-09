@@ -90,7 +90,7 @@ test("old-dagger를 보유한 계정도 스윙이 콘솔 에러 없이 실행된
   expect(consoleErrors).toEqual([]);
 });
 
-test("L 키로 확률표가 열리고 다람쥐/토끼 드랍률이 표시된다", async () => {
+test("L 키로 확률표가 열리고 다람쥐/토끼/보스 드랍률이 표시된다", async () => {
   await joinRoom(client.page, "hunting-ground");
 
   const button = client.page.locator("#loot-table-button");
@@ -101,7 +101,10 @@ test("L 키로 확률표가 열리고 다람쥐/토끼 드랍률이 표시된다
   await expect(panel).toBeVisible();
 
   const monsters = panel.locator(".loot-table__monster");
-  await expect(monsters).toHaveCount(2);
+  // Phase I (2026-09-09) added a boss spawn row to this room (`hg-boss-01`,
+  // server/src/rooms/monsterDefinitions.ts), so this room's table grew from 2 kinds to 3. The
+  // order follows MONSTER_TYPES' own insertion order, which puts the boss last.
+  await expect(monsters).toHaveCount(3);
 
   const squirrel = monsters.nth(0);
   await expect(squirrel.locator(".loot-table__monster-name")).toHaveText("다람쥐");
@@ -114,6 +117,12 @@ test("L 키로 확률표가 열리고 다람쥐/토끼 드랍률이 표시된다
   await expect(rabbit.locator(".loot-table__monster-name")).toHaveText("토끼");
   const rabbitChances = await rabbit.locator(".loot-table__drop-chance").allTextContents();
   expect(rabbitChances).toEqual(["55%", "35%", "12%", "3%"]);
+
+  const boss = monsters.nth(2);
+  await expect(boss.locator(".loot-table__monster-name")).toHaveText("보스");
+  await expect(boss.locator(".loot-table__drop-name")).toHaveText("황금투구");
+  const bossChances = await boss.locator(".loot-table__drop-chance").allTextContents();
+  expect(bossChances).toEqual(["25%"]);
 
   // Escape로 닫힌다.
   await client.page.keyboard.press("Escape");

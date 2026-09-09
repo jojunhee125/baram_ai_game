@@ -98,9 +98,12 @@ test("사냥터→plaza→사냥터 왕복 후에도 room에 맞는 확률표가
 
   const monsters = client.page.locator(".loot-table__monster");
   await tapKey(client.page, "KeyL");
-  await expect(monsters).toHaveCount(2);
+  // 3, not 2, since Phase I (2026-09-09) added a boss spawn row to this room (`hg-boss-01`,
+  // server/src/rooms/monsterDefinitions.ts). MONSTER_TYPES' insertion order puts it last.
+  await expect(monsters).toHaveCount(3);
   await expect(monsters.nth(0).locator(".loot-table__monster-name")).toHaveText("다람쥐");
   await expect(monsters.nth(1).locator(".loot-table__monster-name")).toHaveText("토끼");
+  await expect(monsters.nth(2).locator(".loot-table__monster-name")).toHaveText("보스");
   await client.page.keyboard.press("Escape");
   await expect(client.page.locator("#loot-table")).toBeHidden();
 
@@ -122,9 +125,10 @@ test("사냥터→plaza→사냥터 왕복 후에도 room에 맞는 확률표가
   await client.page.waitForTimeout(1200);
 
   await tapKey(client.page, "KeyL");
-  await expect(monsters).toHaveCount(2);
+  await expect(monsters).toHaveCount(3);
   await expect(monsters.nth(0).locator(".loot-table__monster-name")).toHaveText("다람쥐");
   await expect(monsters.nth(1).locator(".loot-table__monster-name")).toHaveText("토끼");
+  await expect(monsters.nth(2).locator(".loot-table__monster-name")).toHaveText("보스");
 });
 
 test("첫 오픈에서 네트워크 실패 시 에러+재시도, 복구 후 재시도 성공하면 재오픈은 캐시로 즉시 표시된다", async () => {
@@ -153,7 +157,8 @@ test("첫 오픈에서 네트워크 실패 시 에러+재시도, 복구 후 재�
   await retryButton.click();
 
   const monsters = client.page.locator(".loot-table__monster");
-  await expect(monsters).toHaveCount(2);
+  // 3 kinds in this room since Phase I added `hg-boss-01` (다람쥐/토끼/보스).
+  await expect(monsters).toHaveCount(3);
   expect(requestCount).toBe(2);
 
   // Close and reopen: a successful read is cached for this instance's lifetime, so this must not
@@ -161,6 +166,6 @@ test("첫 오픈에서 네트워크 실패 시 에러+재시도, 복구 후 재�
   await client.page.keyboard.press("Escape");
   await expect(client.page.locator("#loot-table")).toBeHidden();
   await tapKey(client.page, "KeyL");
-  await expect(monsters).toHaveCount(2);
+  await expect(monsters).toHaveCount(3);
   expect(requestCount).toBe(2);
 });
