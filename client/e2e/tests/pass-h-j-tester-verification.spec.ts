@@ -103,13 +103,26 @@ test.describe("Phase H (a)(b) — 부팅 시 피커 생략", () => {
 test.describe("Phase H (c)(d) — 실시간 재스킨 (critical: silent no-op risk)", () => {
   test("재스킨 시 자기 화면과 상대 화면 둘 다 즉시 리페인트된다", async () => {
     const [alice, bob] = await openConcurrentClients(2);
+    if (!alice || !bob) {
+      await Promise.all([alice?.close(), bob?.close()]);
+      throw new Error("Expected two browser clients for the live reskin test");
+    }
     try {
       await joinRoom(alice.page, "plaza", { skinIndex: 0 });
       await joinRoom(bob.page, "plaza", { skinIndex: 0 });
       // Let both settle into view of each other and stop any join-cascade repainting.
       await alice.page.waitForTimeout(400);
 
-      const clip = { x: 472, y: 248, width: 80, height: 80 }; // centred on the local camera
+      // 로컬 카메라 중앙 80×80. 좌표를 하드코딩하지 않고 실제 캔버스 사각형에서 계산한다 —
+      // 2026-09-11 클래식 UI 병합으로 캔버스가 뷰포트 전체가 아니라 좌상단(우측 사이드바 제외)
+      // 영역이 되면서, 예전 고정 좌표(472,248)는 플레이어가 아니라 배경 타일을 찍고 있었다.
+      const canvasRect = (await alice.page.locator(".stage__canvas").boundingBox())!;
+      const clip = {
+        x: Math.round(canvasRect.x + canvasRect.width / 2 - 40),
+        y: Math.round(canvasRect.y + canvasRect.height / 2 - 40),
+        width: 80,
+        height: 80,
+      };
       const aliceBefore = await alice.page.screenshot({ clip });
       const bobBefore = await bob.page.screenshot({ clip });
 
@@ -294,9 +307,9 @@ test.describe("Phase J #1 — 동일 타일 스폰 닉네임 겹침 (white-box: 
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const tags = new (mod as any).NameTags(fakeScene);
-      const spriteA = { x: 100, y: 200 };
-      const spriteB = { x: 100, y: 200 };
-      const spriteC = { x: 100, y: 200 };
+      const spriteA = { x: 100, y: 200, displayHeight: 32, originY: 1 };
+      const spriteB = { x: 100, y: 200, displayHeight: 52, originY: 0.96 };
+      const spriteC = { x: 100, y: 200, displayHeight: 32, originY: 1 };
 
       // Three players already sharing a tile, added back-to-back in one synchronous burst —
       // exactly what WorldScene.create()'s attach() replay does for players already in view.
@@ -330,6 +343,10 @@ test.describe("Phase J #1 — 동일 타일 스폰 닉네임 겹침 (white-box: 
       `add() burst produced overlapping/incorrect y positions: ${JSON.stringify(result.burstYs)}`,
     ).toBe(3);
     expect(result.settledDistinct, `update() should always settle to 3 distinct rows: ${JSON.stringify(result.settledYs)}`).toBe(3);
+    expect(result.burstYs).toEqual(result.settledYs);
+    expect(result.settledYs[0]! - result.settledYs[1]!).toBeCloseTo(13);
+    expect(result.settledYs[1]! - result.settledYs[2]!).toBeCloseTo(13);
+    expect(result.settledYs[0]).toBeLessThan(200 - 52 * 0.96);
   });
 });
 

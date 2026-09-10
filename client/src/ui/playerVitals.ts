@@ -35,6 +35,7 @@ export class PlayerVitals {
   private readonly track = document.querySelector<HTMLElement>("#vitals-track")!;
   private readonly fill = document.querySelector<HTMLElement>("#vitals-fill")!;
   private readonly cooldown = document.querySelector<HTMLElement>("#vitals-cooldown")!;
+  private readonly attackStatus = document.createElement("span");
   /**
    * Read once rather than per swing: a change of preference mid-session is not worth a listener,
    * and the timer below is the source of truth for the cooldown either way.
@@ -50,6 +51,10 @@ export class PlayerVitals {
   private revivalTimer: number | undefined;
 
   constructor() {
+    this.attackStatus.className = "vitals__attack-status";
+    this.attackStatus.textContent = "공격 준비";
+    this.panel.querySelector(".vitals__hint")!.append(this.attackStatus);
+    delete this.panel.dataset.attack;
     this.cooldown.style.transitionDuration = "0ms";
     this.cooldown.style.transform = "scaleX(1)";
     // A room hop hands these nodes to a successor mid-fight, so the panel starts from the state a
@@ -119,6 +124,7 @@ export class PlayerVitals {
   beginAttackCooldown(): void {
     window.clearTimeout(this.cooldownTimer);
     this.panel.dataset.attack = "cooling";
+    this.attackStatus.textContent = "재사용 대기";
     this.cooldown.style.transitionDuration = "0ms";
     this.cooldown.style.transform = "scaleX(0)";
     if (this.animate) {
@@ -141,11 +147,13 @@ export class PlayerVitals {
     window.clearTimeout(this.revivalTimer);
     this.panel.hidden = true;
     delete this.panel.dataset.attack;
+    this.attackStatus.remove();
   }
 
   private readonly endAttackCooldown = (): void => {
     this.cooldownTimer = undefined;
     delete this.panel.dataset.attack;
+    this.attackStatus.textContent = "공격 준비";
     this.cooldown.style.transitionDuration = "0ms";
     this.cooldown.style.transform = "scaleX(1)";
   };

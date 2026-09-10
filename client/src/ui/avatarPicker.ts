@@ -137,6 +137,12 @@ function buildCells(): HTMLButtonElement[] {
     const preview = document.createElement("span");
     preview.className = "picker__preview";
     preview.style.backgroundPosition = `-${PREVIEW_COLUMN_PX}px -${skin * PREVIEW_BLOCK_PX}px`;
+    if (skin === 0) {
+      preview.style.backgroundImage = 'url("/sprites/heritage-adventurer.png")';
+      preview.style.backgroundSize = "192px 256px";
+      preview.style.backgroundPosition = "-64px 0";
+      cell.title = "청록 도포 · 새로운 모험가";
+    }
     cell.append(preview);
 
     cells.push(cell);

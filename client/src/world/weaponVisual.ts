@@ -1,4 +1,4 @@
-import type { ItemGranted } from "@zep-test/shared";
+import type { EquipmentChanged } from "@zep-test/shared";
 import { loadInventory } from "../net/inventory";
 import { ITEM_ICON_ORDER } from "../ui/inventoryPanel";
 
@@ -19,36 +19,27 @@ export function itemFrame(icon: string): number {
   return (ITEM_ICON_ORDER as readonly string[]).indexOf(icon);
 }
 
-/**
- * Whether the local account has ever held `old-dagger`. Read once at boot (`loadInventory()`, the
- * same call the bag window makes) and kept current by `applyGrant()` afterwards — no polling
- * timer, because `ItemGranted` already reaches this room on every drop (design §8.2) and this
- * scope has no way to lose an item once granted (design §0: no consumption, no trade).
- *
- * Holds no listener and no DOM, so — like `CombatEffects` — it has no `destroy()`: a stray resolve
- * from an abandoned boot read just writes into an instance nothing reads anymore.
- */
+/** Mirrors equipped state; a late inventory read must not overwrite a newer server verdict. */
 export class WeaponVisualState {
   private owned = false;
+  private receivedEquipment = false;
 
   constructor() {
     void loadInventory().then(
       (items) => {
-        if (items.some((item) => item.itemKey === OLD_DAGGER_ITEM_KEY)) {
-          this.owned = true;
-        }
+        if (this.receivedEquipment) return;
+        this.owned = items.some((item) => item.itemKey === OLD_DAGGER_ITEM_KEY && item.equipped);
       },
       () => {
-        // Left false. Cosmetic only — a future drop's ItemGranted still sets it, and a room hop
-        // builds a fresh instance with a fresh read regardless.
+        // Keep the conservative unarmed default; later equipment verdicts remain authoritative.
       },
     );
   }
 
-  applyGrant(event: ItemGranted): void {
-    if (event.itemKey === OLD_DAGGER_ITEM_KEY) {
-      this.owned = true;
-    }
+  applyEquipmentChange(event: EquipmentChanged): void {
+    if (event.slot !== "weapon") return;
+    this.receivedEquipment = true;
+    this.owned = event.itemKey === OLD_DAGGER_ITEM_KEY;
   }
 
   get hasOldDagger(): boolean {

@@ -14,7 +14,7 @@ const FLASH_COLOR = 0xfdf7ea;
 const SWING_RADIUS_PX = 28;
 /** Half-width of the arc, radians. ~40 degrees each way, so it reads as a cone, not a ring. */
 const SWING_SPREAD = 0.7;
-const SWING_MS = 350;
+const SWING_MS = 240;
 /**
  * The swing arc's own colour — never FLASH_COLOR. Stone floor (`#c9c2b4`) and grass (`#7fae5a`)
  * are both close in value to the off-white FLASH_COLOR, which is why the arc read as invisible;
@@ -78,7 +78,7 @@ const IMPACT_SHAKE_INTENSITY = 0.006;
  * Transient combat visuals: the swing, the flash on a hit, the number that floats off it, and the
  * puff a monster leaves behind.
  *
- * Every one of these is a detached object rather than something done *to* the sprite's position,
+ * Effects are detached objects; the attack pose only rotates the sprite, never its position,
  * for two reasons. The sprite's x/y already belong to the step tween, so a second tween on them
  * would fight it and could strand an avatar off its tile. And a monster's death arrives in the
  * same tick as the state deletion that destroys its sprite, so an animation played on the sprite
@@ -96,33 +96,55 @@ export class CombatEffects {
    * The local player's own swing, drawn whether or not anything was in range: an empty swing gets
    * no reply from the server (design §6.1), so this is the only feedback that the key registered.
    *
-   * `weaponFrame` is optional: undefined draws the arc alone, exactly as before this pass. Passed
-   * when the local player has ever held `old-dagger` (`WeaponVisualState.hasOldDagger`), it also
+   * `weaponFrame` is optional: undefined draws the arc. Passed
+   * when the local player has equipped `old-dagger` (`WeaponVisualState.hasOldDagger`), it also
    * overlays that item's `items.png` frame at the hand position — a cosmetic-only signal, no
    * damage or equip semantics attached.
    */
-  swing(sprite: Phaser.GameObjects.Sprite, facing: Direction, weaponFrame?: number): void {
+  swing(sprite: Phaser.GameObjects.Sprite, facing: Direction, weaponFrame?: number, attackPose = false): void {
     const centre = SWING_ANGLES[facing];
+    const turn = facing === Direction.Left || facing === Direction.Up ? -1 : 1;
+    if (!attackPose) this.scene.tweens.add({
+      targets: sprite,
+      angle: turn * 12,
+      duration: 90,
+      yoyo: true,
+      ease: "Quad.easeOut",
+    });
     const arc = this.scene.add.graphics();
-    arc.lineStyle(3, SWING_COLOR, 0.9);
-    arc.beginPath();
-    arc.arc(0, 0, SWING_RADIUS_PX, centre - SWING_SPREAD, centre + SWING_SPREAD);
-    arc.strokePath();
-    arc.setPosition(sprite.x, sprite.y - TILE_SIZE_PX / 2);
+    for (const [width, color] of [[7, 0x392817], [4, SWING_COLOR], [2, FLASH_COLOR]] as const) {
+      arc.lineStyle(width, color, 1);
+      arc.beginPath();
+      arc.arc(0, 0, SWING_RADIUS_PX, centre - SWING_SPREAD, centre + SWING_SPREAD);
+      arc.strokePath();
+    }
+    const centreY = sprite.y - sprite.displayHeight * 0.4;
+    arc.setPosition(sprite.x, centreY);
     arc.setDepth(sprite.depth + 1);
-    arc.setScale(0.72);
+    arc.setScale(0.8);
+    arc.setRotation(-turn * 0.6);
 
     this.scene.tweens.add({
       targets: arc,
       alpha: 0,
       scaleX: 1.1,
       scaleY: 1.1,
+      rotation: turn * 0.6,
       duration: SWING_MS,
       // easeIn, not easeOut: applied to an alpha fading 1->0, easeOut front-loads the drop (arc
       // reads as gone by ~40% of SWING_MS regardless of how long SWING_MS is) — easeIn holds it
       // near-opaque through most of the duration instead, so lengthening SWING_MS actually reads
       // as more visible (Pass F reviewer finding, 2026-09-02).
       ease: "Quad.easeIn",
+      onUpdate: (tween: Phaser.Tweens.Tween) => {
+        if (!sprite.active) {
+          tween.stop();
+          arc.destroy();
+          return;
+        }
+        arc.setPosition(sprite.x, sprite.y - sprite.displayHeight * 0.4);
+        arc.setDepth(sprite.depth + 1);
+      },
       onComplete: () => arc.destroy(),
     });
 
@@ -130,7 +152,6 @@ export class CombatEffects {
       return;
     }
     const centreX = sprite.x;
-    const centreY = sprite.y - TILE_SIZE_PX / 2;
     const angle = SWING_ANGLES[facing];
     const handRadius = SWING_RADIUS_PX * 0.5;
     const weapon = this.scene.add.sprite(
@@ -141,12 +162,24 @@ export class CombatEffects {
     );
     weapon.setDepth(sprite.depth + 1);
     weapon.setScale(0.6);
+    weapon.setRotation(centre - turn * 0.7);
     this.scene.tweens.add({
       targets: weapon,
       scale: 0.85,
       alpha: 0,
+      rotation: centre + turn * 0.7,
       duration: SWING_MS,
       ease: "Quad.easeIn",
+      onUpdate: (tween: Phaser.Tweens.Tween) => {
+        if (!sprite.active) {
+          tween.stop();
+          weapon.destroy();
+          return;
+        }
+        weapon.setPosition(sprite.x + Math.cos(angle) * handRadius,
+          sprite.y - sprite.displayHeight * 0.4 + Math.sin(angle) * handRadius);
+        weapon.setDepth(sprite.depth + 1);
+      },
       onComplete: () => weapon.destroy(),
     });
   }
@@ -244,15 +277,17 @@ export class CombatEffects {
    */
   death(sprite: Phaser.GameObjects.Sprite): void {
     const ghost = this.scene.add.sprite(sprite.x, sprite.y, sprite.texture.key, sprite.frame.name);
-    ghost.setOrigin(0.5, 1);
+    ghost.setOrigin(sprite.originX, sprite.originY);
+    ghost.setScale(sprite.scaleX, sprite.scaleY);
+    ghost.setFlip(sprite.flipX, sprite.flipY);
     ghost.setDepth(sprite.depth);
     ghost.setTint(FLASH_COLOR).setTintMode(Phaser.TintModes.FILL);
 
     this.scene.tweens.add({
       targets: ghost,
       alpha: 0,
-      scaleX: 1.3,
-      scaleY: 0.6,
+      scaleX: sprite.scaleX * 1.3,
+      scaleY: sprite.scaleY * 0.6,
       duration: DEATH_MS,
       ease: "Quad.easeOut",
       onComplete: () => ghost.destroy(),

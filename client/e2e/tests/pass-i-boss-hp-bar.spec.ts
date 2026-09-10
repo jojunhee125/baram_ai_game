@@ -186,8 +186,12 @@ test("보스 HP바는 화면 상단에 고정되고 다른 HUD와 겹치지 않�
     expect(overlaps, `보스 HP바가 ${selector}와 겹친다`).toBe(false);
   }
 
-  // 가운데 정렬.
-  const centreOffset = Math.abs(bar.x + bar.width / 2 - (stage.x + stage.width / 2));
+  // 가운데 정렬 — 기준은 `.stage`가 아니라 실제 게임 화면(`.stage__canvas`)이다. Phase I 당시에는
+  // HUD가 캔버스 위에 겹쳐 있어 둘이 같은 사각형이었지만, 2026-09-11 클래식 UI 병합으로 HUD가
+  // 우측 사이드바로 분리되면서 `.stage`는 사이드바 폭만큼 더 넓어졌다. "보고 있는 화면의 중앙"이
+  // 원래 계약이므로 캔버스를 기준으로 잰다.
+  const canvas = (await client.page.locator(".stage__canvas").boundingBox())!;
+  const centreOffset = Math.abs(bar.x + bar.width / 2 - (canvas.x + canvas.width / 2));
   expect(centreOffset).toBeLessThan(2);
 });
 

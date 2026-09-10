@@ -1,8 +1,10 @@
 import Phaser from "phaser";
 import { AVATAR_SKIN_COUNT, Direction, PATCH_RATE_MS, TILE_SIZE_PX } from "@zep-test/shared";
 import type { PlayerSnapshot } from "../net/roomConnection";
+import { avatarTexture, HERITAGE_AVATAR, HERITAGE_SKIN, heritageWalkFrames, styleAvatar } from "./heritageArt";
 
 export const AVATAR_TEXTURE = "avatar";
+export const AVATAR_ATTACK_TEXTURE = "classic-adventurer-attack";
 
 const FRAMES_PER_DIRECTION = 3;
 const DIRECTIONS_PER_SKIN = 4;
@@ -25,6 +27,7 @@ const ALL_DIRECTIONS: readonly Direction[] = [
 
 interface TrackedPlayer {
   sprite: Phaser.GameObjects.Sprite;
+  attackTimer: Phaser.Time.TimerEvent | null;
   tween: Phaser.Tweens.Tween | null;
   skin: number;
   tileX: number;
@@ -33,6 +36,7 @@ interface TrackedPlayer {
 }
 
 function directionBase(skin: number, facing: Direction): number {
+  if (skin === HERITAGE_SKIN) return facing * FRAMES_PER_DIRECTION;
   return (skin * DIRECTIONS_PER_SKIN + facing) * FRAMES_PER_DIRECTION;
 }
 
@@ -63,8 +67,8 @@ export function registerAvatarAnimations(scene: Phaser.Scene): void {
       const base = directionBase(skin, facing);
       scene.anims.create({
         key,
-        frames: [base, base + 1, base + 2, base + 1].map((frame) => ({
-          key: AVATAR_TEXTURE,
+        frames: (skin === HERITAGE_SKIN ? heritageWalkFrames(facing) : [base, base + 1, base + 2, base + 1]).map((frame) => ({
+          key: skin === HERITAGE_SKIN ? HERITAGE_AVATAR : AVATAR_TEXTURE,
           frame,
         })),
         frameRate: WALK_FRAME_RATE,
@@ -86,15 +90,16 @@ export class PlayerSprites {
     const sprite = this.scene.add.sprite(
       pixelX(snapshot.tileX),
       pixelY(snapshot.tileY),
-      AVATAR_TEXTURE,
+      avatarTexture(snapshot.avatarSkin),
       idleFrame(snapshot.avatarSkin, snapshot.facing),
     );
-    sprite.setOrigin(0.5, 1);
+    styleAvatar(sprite, snapshot.avatarSkin);
     // Depth by row so a player standing lower on the map overlaps one standing higher.
     sprite.setDepth(sprite.y);
 
     this.tracked.set(sessionId, {
       sprite,
+      attackTimer: null,
       tween: null,
       skin: snapshot.avatarSkin,
       tileX: snapshot.tileX,
@@ -123,10 +128,16 @@ export class PlayerSprites {
     // ever read it past `add()` — a live change would otherwise render as the old skin forever,
     // until this player left and re-entered view.
     const skinChanged = snapshot.avatarSkin !== player.skin;
+    if (distance > 0 || turned || skinChanged) this.finishAttack(player);
     player.tileX = snapshot.tileX;
     player.tileY = snapshot.tileY;
     player.facing = snapshot.facing;
     player.skin = snapshot.avatarSkin;
+    if (skinChanged) {
+      player.sprite.stop();
+      player.sprite.setTexture(avatarTexture(player.skin), idleFrame(player.skin, player.facing));
+      styleAvatar(player.sprite, player.skin);
+    }
 
     if (distance > 0) {
       this.stepTo(player, distance > 1);
@@ -147,6 +158,7 @@ export class PlayerSprites {
     if (!player) {
       return;
     }
+    player.attackTimer?.remove(false);
     player.tween?.stop();
     player.sprite.destroy();
     this.tracked.delete(sessionId);
@@ -154,6 +166,34 @@ export class PlayerSprites {
 
   get(sessionId: string): Phaser.GameObjects.Sprite | undefined {
     return this.tracked.get(sessionId)?.sprite;
+  }
+
+  attack(sessionId: string, facing: Direction): boolean {
+    const player = this.tracked.get(sessionId);
+    if (!player || player.skin !== HERITAGE_SKIN || !this.scene.textures.exists(AVATAR_ATTACK_TEXTURE)) return false;
+    this.finishAttack(player);
+    const key = `classic-attack-${facing}`;
+    const frames = facing === Direction.Left ? [3, 4, 8] : facing === Direction.Right ? [6, 7, 5]
+      : [facing * 3, facing * 3 + 1, facing * 3 + 2];
+    if (!this.scene.anims.exists(key)) {
+      this.scene.anims.create({ key, frames: frames.map(frame => ({ key: AVATAR_ATTACK_TEXTURE, frame })),
+        frameRate: 10, repeat: 0 });
+    }
+    player.sprite.stop().setTexture(AVATAR_ATTACK_TEXTURE, frames[0]);
+    styleAvatar(player.sprite, player.skin);
+    player.sprite.play(key);
+    player.attackTimer = this.scene.time.delayedCall(300, () => this.finishAttack(player));
+    return true;
+  }
+
+  private finishAttack(player: TrackedPlayer): void {
+    if (!player.attackTimer) return;
+    player.attackTimer.remove(false);
+    player.attackTimer = null;
+    if (!player.sprite.active) return;
+    player.sprite.stop().setTexture(avatarTexture(player.skin), idleFrame(player.skin, player.facing));
+    styleAvatar(player.sprite, player.skin);
+    if (player.tween) player.sprite.play(walkKey(player.skin, player.facing), true);
   }
 
   private stepTo(player: TrackedPlayer, snap: boolean): void {
@@ -182,6 +222,7 @@ export class PlayerSprites {
       ease: "Linear",
       onComplete: () => {
         player.tween = null;
+        if (player.attackTimer) return;
         player.sprite.stop();
         player.sprite.setFrame(idleFrame(player.skin, player.facing));
       },

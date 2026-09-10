@@ -35,6 +35,11 @@ import { drawInteractableMarkers } from "../world/interactableMarkers";
 import { LocalPlayer } from "../world/localPlayer";
 import { MonsterHealthBars } from "../world/monsterHealthBars";
 import {
+  isHeritageMonsterTexture,
+  preloadHeritageMonsterArt,
+  prepareHeritageMonsterArt,
+} from "../world/heritageMonsterArt";
+import {
   MONSTER_TEXTURE,
   MonsterSprites,
   bossDisplayName,
@@ -43,8 +48,11 @@ import {
 } from "../world/monsterSprites";
 import { NameTags } from "../world/nameTags";
 import { drawPortalMarkers } from "../world/portalMarkers";
+import { CLASSIC_VILLAGE_SOURCE, drawHeritageEnvironment, HERITAGE_AVATAR, HERITAGE_CELL, HERITAGE_ENVIRONMENT, HERITAGE_TERRAIN_SOURCE, registerHeritageTerrain, usesClassicTerrain } from "../world/heritageArt";
+import { RegionGuide } from "../ui/regionGuide";
 import {
   AVATAR_TEXTURE,
+  AVATAR_ATTACK_TEXTURE,
   PlayerSprites,
   registerAvatarAnimations,
   STEP_TWEEN_MS,
@@ -138,6 +146,7 @@ export class WorldScene extends Phaser.Scene {
    * the same footing as `objectPanel?.blocksMovement`, for as long as it is open.
    */
   private skinPickerOpen = false;
+  private regionGuide: RegionGuide | null = null;
 
   constructor() {
     super(WorldScene.KEY);
@@ -173,12 +182,27 @@ export class WorldScene extends Phaser.Scene {
   }
 
   preload(): void {
-    this.load.on(Phaser.Loader.Events.FILE_LOAD_ERROR, (file: Phaser.Loader.File) => {
+    this.load.image(HERITAGE_TERRAIN_SOURCE, "/tilesets/heritage-terrain.png");
+    if (usesClassicTerrain(this.mapKey)) {
+      this.load.image(CLASSIC_VILLAGE_SOURCE, "/tilesets/classic-village-ground.png");
+    }
+    this.load.spritesheet(HERITAGE_AVATAR, "/sprites/heritage-adventurer.png", {
+      frameWidth: HERITAGE_CELL, frameHeight: HERITAGE_CELL,
+    });
+    this.load.spritesheet(AVATAR_ATTACK_TEXTURE, "/sprites/classic-adventurer-attack.png", {
+      frameWidth: HERITAGE_CELL, frameHeight: HERITAGE_CELL,
+    });
+    this.load.image(HERITAGE_ENVIRONMENT, "/sprites/heritage-environment.png");
+    const onLoadError = (file: Phaser.Loader.File): void => {
+      if (isHeritageMonsterTexture(file.key)) {
+        console.warn(`Monster image unavailable: ${file.key}; using legacy art.`);
+        return;
+      }
       showBootError(
         "맵을 불러오지 못했습니다",
         `맵 리소스(${file.key})를 가져오지 못했습니다. 새로고침해 주세요.`,
       );
-    });
+    };
 
     this.load.tilemapTiledJSON(this.mapKey, `/maps/${this.mapKey}.json`);
     this.load.image(TILESET_KEY, `/tilesets/${TILESET_KEY}.png`);
@@ -193,6 +217,11 @@ export class WorldScene extends Phaser.Scene {
       frameWidth: TILE_SIZE_PX,
       frameHeight: TILE_SIZE_PX,
     });
+    this.load.on(Phaser.Loader.Events.FILE_LOAD_ERROR, onLoadError);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.load.off(Phaser.Loader.Events.FILE_LOAD_ERROR, onLoadError);
+    });
+    preloadHeritageMonsterArt(this);
     // Same file the bag window already draws as a CSS background — this is a second, independent
     // loader onto a Phaser texture so the swing overlay can stamp a frame of it onto the canvas.
     this.load.spritesheet(ITEM_TEXTURE, "/sprites/items.png", {
@@ -207,9 +236,10 @@ export class WorldScene extends Phaser.Scene {
       drawPortalMarkers(this, this.connection.portalMarkers);
       drawInteractableMarkers(this, this.connection.interactableMarkers);
       registerAvatarAnimations(this);
-      registerMonsterAnimations(this);
+      const monsterArt = prepareHeritageMonsterArt(this);
+      registerMonsterAnimations(this, monsterArt);
       this.players = new PlayerSprites(this);
-      this.monsters = new MonsterSprites(this);
+      this.monsters = new MonsterSprites(this, monsterArt);
       this.monsterHealth = new MonsterHealthBars(this);
       this.effects = new CombatEffects(this);
       this.bubbles = new ChatBubbles(this);
@@ -265,9 +295,11 @@ export class WorldScene extends Phaser.Scene {
         // The bag is the one window that stays open in a fight, so a pickup lands in it live
         // rather than waiting for the next read.
         this.inventoryPanel?.applyGrant(event);
-        this.weapon?.applyGrant(event);
       },
-      onEquipmentChanged: (event) => this.inventoryPanel?.applyEquipmentChange(event),
+      onEquipmentChanged: (event) => {
+        this.inventoryPanel?.applyEquipmentChange(event);
+        this.weapon?.applyEquipmentChange(event);
+      },
       onMoveRejected: (correction) => this.localPlayer?.applyRejection(correction),
       onTeleported: (destination) => this.localPlayer?.applyTeleport(destination),
       onChat: (message) => this.showChat(message),
@@ -313,6 +345,11 @@ export class WorldScene extends Phaser.Scene {
     this.portalDenialBanner = new PortalDenialBanner();
     this.attackKey = new AttackKey(() => this.swing());
     this.buildMinimap();
+    this.regionGuide = new RegionGuide(this.mapKey);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.regionGuide?.destroy();
+      this.regionGuide = null;
+    });
     // attach() replays the players already in view, so addPlayer() normally does this first.
     this.initLocalPlayer();
     hideBootStatus();
@@ -334,6 +371,8 @@ export class WorldScene extends Phaser.Scene {
     this.vitals?.update();
     // Renderers, not input: these belong above the transition gate with the other two.
     this.minimap?.update(this.observeMinimap());
+    const localSprite = this.players.get(this.connection.sessionId);
+    if (localSprite) this.regionGuide?.update(localSprite.x, localSprite.y);
 
     // Behind the wipe the old room is still live; a step taken here would be applied there.
     if (this.transitioning) {
@@ -405,7 +444,8 @@ export class WorldScene extends Phaser.Scene {
       const weaponFrame = this.weapon?.hasOldDagger
         ? itemFrame(OLD_DAGGER_ITEM_KEY)
         : undefined;
-      this.effects.swing(sprite, this.localPlayer.facing, weaponFrame);
+      const attackPose = this.players.attack(this.connection.sessionId, this.localPlayer.facing);
+      this.effects.swing(sprite, this.localPlayer.facing, weaponFrame, attackPose);
     }
     return true;
   }
@@ -755,7 +795,8 @@ export class WorldScene extends Phaser.Scene {
   private buildWorld(): BuiltWorld {
     const map = this.make.tilemap({ key: this.mapKey });
 
-    const tileset = map.addTilesetImage(TILESET_KEY, TILESET_KEY);
+    const terrainKey = registerHeritageTerrain(this, this.mapKey);
+    const tileset = map.addTilesetImage(TILESET_KEY, terrainKey);
     if (!tileset) {
       throw new Error(`tileset "${TILESET_KEY}" is not embedded in ${this.mapKey}.json`);
     }
@@ -764,6 +805,7 @@ export class WorldScene extends Phaser.Scene {
     this.createTileLayer(map, GROUND_LAYER, tileset);
     const collision = this.createTileLayer(map, COLLISION_LAYER, tileset);
     collision.setCollisionByProperty({ collides: true });
+    drawHeritageEnvironment(this, this.mapKey, collision);
 
     const camera = this.cameras.main;
     camera.setBounds(0, 0, map.widthInPixels, map.heightInPixels);

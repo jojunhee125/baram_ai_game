@@ -3,8 +3,15 @@ import Phaser from "phaser";
 /** Canvas pixels, not tiles: a bar has to stay readable whatever the sprite underneath is. */
 const BAR_WIDTH_PX = 26;
 const BAR_HEIGHT_PX = 4;
-/** Clears the monster's head. Two pixels above where a name tag would sit, which monsters lack. */
-const BAR_OFFSET_Y = 36;
+const NAME_TAG_MIN_OFFSET_Y = 34;
+const NAME_TAG_BODY_GAP_PX = 2;
+const NAME_TAG_CLEARANCE_PX = 24;
+
+function barY(sprite: Phaser.GameObjects.Sprite): number {
+  return sprite.y - Math.max(NAME_TAG_MIN_OFFSET_Y,
+    sprite.displayHeight * sprite.originY + NAME_TAG_BODY_GAP_PX) -
+    NAME_TAG_CLEARANCE_PX - BAR_HEIGHT_PX;
+}
 
 const BAR_BACKDROP = 0x14131a;
 const BAR_TRACK = 0x3a3950;
@@ -58,7 +65,7 @@ export class MonsterHealthBars {
 
     const graphics = this.scene.add.graphics();
     graphics.setDepth(BAR_DEPTH);
-    graphics.setPosition(sprite.x, sprite.y - BAR_OFFSET_Y);
+    graphics.setPosition(sprite.x, barY(sprite));
     draw(graphics, ratio);
     this.bars.set(monsterId, { graphics, sprite, ratio });
   }
@@ -73,7 +80,7 @@ export class MonsterHealthBars {
         this.bars.delete(monsterId);
         continue;
       }
-      bar.graphics.setPosition(bar.sprite.x, bar.sprite.y - BAR_OFFSET_Y);
+      bar.graphics.setPosition(bar.sprite.x, barY(bar.sprite));
     }
   }
 

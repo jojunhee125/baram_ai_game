@@ -23,7 +23,7 @@ export class ChatBubbles {
     this.active.get(sessionId)?.label.destroy();
 
     const body = text.length > MAX_BUBBLE_CHARS ? `${text.slice(0, MAX_BUBBLE_CHARS)}…` : text;
-    const label = this.scene.add.text(sprite.x, sprite.y - BUBBLE_OFFSET_Y, body, {
+    const label = this.scene.add.text(sprite.x, sprite.y - Math.max(BUBBLE_OFFSET_Y, sprite.displayHeight * sprite.originY + 18), body, {
       fontFamily: '"Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif',
       // Matches the name tag: see nameTags.ts for why 12px and not 13px.
       fontSize: "12px",
@@ -50,7 +50,7 @@ export class ChatBubbles {
         this.active.delete(sessionId);
         continue;
       }
-      bubble.label.setPosition(bubble.sprite.x, bubble.sprite.y - BUBBLE_OFFSET_Y);
+      bubble.label.setPosition(bubble.sprite.x, bubble.sprite.y - Math.max(BUBBLE_OFFSET_Y, bubble.sprite.displayHeight * bubble.sprite.originY + 18));
     }
   }
 

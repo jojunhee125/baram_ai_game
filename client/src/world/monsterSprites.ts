@@ -1,6 +1,11 @@
 import Phaser from "phaser";
-import { Direction, TILE_SIZE_PX } from "@zep-test/shared";
+import { Direction, PATCH_RATE_MS, TILE_SIZE_PX } from "@zep-test/shared";
 import type { MonsterSnapshot } from "../net/roomConnection";
+import {
+  prepareHeritageMonsterArt,
+  type HeritageMonsterArt,
+  type MonsterAppearance,
+} from "./heritageMonsterArt";
 
 export const MONSTER_TEXTURE = "monster";
 
@@ -15,18 +20,11 @@ const DIRECTIONS_PER_KIND = 4;
  */
 export const MONSTER_SPRITE_ORDER = ["squirrel", "rabbit", "deer", "boss"] as const;
 
-/**
- * One tile of monster movement. Sized like STEP_TWEEN_MS — the shortest step interval any kind
- * uses, plus a margin — so consecutive chase steps blend instead of dropping back to idle between
- * tiles, while a wander step (over a second apart) finishes and rests.
- *
- * A per-kind value would be more precise and is deliberately not taken: the client holds no
- * monster stat table (design §8.3), so it uses the one bound that holds for every kind.
- */
-export const MONSTER_STEP_TWEEN_MS = 420;
+/** Catch up within one state-patch interval, rather than trailing the authoritative attack tile. */
+export const MONSTER_STEP_TWEEN_MS = PATCH_RATE_MS;
 
-/** The avatar's 16fps is tuned to a 120ms step. This is the same two-frames-per-tile feel at 420. */
-const MONSTER_WALK_FRAME_RATE = 5;
+/** Two animation frames per rendered tile step; server movement cadence remains unchanged. */
+const MONSTER_WALK_FRAME_RATE = 2000 / MONSTER_STEP_TWEEN_MS;
 
 const ALL_DIRECTIONS: readonly Direction[] = [
   Direction.Down,
@@ -38,7 +36,7 @@ const ALL_DIRECTIONS: readonly Direction[] = [
 interface TrackedMonster {
   sprite: Phaser.GameObjects.Sprite;
   tween: Phaser.Tweens.Tween | null;
-  kindIndex: number;
+  art: MonsterAppearance;
   tileX: number;
   tileY: number;
   facing: Direction;
@@ -90,16 +88,27 @@ export function monsterDisplayName(kind: string): string {
   return MONSTER_DISPLAY_NAMES[kind] ?? kind;
 }
 
-function directionBase(kindIndex: number, facing: Direction): number {
-  return (kindIndex * DIRECTIONS_PER_KIND + facing) * FRAMES_PER_DIRECTION;
+function resolveMonsterVisual(art: HeritageMonsterArt, kind: string): MonsterAppearance {
+  return art.get(kind) ?? {
+    textureKey: MONSTER_TEXTURE,
+    firstFrame: kindIndexOf(kind) * DIRECTIONS_PER_KIND * FRAMES_PER_DIRECTION,
+    logicalCellPx: TILE_SIZE_PX,
+    displayCellPx: TILE_SIZE_PX,
+    feetY: TILE_SIZE_PX,
+  };
 }
 
-function idleFrame(kindIndex: number, facing: Direction): number {
-  return directionBase(kindIndex, facing) + 1;
+function directionBase(art: MonsterAppearance, facing: Direction): number {
+  return art.firstFrame + facing * FRAMES_PER_DIRECTION;
 }
 
-function walkKey(kindIndex: number, facing: Direction): string {
-  return `monster-walk-${kindIndex}-${facing}`;
+function idleFrame(art: MonsterAppearance, facing: Direction): number {
+  return directionBase(art, facing) + 1;
+}
+
+function walkKey(art: MonsterAppearance, facing: Direction): string {
+  const kindIndex = art.firstFrame / (DIRECTIONS_PER_KIND * FRAMES_PER_DIRECTION);
+  return `${art.textureKey}-walk-${kindIndex}-${facing}`;
 }
 
 function pixelX(tileX: number): number {
@@ -111,23 +120,31 @@ function pixelY(tileY: number): number {
   return (tileY + 1) * TILE_SIZE_PX;
 }
 
-export function registerMonsterAnimations(scene: Phaser.Scene): void {
-  for (let kindIndex = 0; kindIndex < MONSTER_SPRITE_ORDER.length; kindIndex += 1) {
-    for (const facing of ALL_DIRECTIONS) {
-      const key = walkKey(kindIndex, facing);
-      if (scene.anims.exists(key)) {
-        continue;
+export function registerMonsterAnimations(
+  scene: Phaser.Scene,
+  appearances: HeritageMonsterArt = prepareHeritageMonsterArt(scene),
+): void {
+  for (const kind of MONSTER_SPRITE_ORDER) {
+    const legacy = resolveMonsterVisual(new Map(), kind);
+    const resolved = resolveMonsterVisual(appearances, kind);
+    const variants = resolved.textureKey === MONSTER_TEXTURE ? [legacy] : [legacy, resolved];
+    for (const art of variants) {
+      for (const facing of ALL_DIRECTIONS) {
+        const key = walkKey(art, facing);
+        if (scene.anims.exists(key)) {
+          continue;
+        }
+        const base = directionBase(art, facing);
+        scene.anims.create({
+          key,
+          frames: [base, base + 1, base + 2, base + 1].map((frame) => ({
+            key: art.textureKey,
+            frame,
+          })),
+          frameRate: MONSTER_WALK_FRAME_RATE,
+          repeat: -1,
+        });
       }
-      const base = directionBase(kindIndex, facing);
-      scene.anims.create({
-        key,
-        frames: [base, base + 1, base + 2, base + 1].map((frame) => ({
-          key: MONSTER_TEXTURE,
-          frame,
-        })),
-        frameRate: MONSTER_WALK_FRAME_RATE,
-        repeat: -1,
-      });
     }
   }
 }
@@ -150,25 +167,29 @@ export function registerMonsterAnimations(scene: Phaser.Scene): void {
 export class MonsterSprites {
   private readonly tracked = new Map<string, TrackedMonster>();
 
-  constructor(private readonly scene: Phaser.Scene) {}
+  constructor(
+    private readonly scene: Phaser.Scene,
+    private readonly appearances: HeritageMonsterArt = prepareHeritageMonsterArt(scene),
+  ) {}
 
   add(monsterId: string, snapshot: MonsterSnapshot): Phaser.GameObjects.Sprite {
     this.remove(monsterId);
 
-    const kindIndex = kindIndexOf(snapshot.kind);
+    const art = resolveMonsterVisual(this.appearances, snapshot.kind);
     const sprite = this.scene.add.sprite(
       pixelX(snapshot.tileX),
       pixelY(snapshot.tileY),
-      MONSTER_TEXTURE,
-      idleFrame(kindIndex, snapshot.facing),
+      art.textureKey,
+      idleFrame(art, snapshot.facing),
     );
-    sprite.setOrigin(0.5, 1);
+    sprite.setDisplaySize(art.displayCellPx, art.displayCellPx);
+    sprite.setOrigin(0.5, art.feetY / art.logicalCellPx);
     sprite.setDepth(sprite.y);
 
     this.tracked.set(monsterId, {
       sprite,
       tween: null,
-      kindIndex,
+      art,
       tileX: snapshot.tileX,
       tileY: snapshot.tileY,
       facing: snapshot.facing,
@@ -199,9 +220,9 @@ export class MonsterSprites {
     }
     if (turned) {
       if (monster.tween) {
-        monster.sprite.play(walkKey(monster.kindIndex, monster.facing), true);
+        monster.sprite.play(walkKey(monster.art, monster.facing), true);
       } else {
-        monster.sprite.setFrame(idleFrame(monster.kindIndex, monster.facing));
+        monster.sprite.setFrame(idleFrame(monster.art, monster.facing));
       }
     }
   }
@@ -235,11 +256,11 @@ export class MonsterSprites {
       monster.tween = null;
       monster.sprite.setPosition(pixelX(monster.tileX), targetY);
       monster.sprite.stop();
-      monster.sprite.setFrame(idleFrame(monster.kindIndex, monster.facing));
+      monster.sprite.setFrame(idleFrame(monster.art, monster.facing));
       return;
     }
 
-    monster.sprite.play(walkKey(monster.kindIndex, monster.facing), true);
+    monster.sprite.play(walkKey(monster.art, monster.facing), true);
 
     monster.tween = this.scene.tweens.add({
       targets: monster.sprite,
@@ -250,7 +271,7 @@ export class MonsterSprites {
       onComplete: () => {
         monster.tween = null;
         monster.sprite.stop();
-        monster.sprite.setFrame(idleFrame(monster.kindIndex, monster.facing));
+        monster.sprite.setFrame(idleFrame(monster.art, monster.facing));
       },
     });
   }

@@ -72,10 +72,20 @@ test("퀴즈대(47,8)는 여전히 밟으면 이동이 멈추고, 패널을 닫�
 
   // Row 20 (x=16..47) and column x=47 (y=8..20) are both fully walkable (verified against the
   // collision layer) and cross no door trigger, unlike the shorter path through the NPC's row.
-  await holdKey(client.page, "ArrowRight", 1960); // (31,20) -> (47,20), 16 steps
-  await client.page.waitForTimeout(80);
-  await holdKey(client.page, "ArrowUp", 1480); // (47,20) -> (47,8), 12 steps, lands on the quiz stand
-  await client.page.waitForTimeout(150);
+  // Wait for the reached tile instead of assuming a fixed number of rendered frames.
+  // On slower browsers the old 1960ms hold ended at x=46 and never reached the quiz.
+  await client.page.keyboard.down("ArrowRight");
+  try {
+    await expect(client.page.getByLabel("현재 좌표")).toHaveText("47, 20", { timeout: 8000 });
+  } finally {
+    await client.page.keyboard.up("ArrowRight");
+  }
+  await client.page.keyboard.down("ArrowUp");
+  try {
+    await expect(client.page.locator("#object-panel")).toBeVisible({ timeout: 8000 });
+  } finally {
+    await client.page.keyboard.up("ArrowUp");
+  }
 
   await expect(client.page.locator("#object-panel")).toBeVisible();
   await expect(client.page.locator("#object-panel-kind")).toHaveText("퀴즈");

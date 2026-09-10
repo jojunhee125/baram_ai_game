@@ -1,0 +1,147 @@
+:root {
+  color-scheme: dark;
+  --surface-base: #211a13;
+  --surface-raised: #352a1e;
+  --surface-hover: #50402c;
+  --border-subtle: #756044;
+  --border-strong: #c4aa78;
+  --text-primary: #f4e9cd;
+  --text-muted: #c7b797;
+  --accent: #e3c782;
+  --radius: 0px;
+}
+body { background: #18130f; }
+.stage {
+  --sidebar-width: 240px;
+  --footer-height: 132px;
+  width: min(100%, calc((100dvh - var(--space-8) - var(--footer-height) - 2px) * 16 / 9 + var(--sidebar-width)));
+  aspect-ratio: auto;
+  background: #292117;
+  border-color: #c4aa78;
+  box-shadow: 0 0 0 2px #463421, 0 0 0 3px #a78d60;
+  font-family: Dotum, "돋움", Gulim, "굴림", sans-serif;
+}
+.stage__canvas {
+  position: relative;
+  inset: auto;
+  width: calc(100% - var(--sidebar-width));
+  aspect-ratio: 16 / 9;
+  margin-bottom: var(--footer-height);
+}
+.chat {
+  left: 0;
+  bottom: 0;
+  width: calc(100% - var(--sidebar-width));
+  height: var(--footer-height);
+  gap: 0;
+}
+.chat__log { flex: 1; min-height: 0; max-height: none; }
+.chat__input { flex: none; }
+.vitals {
+  top: auto;
+  left: auto;
+  right: 0;
+  bottom: 0;
+  width: var(--sidebar-width);
+  height: var(--footer-height);
+  padding: 16px 12px;
+}
+.hud {
+  top: 0;
+  right: 0;
+  bottom: var(--footer-height);
+  width: var(--sidebar-width);
+  max-height: none;
+  padding: 8px;
+  overflow-y: auto;
+  background: #352a1e;
+  border-left: 2px solid #b59c70;
+  pointer-events: auto;
+}
+.hud > * { flex-shrink: 0; }
+.hud__controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+  gap: 4px;
+}
+.hud .hud__button { width: 100%; justify-content: center; padding: 0 4px; }
+.hud__button .visually-hidden {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  clip-path: none;
+  overflow: visible;
+  font-size: 11px;
+}
+.hud__icon { display: none; }
+/* 가로만 옮긴다: HUD가 우측 사이드바로 빠져 게임 영역이 좁아졌으므로 중앙은 캔버스 기준이다.
+   `top`은 style.css 값을 그대로 쓴다 — 첫 줄은 `.notice`/`#portal-denial-banner`가 쓰고 보스바는
+   그 아래라는 Phase I 계약(style.css `.boss-vitals` 주석)이며, 여기서 8px로 올리면 보스전 중
+   "이동하지 못했습니다"가 가려진다. */
+.boss-vitals { left: calc((100% - var(--sidebar-width)) / 2); }
+.toasts { right: calc(var(--sidebar-width) + 8px); bottom: calc(var(--footer-height) + 8px); }
+.chat__log, .chat__input, .vitals, .boss-vitals, .minimap,
+.bag, .loot-table, .character-menu, .landmark-panel {
+  background: #292117;
+  color: #f4e9cd;
+  border: 2px solid;
+  border-color: #b59c70 #51402b #51402b #b59c70;
+  border-radius: 0;
+  box-shadow: inset 0 0 0 1px #17120d;
+}
+.chat__log { line-height: 1.6; }
+.chat__input:focus { background: #191510; }
+.chat__empty, .chat__input::placeholder { color: #c7b797; }
+.bag__header, .loot-table__header, .character-menu__header, .landmark-panel__header {
+  padding-bottom: 6px;
+  border-bottom: 1px solid #92794f;
+  color: #eed8a6;
+}
+.hud__button, .character-menu__item, .landmark-panel__item,
+.bag__equip, .bag__close, .loot-table__close, .character-menu__close, .landmark-panel__close {
+  border: 2px solid;
+  border-color: #d5bd8b #59452e #59452e #d5bd8b;
+  border-radius: 0;
+  background: #79613f;
+  color: #fff3d7;
+  box-shadow: inset 0 0 0 1px #92794f;
+}
+.hud__button:hover:not(:disabled), .character-menu__item:hover,
+.landmark-panel__item:hover:not(:disabled) {
+  background: #917449;
+  border-color: #ead4a6 #59452e #59452e #ead4a6;
+}
+.hud__button[aria-expanded="true"] {
+  background: #3c2d1e;
+  border-color: #59452e #d5bd8b #d5bd8b #59452e;
+  color: #ffe4a3;
+}
+.bag__slot { border-radius: 0; }
+.bag__slot-label { color: #c7b797; }
+.vitals__attack-status { margin-left: auto; color: #e3c782; white-space: nowrap; }
+.vitals[data-attack="cooling"] .vitals__hint { opacity: 1; }
+.vitals[data-attack="cooling"] .vitals__attack-status { color: #c7b797; }
+.vitals__cooldown { height: 6px; border: 1px solid #756044; border-radius: 0; }
+.vitals__cooldown-fill { background: #e3c782; }
+.region-guide {
+  position: absolute; left: 8px; top: 8px; z-index: 4;
+  width: min(270px, 32%); padding: 10px 12px;
+  color: #f4e9cd; background: #292117; border: 2px solid;
+  border-color: #b59c70 #51402b #51402b #b59c70; border-radius: 0;
+  box-shadow: inset 0 0 0 1px #17120d; font-size: 12px;
+}
+.region-guide__kind { display: block; color: #c5b786; font-size: 10px; letter-spacing: .15em; }
+.region-guide strong { display: block; margin-top: 3px; font-size: 15px; font-weight: 600; }
+.region-guide__coordinates { display: block; color: #c7b797; font-variant-numeric: tabular-nums; font-size: 11px; }
+.region-guide details { margin-top: 6px; border-top: 1px solid #ffffff19; padding-top: 6px; }
+.region-guide summary { cursor: pointer; color: #d7c89b; }
+.region-guide summary:focus-visible { outline: 2px solid #d7c89b; outline-offset: 3px; }
+.region-guide p { margin: 7px 0 0; line-height: 1.65; }
+@media (max-width: 720px) {
+  .stage { --sidebar-width: 180px; --footer-height: 112px; }
+  .hud__controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .region-guide { width: 180px; max-width: calc(100% - var(--sidebar-width) - 16px); padding: 6px 8px; font-size: 10px; }
+  .region-guide strong { font-size: 12px; }
+}

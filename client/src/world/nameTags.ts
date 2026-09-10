@@ -25,7 +25,7 @@ export class NameTags {
   add(id: string, sprite: Phaser.GameObjects.Sprite, label: string): void {
     this.remove(id);
 
-    const text = this.scene.add.text(sprite.x, sprite.y - NAME_TAG_OFFSET_Y, label, {
+    const text = this.scene.add.text(sprite.x, sprite.y - Math.max(NAME_TAG_OFFSET_Y, sprite.displayHeight * sprite.originY + 2), label, {
       fontFamily: '"Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif',
       // Sized against the 32x18 canvas: 11px shrank to ~17px on screen once the viewport
       // widened, below what the old 20x15 layout rendered at. Kept at 12px rather than 13px so
@@ -64,7 +64,7 @@ export class NameTags {
    */
   private layout(): void {
     for (const { text, sprite } of this.active.values()) {
-      text.setPosition(sprite.x, sprite.y - NAME_TAG_OFFSET_Y);
+      text.setPosition(sprite.x, sprite.y - Math.max(NAME_TAG_OFFSET_Y, sprite.displayHeight * sprite.originY + 2));
     }
     const groups = new Map<string, string[]>();
     for (const [id, { sprite }] of this.active) {
@@ -81,13 +81,13 @@ export class NameTags {
         continue;
       }
       ids.sort();
+      // Different skins can have different heights. Stack the entire group above its tallest
+      // member, or a short avatar's second label may overlap a tall avatar's first label.
+      const top = Math.min(...ids.map(id => this.active.get(id)!.text.y));
       ids.forEach((id, index) => {
-        if (index === 0) {
-          return;
-        }
         const tracked = this.active.get(id);
         if (tracked) {
-          tracked.text.y -= index * STACK_OFFSET_PX;
+          tracked.text.y = top - index * STACK_OFFSET_PX;
         }
       });
     }
