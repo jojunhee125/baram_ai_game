@@ -69,6 +69,15 @@ export interface MonsterType {
   respawnDelayMs: number;
   loot: readonly LootEntry[];
   /**
+   * EXP credited to whoever last hit this monster (design-phase-w-level-system.md §4.1, §11 —
+   * last-hit, `awardLoot`'s own rule reused). A positive integer, boot-validated the way loot's
+   * `chance`/`quantity` already are (`validateMonsterSpawnDefinitions`). Hand-tuned per kind rather
+   * than derived from `maxHp`/`damage`: this table's stats have always been set by feel and
+   * live-play feedback (the comment above this map documents two such retunings), and `expReward`
+   * is the same kind of number.
+   */
+  expReward: number;
+  /**
    * True only for the boss kind. Boot validation requires every spawn row with
    * {@link MonsterSpawnDefinition.persistentRespawn} to name a kind with this set, and vice versa
    * (design §7) — the pairing is what stops a typo from silently giving a squirrel row DB-backed
@@ -115,6 +124,8 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       aggroRadiusTiles: 2,
       leashRadiusTiles: 8,
       respawnDelayMs: 8000,
+      /** Phase W-1, decisions.md 2026-09-11: reverse-tuned so ~5,000 average kills clear LEVEL_CAP. */
+      expReward: 4,
       loot: [
         { itemKey: "acorn", chance: 0.6, quantity: 1 },
         { itemKey: "copper-coin", chance: 0.25, quantity: 1 },
@@ -141,6 +152,8 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       aggroRadiusTiles: 2,
       leashRadiusTiles: 10,
       respawnDelayMs: 12000,
+      /** Phase W-1: squirrel(4) < rabbit(7) < deer(11) « boss(600), the hits-to-kill ordering §4.1 asks for. */
+      expReward: 7,
       loot: [
         { itemKey: "carrot", chance: 0.55, quantity: 1 },
         { itemKey: "copper-coin", chance: 0.35, quantity: 1 },
@@ -175,6 +188,8 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       leashRadiusTiles: 10,
       /** Continues the den's respawn arithmetic (8000, 12000, +4000). */
       respawnDelayMs: 16000,
+      /** Phase W-1: squirrel(4) < rabbit(7) < deer(11) « boss(600). */
+      expReward: 11,
       loot: [
         { itemKey: "herb", chance: 0.5, quantity: 1 },
         { itemKey: "copper-coin", chance: 0.3, quantity: 1 },
@@ -208,6 +223,8 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       /** Rabbit/deer's own value, reused rather than inventing a new one. */
       leashRadiusTiles: 10,
       respawnDelayMs: BOSS_RESPAWN_MS,
+      /** Phase W-1: far above deer(11), matching the same "the delay is a bigger number" move maxHp/respawnDelayMs already made. */
+      expReward: 600,
       loot: [{ itemKey: "golden-helmet", chance: 0.25, quantity: 1 }],
     },
   ],
@@ -372,6 +389,11 @@ export function validateMonsterSpawnDefinitions(
       // The map key is what a spawn row names and `type.kind` is what the wire carries, so a
       // mismatch renders one monster as another without anything else noticing.
       errors.push(`${label} is filed under a key that does not match its own kind "${type.kind}"`);
+    }
+    if (!Number.isInteger(type.expReward) || type.expReward <= 0) {
+      // Same spot, same pattern as the loot chance/quantity checks just below: a kill that grants
+      // 0, a negative amount or a fraction is a typo that boot should catch, not `awardExp`.
+      errors.push(`${label} has an expReward of ${type.expReward}, which is not a positive integer`);
     }
     for (const [index, entry] of type.loot.entries()) {
       const line = `${label} loot row ${index}`;

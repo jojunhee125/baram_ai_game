@@ -135,8 +135,25 @@ export const COMBAT_EXIT_MS = 2000;
  *
  * Recovery rides the monster tick, so it runs only in a room that has monsters. That is the only
  * room where health can be lost, and any room change restores it anyway.
+ *
+ * Superseded server-side by COMBAT_RECOVERY_FRACTION_PER_TICK (Phase W-1, 2026-09-11): a level's
+ * `totalMaxHp` (design-phase-w-level-system.md §4.2) varies per session, so `recoverOutOfCombat`
+ * now recomputes this fraction against each session's own max instead of adding one shared
+ * absolute number. Kept exported and unchanged for the client (`playerVitals.ts`), which still
+ * mirrors the old absolute curve until Phase W-2 teaches it about levels — the two constants agree
+ * exactly at level 1 (`round(100 * 0.03) === 3`), which is the anchor invariant that makes today's
+ * client harmless to leave alone.
  */
 export const COMBAT_RECOVERY_HP_PER_TICK = 3;
+
+/**
+ * Fraction of `totalMaxHp` restored per MONSTER_TICK_MS once out of combat — the server-side
+ * successor to COMBAT_RECOVERY_HP_PER_TICK (Phase W-1, design §4.4). 3/100 = 0.03 is not a new
+ * number: it is the ratio COMBAT_RECOVERY_HP_PER_TICK already had against PLAYER_MAX_HP, made
+ * explicit so it scales with a leveled-up session's larger `totalMaxHp` instead of leaving
+ * absolute recovery time worse the higher a player's level climbs.
+ */
+export const COMBAT_RECOVERY_FRACTION_PER_TICK = 0.03;
 
 /**
  * Number of selectable avatar variants. Must equal the skin block count baked into

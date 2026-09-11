@@ -94,6 +94,7 @@ const ONE_HIT_ENTRY_PASS_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map(
       aggroRadiusTiles: 0,
       leashRadiusTiles: 0,
       respawnDelayMs: MONSTER_TICK_MS * 100_000,
+      expReward: 1,
       loot: [{ itemKey: "entry-pass", chance: 1, quantity: 1 }],
     },
   ],

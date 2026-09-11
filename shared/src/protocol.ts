@@ -169,6 +169,8 @@ export const ServerMessage = {
   PlayerHit: "combat:player-hit",
   ItemGranted: "inventory:granted",
   EquipmentChanged: "equipment:changed",
+  /** design-phase-w-level-system.md §6 — one kill's EXP, and a level-up if this pushes past one. */
+  ExpGranted: "progress:exp-granted",
 } as const;
 
 export type ServerMessage = (typeof ServerMessage)[keyof typeof ServerMessage];
@@ -439,6 +441,37 @@ export interface EquipmentChanged {
   applied: boolean;
 }
 
+/**
+ * One kill's EXP, unicast to the killer only — {@link ItemGranted}'s own shape and reason.
+ * `hpRemaining === 0` is never sent here (a level-up cannot happen while dead: `awardExp` only
+ * runs after a kill, and killing requires being alive) — {@link PlayerHit}'s death notice, not
+ * this message, remains the one source of "you died".
+ *
+ * No separate "level up" message: if `level` is greater than what the client already believed,
+ * that rise *is* the level-up notice — the same "two messages that always travel together are one
+ * message" reasoning {@link MonsterHit}'s own doc comment gives.
+ */
+export interface ExpGranted {
+  monsterId: string;
+  /** EXP this one kill granted. */
+  amount: number;
+  /** Cumulative EXP after this grant — the server's own truth, never a client-side running total. */
+  totalExp: number;
+  /** The level `totalExp` maps to. Greater than what the client last knew is the level-up itself. */
+  level: number;
+  /** EXP still needed for the next level, or `null` once `level` has reached the cap. */
+  expToNextLevel: number | null;
+  /**
+   * Paired with {@link PlayerHit}'s own hp fields: a level-up is always a full heal (design §6), so
+   * `hpRemaining === hpMax` here whenever `level` just rose. When it did not, these simply echo the
+   * session's current numbers — the same "next message carries the server's real number" correction
+   * {@link PlayerHit} already relies on, applied here since a kill is also the moment `hpMax` itself
+   * may have just grown (a level's `totalMaxHp`, design §4.2).
+   */
+  hpMax: number;
+  hpRemaining: number;
+}
+
 export interface ServerMessagePayload {
   [ServerMessage.Chat]: ChatBroadcast;
   [ServerMessage.MoveRejected]: MoveRejected;
@@ -451,4 +484,5 @@ export interface ServerMessagePayload {
   [ServerMessage.PlayerHit]: PlayerHit;
   [ServerMessage.ItemGranted]: ItemGranted;
   [ServerMessage.EquipmentChanged]: EquipmentChanged;
+  [ServerMessage.ExpGranted]: ExpGranted;
 }

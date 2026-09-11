@@ -1,6 +1,7 @@
 import type { Client } from "colyseus";
 import type { BossStateStore } from "../db/bossStateStore";
 import type { InventoryStore } from "../db/inventoryStore";
+import type { ProgressStore } from "../db/progressStore";
 // `InteractableKind` is imported as a value, not just as a type: the authored table's
 // discriminant and the wire union's have to be the same string, so both read it from one place.
 import {
@@ -52,6 +53,21 @@ export interface RoomCreateOptions {
    * defeat time back from (design-phase-i-boss-monster.md §2.4).
    */
   bossStateStore?: BossStateStore;
+  /**
+   * Where an account's cumulative EXP is filed, injected the same way and for the same reason as
+   * {@link inventoryStore}/{@link bossStateStore} (design-phase-w-level-system.md §5). Optional
+   * for the same reason too: the tests, the load-test harness and `npm run dev` all build rooms
+   * without one, and a room with no store still fights and still levels up sessions in memory — it
+   * just never persists the total past this room instance (`MetaverseRoom.hydrateProgressCache`/
+   * `awardExp` both no-op past the null check).
+   */
+  progressStore?: ProgressStore;
+  /**
+   * The death EXP penalty (design §11.0) exempts these accounts entirely — an env-configured
+   * allowlist (`ADMIN_OWNER_KEYS`), never a key literal in this codebase. Undefined means nobody is
+   * exempt, which is every test, the load-test harness and `npm run dev` unless they opt in.
+   */
+  adminOwnerKeys?: ReadonlySet<string>;
   /**
    * The real gameplay population cap, enforced by `onJoin` throwing past it — distinct from
    * `maxClients`, which only bounds when Colyseus's own matchmaker opens a second instance of this
@@ -428,6 +444,14 @@ export interface PlayerSession {
    * "Taken", not "dealt" — attacking something does not keep you in combat, being attacked does.
    */
   lastDamagedAt: number;
+  /**
+   * Cumulative EXP, cached the way `hp` is: never in `RoomState` (design-phase-w-level-system.md
+   * §2 — an exact running total is the same kind of "the account's own business" number HP is),
+   * and 0 until a `hasMonsters` room's `hydrateProgressCache` catches it up or this session's own
+   * `awardExp` grants some. `Player.level` (the public schema field) is always
+   * `levelForExp(totalExp)` — never a second value kept in step by hand.
+   */
+  totalExp: number;
   /**
    * The account this session's drops are filed under, taken from the SSO token at `onAuth`, and
    * null everywhere there is no SSO. Null is not a refusal: a grant then goes to the in-memory

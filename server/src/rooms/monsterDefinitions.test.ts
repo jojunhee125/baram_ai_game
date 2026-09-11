@@ -42,7 +42,7 @@ function mapsFor(...rooms: string[]): ReadonlyMap<string, CollisionMap> {
   return new Map(rooms.map((room) => [room, MAP]));
 }
 
-const ONE_TYPE = (loot: MonsterType["loot"]): ReadonlyMap<MonsterKind, MonsterType> =>
+const ONE_TYPE = (loot: MonsterType["loot"], expReward = 4): ReadonlyMap<MonsterKind, MonsterType> =>
   new Map([
     [
       MonsterKind.Squirrel,
@@ -56,6 +56,7 @@ const ONE_TYPE = (loot: MonsterType["loot"]): ReadonlyMap<MonsterKind, MonsterTy
         aggroRadiusTiles: 2,
         leashRadiusTiles: 8,
         respawnDelayMs: 8000,
+        expReward,
         loot,
       },
     ],
@@ -153,6 +154,33 @@ describe("validateMonsterSpawnDefinitions", () => {
       assert.equal(errors.length, 1, `quantity ${quantity}`);
       assert.match(errors[0] ?? "", /not a positive integer/);
     }
+  });
+
+  it("rejects a non-positive-integer expReward", () => {
+    for (const expReward of [0, -1, 1.5]) {
+      const { errors } = validateMonsterSpawnDefinitions(
+        [oneSpawn()],
+        ONE_TYPE([], expReward),
+        ITEMS,
+        mapsFor("a"),
+        NO_PORTALS,
+        NO_OBJECTS,
+      );
+      assert.equal(errors.length, 1, `expReward ${expReward}`);
+      assert.match(errors[0] ?? "", /not a positive integer/);
+    }
+  });
+
+  it("accepts a positive integer expReward", () => {
+    const { errors } = validateMonsterSpawnDefinitions(
+      [oneSpawn()],
+      ONE_TYPE([], 4),
+      ITEMS,
+      mapsFor("a"),
+      NO_PORTALS,
+      NO_OBJECTS,
+    );
+    assert.deepEqual(errors, []);
   });
 
   it("rejects a monster type filed under a key that does not match its own kind", () => {

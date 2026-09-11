@@ -75,6 +75,7 @@ const FIXTURE_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       aggroRadiusTiles: 6,
       leashRadiusTiles: 10,
       respawnDelayMs: MONSTER_TICK_MS * 5,
+      expReward: 4,
       loot: [
         { itemKey: "acorn", chance: 1, quantity: 2 },
         { itemKey: "herb", chance: 0.0001, quantity: 1 },
@@ -95,6 +96,7 @@ const FIXTURE_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       aggroRadiusTiles: 6,
       leashRadiusTiles: 10,
       respawnDelayMs: MONSTER_TICK_MS * 5,
+      expReward: 7,
       loot: [
         { itemKey: "acorn", chance: 1, quantity: 1 },
         { itemKey: "herb", chance: 1, quantity: 1 },

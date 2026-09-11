@@ -11,6 +11,14 @@ export const Player = schema({
   /** Direction enum value. */
   facing: "uint8",
   avatarSkin: "uint8",
+  /**
+   * Public — the same "everyone in view sees it" treatment as `nickname` (design-phase-w-level-
+   * system.md §2), not the session-only treatment `hp` gets: a level changes at most a few dozen
+   * times in a session, at the moment of a level-up, so the patch cost is nowhere near HP's
+   * every-hit rate. Always set at spawn (never left unassigned) so it is never the schema's own
+   * `undefined` default — see `MetaverseRoom.onJoin`.
+   */
+  level: "uint8",
 });
 
 export type Player = SchemaType<typeof Player>;

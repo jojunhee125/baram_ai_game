@@ -833,6 +833,7 @@ const FIXTURE_MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       aggroRadiusTiles: 6,
       leashRadiusTiles: 10,
       respawnDelayMs: MONSTER_TICK_MS * 5,
+      expReward: 1,
       loot: [],
     },
   ],

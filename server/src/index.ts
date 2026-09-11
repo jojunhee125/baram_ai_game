@@ -11,13 +11,19 @@ import {
 import { runMigrations } from "./db/migrate";
 import { createPool, resolveDatabaseUrl } from "./db/pool";
 import { InMemoryProfileStore, PostgresProfileStore, type ProfileStore } from "./db/profileStore";
+import {
+  InMemoryProgressStore,
+  PostgresProgressStore,
+  type ProgressStore,
+} from "./db/progressStore";
 import { markDatabaseOk } from "./db/status";
-import { createGameServer, resolvePort } from "./server";
+import { createGameServer, resolveAdminOwnerKeys, resolvePort } from "./server";
 
 const databaseUrl = resolveDatabaseUrl(process.env.DATABASE_URL);
 let profileStore: ProfileStore;
 let inventoryStore: InventoryStore;
 let bossStateStore: BossStateStore;
+let progressStore: ProgressStore;
 
 if (databaseUrl === null) {
   // A supported mode, not a misconfiguration: KAD always injects the URL, and everything
@@ -25,7 +31,8 @@ if (databaseUrl === null) {
   profileStore = new InMemoryProfileStore();
   inventoryStore = new InMemoryInventoryStore();
   bossStateStore = new InMemoryBossStateStore();
-  console.log("[zep-test] DATABASE_URL is not set; profiles, bags and boss timers live in this process only");
+  progressStore = new InMemoryProgressStore();
+  console.log("[zep-test] DATABASE_URL is not set; profiles, bags, boss timers and EXP live in this process only");
 } else {
   // Anything that throws here refuses the boot, before `listen`. A configured database that
   // does not answer is a deployment error, and starting anyway would quietly drop every
@@ -36,6 +43,7 @@ if (databaseUrl === null) {
   profileStore = new PostgresProfileStore(pool);
   inventoryStore = new PostgresInventoryStore(pool);
   bossStateStore = new PostgresBossStateStore(pool);
+  progressStore = new PostgresProgressStore(pool);
   console.log(
     applied.length === 0
       ? "[zep-test] database connected; schema already up to date"
@@ -43,8 +51,11 @@ if (databaseUrl === null) {
   );
 }
 
+const adminOwnerKeys = resolveAdminOwnerKeys(process.env.ADMIN_OWNER_KEYS);
 const port = resolvePort(process.env.PORT);
-await createGameServer(profileStore, inventoryStore, bossStateStore).listen(port);
+await createGameServer(profileStore, inventoryStore, bossStateStore, progressStore, adminOwnerKeys).listen(
+  port,
+);
 console.log(
   `[zep-test] listening on port ${port} — client at /, matchmaking at /matchmake, health at /api/health`,
 );

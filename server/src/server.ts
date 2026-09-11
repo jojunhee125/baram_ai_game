@@ -4,6 +4,7 @@ import { Server, WebSocketTransport } from "colyseus";
 import type { BossStateStore } from "./db/bossStateStore";
 import type { InventoryStore } from "./db/inventoryStore";
 import type { ProfileStore } from "./db/profileStore";
+import type { ProgressStore } from "./db/progressStore";
 import { validateInteractableDefinitions } from "./game/interactables";
 import { validateItemDefinitions } from "./game/items";
 import { validateLandmarkDefinitions } from "./game/landmarks";
@@ -28,14 +29,18 @@ import { PORTAL_DEFINITIONS } from "./rooms/portalDefinitions";
 export const DEFAULT_PORT = 2567;
 
 /**
- * All three stores are resolved at boot by `index.ts` — Postgres when `DATABASE_URL` is set and
+ * All four stores are resolved at boot by `index.ts` — Postgres when `DATABASE_URL` is set and
  * process memory when it is not. Omitting them takes the same in-memory path, which is what a
- * test or a local `npm run dev` runs on.
+ * test or a local `npm run dev` runs on. `adminOwnerKeys` defaults to nobody exempt, the same
+ * "opt in, never a hardcoded key" default `ADMIN_OWNER_KEYS` is meant to have
+ * (design-phase-w-level-system.md §11.0).
  */
 export function createGameServer(
   profileStore?: ProfileStore,
   inventoryStore?: InventoryStore,
   bossStateStore?: BossStateStore,
+  progressStore?: ProgressStore,
+  adminOwnerKeys: ReadonlySet<string> = new Set(),
 ): Server {
   // Has to be set explicitly: the 8 KB default is nowhere near one patch of a 500-view room.
   // Every client's view is appended to one shared buffer, so a patch needs the sum of all 500
@@ -100,6 +105,8 @@ export function createGameServer(
       realCapacity: definition.realCapacity ?? definition.maxClients,
       inventoryStore,
       bossStateStore,
+      progressStore,
+      adminOwnerKeys,
     });
   }
   return gameServer;
@@ -108,6 +115,21 @@ export function createGameServer(
 export function resolvePort(value: string | undefined): number {
   const port = Number.parseInt(value ?? "", 10);
   return Number.isInteger(port) && port > 0 && port < 65536 ? port : DEFAULT_PORT;
+}
+
+/**
+ * `ADMIN_OWNER_KEYS` is a comma-separated allowlist of `sub` UUIDs exempt from the death EXP
+ * penalty (design-phase-w-level-system.md §11.0) — an env value, never a literal in this file, so
+ * who is exempt is a deploy-time decision rather than a code change. Blank segments (a trailing
+ * comma, doubled separators, surrounding whitespace) are dropped rather than becoming an
+ * empty-string "admin".
+ */
+export function resolveAdminOwnerKeys(value: string | undefined): ReadonlySet<string> {
+  const keys = (value ?? "")
+    .split(",")
+    .map((key) => key.trim())
+    .filter((key) => key.length > 0);
+  return new Set(keys);
 }
 
 /**

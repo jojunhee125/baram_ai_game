@@ -26,6 +26,7 @@ const SQUIRREL: MonsterType = {
   aggroRadiusTiles: 4,
   leashRadiusTiles: 8,
   respawnDelayMs: 8000,
+  expReward: 4,
   loot: [],
 };
 
