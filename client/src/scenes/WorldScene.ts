@@ -38,6 +38,7 @@ import {
   isHeritageMonsterTexture,
   preloadHeritageMonsterArt,
   prepareHeritageMonsterArt,
+  roomHasHeritageMonsters,
 } from "../world/heritageMonsterArt";
 import {
   MONSTER_TEXTURE,
@@ -221,7 +222,10 @@ export class WorldScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.load.off(Phaser.Loader.Events.FILE_LOAD_ERROR, onLoadError);
     });
-    preloadHeritageMonsterArt(this);
+    // 지형(`usesClassicTerrain`)과 같은 게이팅. 4.32MiB를 몬스터 없는 room에 내려보내지 않는다.
+    if (roomHasHeritageMonsters(this.mapKey)) {
+      preloadHeritageMonsterArt(this);
+    }
     // Same file the bag window already draws as a CSS background — this is a second, independent
     // loader onto a Phaser texture so the swing overlay can stamp a frame of it onto the canvas.
     this.load.spritesheet(ITEM_TEXTURE, "/sprites/items.png", {

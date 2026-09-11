@@ -87,6 +87,23 @@ export function isHeritageMonsterTexture(key: string): boolean {
   return Object.values(HERITAGE_MONSTER_ART).some(art => art.texture === key);
 }
 
+/**
+ * 몬스터가 실제로 사는 room인가. `usesClassicTerrain`과 같은 부류의 클라이언트 렌더 게이트다.
+ *
+ * 레거시 `monster.png`는 모든 room에서 무조건 로드한다 — 몇 킬로바이트라서 "어느 room에 몬스터가
+ * 있는가"라는 서버 소유 사실을 클라이언트가 한 벌 더 갖는 비용이 더 컸기 때문이다(`WorldScene.preload`
+ * 주석). 이 4종 heritage 시트는 합계 4.32MiB라 그 전제가 뒤집힌다: 몬스터가 0마리인 `grand-plaza`는
+ * 500 CCU 성능 기준선 room이고 `plaza`는 전원이 거쳐가는 로비인데, 둘 다 절대 쓰지 않을 4.32MiB를
+ * 받고 있었다(2026-09-11 독립 리뷰).
+ *
+ * 이 목록이 미래에 틀리면(새 room에 몬스터가 생기면) 그 room의 몬스터는 레거시 외형으로 그려진다 —
+ * `prepareHeritageMonsterArt`가 텍스처 없는 종류를 건너뛰고 `monsterSprites`가 기존 atlas로 되돌아가므로
+ * 빈 스프라이트가 되지는 않는다.
+ */
+export function roomHasHeritageMonsters(mapKey: string): boolean {
+  return mapKey === "hunting-ground" || mapKey === "hunting-den";
+}
+
 export function preloadHeritageMonsterArt(scene: Phaser.Scene): void {
   for (const art of Object.values(HERITAGE_MONSTER_ART)) {
     scene.load.image(art.texture, `/sprites/${art.texture}.png`);

@@ -132,6 +132,16 @@ body { background: #18130f; }
   border-color: #b59c70 #51402b #51402b #b59c70; border-radius: 0;
   box-shadow: inset 0 0 0 1px #17120d; font-size: 12px;
 }
+/* 보스 HP바는 상단 중앙에 stage 폭의 39.0625%로 뜨고, 지역 안내는 좌상단에 최대 270px로 뜬다.
+   stage 폭이 약 1306px보다 좁으면 두 사각형이 가로로 겹쳐서 보스 이름과 HP 수치가 안내 패널
+   뒤로 사라진다 — 1280×720·1280×800 같은 노트북 창이 여기 해당한다(2026-09-11 실측: 1024×576에서
+   104px 겹침, 안내가 z-index 4로 위에 있어 보스 정보 쪽이 가려졌다). 보스바가 떠 있는 동안에만
+   안내를 그 아래 줄로 내린다. :has()를 지원하지 않는 브라우저에서는 최소한 전투 정보가 위로
+   오도록 z-index만 뒤집는다. */
+.boss-vitals { z-index: 5; }
+.stage:has(#boss-vitals:not([hidden])) .region-guide {
+  top: calc(var(--space-3) + var(--control-height) + var(--space-2) + 48px);
+}
 .region-guide__kind { display: block; color: #c5b786; font-size: 10px; letter-spacing: .15em; }
 .region-guide strong { display: block; margin-top: 3px; font-size: 15px; font-weight: 600; }
 .region-guide__coordinates { display: block; color: #c7b797; font-variant-numeric: tabular-nums; font-size: 11px; }

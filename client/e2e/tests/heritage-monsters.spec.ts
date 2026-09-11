@@ -761,3 +761,31 @@ test.describe("missing optional art", () => {
     await expect(page.getByText("맵을 불러오지 못했습니다", { exact: true })).toBeHidden();
   });
 });
+
+/**
+ * 2026-09-11 독립 리뷰 High: 4종 시트 합계 4.32MiB가 `mapKey`와 무관하게 모든 room의
+ * `preload()`에서 무조건 로드되고 있었다. 몬스터는 `hunting-ground`/`hunting-den`에만 있고,
+ * `grand-plaza`는 500 CCU 성능 기준선 room, `plaza`는 전원이 거쳐가는 로비다.
+ */
+test.describe("몬스터 아트는 몬스터가 사는 room에서만 내려받는다", () => {
+  async function monsterArtRequests(page: Page, room: string): Promise<string[]> {
+    const seen = new Set<string>();
+    page.on("request", request => {
+      const match = /\/sprites\/(heritage-(?:squirrel|rabbit|deer|boss))\.png/.exec(request.url());
+      if (match?.[1]) seen.add(match[1]);
+    });
+    await joinRoom(page, room, { skinIndex: 0 });
+    await expect(page.locator("#game-root canvas")).toBeVisible();
+    return [...seen].sort();
+  }
+
+  for (const room of ["plaza", "grand-plaza"]) {
+    test(`${room}에서는 몬스터 PNG를 한 장도 요청하지 않는다`, async ({ page }) => {
+      expect(await monsterArtRequests(page, room)).toEqual([]);
+    });
+  }
+
+  test("hunting-ground에서는 4종을 전부 요청한다", async ({ page }) => {
+    expect(await monsterArtRequests(page, "hunting-ground")).toEqual([...TEXTURES].sort());
+  });
+});

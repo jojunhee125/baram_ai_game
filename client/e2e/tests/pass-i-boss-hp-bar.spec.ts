@@ -176,7 +176,11 @@ test("보스 HP바는 화면 상단에 고정되고 다른 HUD와 겹치지 않�
 
   // 같은 화면에 떠 있는 다른 HUD와 사각형이 겹치지 않는다. `.hud__controls`는 버튼 6개의 실제
   // 폭이 `.hud`의 23.4375%를 넘겨 왼쪽으로 삐져나오므로, 컨테이너가 아니라 이 줄 자체를 잰다.
-  for (const selector of ["#vitals", ".hud__controls", "#minimap", "#inventory"]) {
+  // `.region-guide`는 2026-09-11 클래식 UI 병합에서 새로 생긴 좌상단 패널이다. 이 목록에 없던
+  // 동안 stage 폭 1306px 미만에서 보스 이름·HP 수치를 덮고 있었고(기본 뷰포트 1024×576에서
+  // 104px 겹침), 이 파일은 보스바만, `heritage-first-play.spec.ts`는 1440×900에서 안내만 보느라
+  // 둘을 동시에 노출시키는 테스트가 없어 아무도 못 잡았다.
+  for (const selector of ["#vitals", ".hud__controls", "#minimap", "#inventory", ".region-guide"]) {
     const other = (await client.page.locator(selector).boundingBox())!;
     const overlaps =
       bar.x < other.x + other.width &&
