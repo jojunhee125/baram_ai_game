@@ -14,7 +14,7 @@ import { resolveJoinOptions, updateAvatarSkin } from "../net/identity";
 import { saveAvatarSkin } from "../net/profile";
 import { RoomConnection, type PlayerSnapshot } from "../net/roomConnection";
 import { resolveHomeRoomName } from "../net/roomTarget";
-import { fadeFromBlack, fadeToBlack, showTransitionNotice } from "../transitionOverlay";
+import { fadeFromBlack, fadeToBlack, showDeathNotice, showTransitionNotice } from "../transitionOverlay";
 import { chooseAvatarSkin } from "../ui/avatarPicker";
 import { BossVitals } from "../ui/bossVitals";
 import { CharacterMenu } from "../ui/characterMenu";
@@ -497,7 +497,8 @@ export class WorldScene extends Phaser.Scene {
    * client — an onlooker sees the flash and no number.
    *
    * Death costs nothing but the walk home, and that walk arrives as the ordinary `Teleported`
-   * this scene already handles, so there is nothing to move here.
+   * this scene already handles, so there is nothing to move here — only the death notice below,
+   * which reads `hpRemaining === 0` the same way the puff below it does (design-phase-x-lowcost-ux.md §2.3).
    */
   private showPlayerHit(event: PlayerHit): void {
     this.vitals?.applyHit(event);
@@ -511,6 +512,7 @@ export class WorldScene extends Phaser.Scene {
     this.effects.impact(sprite, tone);
     if (event.hpRemaining <= 0) {
       this.effects.death(sprite);
+      showDeathNotice("쓰러졌습니다 — 마을로 돌아갑니다");
     }
   }
 
