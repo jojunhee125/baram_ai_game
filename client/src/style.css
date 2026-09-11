@@ -346,6 +346,37 @@ body {
   margin: 0 0 var(--space-1);
 }
 
+/* Groups the level badge with the "체력" label, so .vitals__head keeps its original two-slot
+   (title | count) space-between layout with a third piece added inside the left slot. */
+.vitals__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+}
+
+/* The interface's one accent hue — this is the only always-visible number that is not health. */
+.vitals__level {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Pulses on a level-up (playerVitals.ts toggles the attribute, then clears it); transform only. */
+.vitals__level[data-levelup="true"] {
+  animation: level-badge-pulse 900ms ease;
+}
+
+@keyframes level-badge-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.35);
+  }
+}
+
 .vitals__label {
   color: rgba(236, 234, 244, 0.62);
   font-size: 11px;
@@ -387,6 +418,48 @@ body {
 
 .vitals[data-level="critical"] .vitals__fill {
   background: var(--danger);
+}
+
+/* Thinner and slower to fill than the HP track above it — this rises once per kill, not per hit. */
+.vitals__exp-track {
+  overflow: hidden;
+  height: 4px;
+  margin-top: var(--space-1);
+  border-radius: 2px;
+  background: rgba(236, 234, 244, 0.14);
+}
+
+.vitals__exp-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transform-origin: left center;
+  transform: scaleX(0);
+  transition: transform 200ms ease;
+}
+
+/*
+ * The level-up banner, pinned under the panel it reports on rather than a shared corner: .vitals
+ * is always at a fixed top/left, so this never has to fight another toast for a spot, and reads
+ * next to the very number it just changed.
+ */
+.vitals__levelup {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid rgba(110, 168, 220, 0.4);
+  border-radius: var(--radius);
+  background: rgba(20, 19, 26, 0.88);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: toast-in 160ms ease-out;
 }
 
 .vitals__hint {
@@ -1306,6 +1379,32 @@ body {
   outline-offset: 2px;
 }
 
+/* Level-only stat row — text, not a button, so it gets its own class rather than .character-menu__item. */
+.character-menu__stat-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(236, 234, 244, 0.04);
+}
+
+.character-menu__stat {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: rgba(236, 234, 244, 0.72);
+  font-size: 12px;
+}
+
+/* The numbers, not the labels: tabular so a bonus climbing past one digit never reflows the row. */
+.character-menu__stat span {
+  color: #eceaf4;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 /*
  * The landmark panel. Same HUD-column, non-modal treatment as .character-menu — the header/close/
  * list styling below is a 1:1 clone of .character-menu's; rows here can additionally disable during
@@ -1780,6 +1879,7 @@ body {
   .picker__start,
   .toast[data-state="leaving"],
   .transition,
+  .vitals__exp-fill,
   .vitals__fill,
   .vitals__hint {
     transition: none;
@@ -1791,7 +1891,9 @@ body {
    * and snaps the bar instead.
    */
   .toast,
-  .boss-vitals {
+  .boss-vitals,
+  .vitals__level[data-levelup="true"],
+  .vitals__levelup {
     animation: none;
   }
 }

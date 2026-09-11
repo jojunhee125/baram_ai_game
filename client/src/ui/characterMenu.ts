@@ -1,3 +1,4 @@
+import { ATTACK_PER_LEVEL, HP_PER_LEVEL } from "@zep-test/shared";
 import { isTextEntry } from "../input/textEntry";
 
 /**
@@ -24,6 +25,11 @@ export class CharacterMenu {
   private readonly changeSkinButton = document.querySelector<HTMLButtonElement>(
     "#character-menu-change-skin",
   )!;
+  private readonly levelValue = document.querySelector<HTMLElement>("#character-menu-level")!;
+  private readonly atkBonusValue = document.querySelector<HTMLElement>(
+    "#character-menu-atk-bonus",
+  )!;
+  private readonly hpBonusValue = document.querySelector<HTMLElement>("#character-menu-hp-bonus")!;
 
   constructor(private readonly onChangeSkin: () => void) {
     this.button.addEventListener("click", this.handleToggleClick);
@@ -36,6 +42,19 @@ export class CharacterMenu {
 
   get isOpen(): boolean {
     return panelOpen;
+  }
+
+  /**
+   * The stat row's only data (design-phase-w2-level-client.md §2.3) — level-only bonuses, never a
+   * total: this bundle never learns an equipped item's own attackDamage/maxHp, so a bare "공격력
+   * +X" would read as the sum and be wrong the instant a weapon is worn. Pure arithmetic off the
+   * same per-level constants the server anchors totalAttack/totalMaxHp to (design §4.2) — no
+   * message of its own, called whenever `WorldScene` already knows the local player's level.
+   */
+  applyLevel(level: number): void {
+    this.levelValue.textContent = String(level);
+    this.atkBonusValue.textContent = String((level - 1) * ATTACK_PER_LEVEL);
+    this.hpBonusValue.textContent = String((level - 1) * HP_PER_LEVEL);
   }
 
   /**

@@ -19,6 +19,7 @@ import {
   type PlayerHit,
   type TilePosition,
 } from "@zep-test/shared";
+import { CachedProgressStore } from "../db/progressCache";
 import { InMemoryProgressStore, type ProgressStore } from "../db/progressStore";
 import type { CollisionMap, ProximityIndex, RoomCreateOptions } from "./contracts";
 import { MetaverseRoom } from "./metaverseRoom";
@@ -28,8 +29,11 @@ import { MonsterKind, type MonsterSpawnDefinition, type MonsterType } from "./mo
  * Phase W-1 (`docs/design-phase-w-level-system.md`, `docs/decisions.md` 2026-09-11 "Phase W·X 구현
  * 착수 승인"): the server-only half of the level/EXP system — the shared curve (§11), the level-1
  * anchor (§4.2), grantExp/level-up (§6), boss/last-hit attribution (§11-5), the death penalty
- * (§11.0) and its admin exemption, the recovery-fraction conversion (§4.4), and the grand-plaza
- * zero-query invariant (§5.3).
+ * (§11.0) and its admin exemption, the recovery-fraction conversion (§4.4). Phase W-2a
+ * (`docs/design-phase-w2-level-client.md` §1, `docs/decisions.md` 2026-09-11 "레벨은 grand-plaza를
+ * 포함한 모든 room에서 실제 값이 보여야 한다") replaced the grand-plaza *zero-query* invariant with a
+ * *once-per-account, ever* one via `CachedProgressStore` — see the "grand-plaza shows real levels"
+ * describe block below.
  *
  * Harness modeled on `passE-combat-verification.test.ts` (hand-driven room, no live timer, no
  * `@colyseus/testing` socket) — every case here needs an exact `now` or an exact call count.
@@ -595,27 +599,60 @@ describe("VERIFY recoverOutOfCombat's fraction conversion (§4.4)", () => {
   });
 });
 
-// -- grand-plaza invariant ----------------------------------------------------------------------------
+// -- grand-plaza shows real levels (Phase W-2a) --------------------------------------------------------
 
-describe("VERIFY grand-plaza pays nothing for this feature (§5.3)", () => {
-  it("never touches ProgressStore in a room with no monster rows", async () => {
-    const store = new CountingProgressStore();
-    const room = await createRoom([], { progressStore: store });
+describe("VERIFY grand-plaza shows real levels via a cross-room cache, at most one inner read per account, ever (design-phase-w2-level-client.md §1.3, §1.6)", () => {
+  it("hydrates a fresh account from the inner store exactly once — first join, rejoining the same room, and a different room instance are all cache hits after that", async () => {
+    const inner = new CountingProgressStore();
+    const cached = new CachedProgressStore(inner);
+    // Two independent room instances sharing one process-wide cache — production's own wiring
+    // (server.ts:103-110 spreads the same `progressStore` reference into every room definition).
+    const plaza = await createRoom([], { progressStore: cached });
+    const huntingGround = await createRoom(
+      [squirrelAt("m", { tileX: OPEN_CENTRE.tileX + 1, tileY: OPEN_CENTRE.tileY })],
+      { progressStore: cached },
+    );
     try {
-      const player = join(room, "visitor", undefined, "owner-plaza");
-      place(room, "visitor", OPEN_CENTRE);
+      // First join anywhere, for this account: exactly one cold miss.
+      const visitor = join(plaza, "visitor", undefined, "owner-plaza");
+      place(plaza, "visitor", OPEN_CENTRE);
       await flush();
-      room.onLeave(asRoomClient(player));
+      assert.equal(inner.calls, 1, "the first join anywhere costs exactly one inner read");
+      assert.equal(
+        plaza.state.players.get("visitor")?.level,
+        1,
+        "no exp granted yet, but the value is real (hydrated), not merely skipped",
+      );
+
+      // Leaving and rejoining the *same* room instance is a cache hit, not a second read.
+      plaza.onLeave(asRoomClient(visitor));
+      await flush();
+      join(plaza, "visitor", undefined, "owner-plaza");
+      place(plaza, "visitor", OPEN_CENTRE);
+      await flush();
+      assert.equal(inner.calls, 1, "re-entering the same room instance never re-reads the store");
+      plaza.onLeave(asRoomClient(visitor));
       await flush();
 
-      assert.equal(store.calls, 0, "hasMonsters=false must gate every ProgressStore call, join to leave");
-      assert.equal(room.state.players.get("visitor"), undefined);
+      // Hopping into a *different* room instance — the cross-room case W-2 opens up — is also a
+      // cache hit: same account, same shared cache, no per-room-instance boundary query.
+      join(huntingGround, "visitor2", undefined, "owner-plaza");
+      place(huntingGround, "visitor2", OPEN_CENTRE);
+      await flush();
+      assert.equal(inner.calls, 1, "a different room instance for the same account is still a cache hit");
+
+      // A second, genuinely distinct account is a real cold miss, not a false cache hit.
+      join(plaza, "other", undefined, "owner-other");
+      place(plaza, "other", OPEN_CENTRE);
+      await flush();
+      assert.equal(inner.calls, 2, "a different account is a new account, not a cache hit");
     } finally {
-      dispose(room);
+      dispose(plaza);
+      dispose(huntingGround);
     }
   });
 
-  it("spawns every session at Player.level === 1, never an unset/undefined level", async () => {
+  it("spawns every session at Player.level === 1 when nothing has ever been granted, never an unset/undefined level", async () => {
     const room = await createRoom([]);
     try {
       join(room, "visitor");

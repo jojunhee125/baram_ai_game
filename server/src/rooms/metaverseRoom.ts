@@ -255,12 +255,6 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   private progressStore: ProgressStore | null = null;
   /** Death EXP penalty exemptions (design-phase-w-level-system.md §11.0). Empty unless configured. */
   private adminOwnerKeys: ReadonlySet<string> = new Set();
-  /**
-   * The tail of the in-flight progress-store chain for each account — {@link queueProgressUpdate}.
-   * A quiet account has no entry at all; one appears only while a grant or death penalty for it is
-   * still in flight, and is removed the instant that chain drains, so this never grows unbounded.
-   */
-  private readonly progressQueueByOwner = new Map<string, Promise<void>>();
   /** The enforced join cap — {@link RoomCreateOptions.realCapacity}, falling back to `maxClients`. */
   private realCapacity!: number;
   private collisionMap!: CollisionMap;
@@ -520,11 +514,13 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         tileY: spawnTile.tileY,
         facing: Direction.Down,
         avatarSkin: normalizeAvatarSkin(options?.avatarSkin),
-        // Always 1, never left unset: a `hasMonsters` room raises this once `hydrateProgressCache`
-        // (below) learns the account's real level, but every room — including grand-plaza, which
-        // never hydrates progress at all (§5.3) — must still hand the client a defined level, not
-        // the schema's own `undefined` default (design-phase-w-level-system.md, W-2 handoff: a
-        // client that has not yet learned to read this field never sees an implausible Lv.0).
+        // Always 1, never left unset: `hydrateProgressCache` (below) raises this once it learns the
+        // account's real level, but that read has not happened yet at the moment this object is
+        // constructed, in every room — including grand-plaza, which now hydrates progress the same
+        // as any other room (design-phase-w2-level-client.md §1.3) — so every join still needs a
+        // defined placeholder here, not the schema's own `undefined` default (design-phase-w-level-
+        // system.md, W-2 handoff: a client that has not yet learned to read this field never sees an
+        // implausible Lv.0).
         level: 1,
       }),
     );
@@ -540,8 +536,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       // nothing could undo.
       hp: PLAYER_MAX_HP,
       lastDamagedAt: 0,
-      // 0 until hydrateProgressCache (hasMonsters rooms only) or this session's own awardExp
-      // raises it — grand-plaza sessions simply never touch either, and stay at level 1 forever.
+      // 0 until hydrateProgressCache (below, every room with a progressStore) or this session's own
+      // awardExp raises it. A session that never kills anything and joined before the store
+      // answered stays at level 1 for that visit — design-phase-w2-level-client.md §1.3.
       totalExp: 0,
       ownerKey: client.auth?.ssoUserId ?? null,
       ownedPossessionKeys: new Set(),
@@ -584,11 +581,15 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         console.warn(`[zep-test] could not hydrate equipment for ${ownerKey}`, cause);
       });
     }
-    // Same gate, same reasoning as the equipment hydration just above (design-phase-w-level-
-    // system.md §5.3): totalExp/level are only ever read on the combat path (totalAttack/
-    // totalMaxHp), which never runs outside a hasMonsters room either, so hydrating this in
-    // grand-plaza would be a pure-waste DB round trip on the 500 CCU join path (PoC #2).
-    if (this.hasMonsters && this.progressStore !== null) {
+    // Not gated on `hasMonsters` (unlike the equipment hydration just above): the level shown in
+    // `Player.level` is now real in every room, including grand-plaza (design-phase-w2-level-
+    // client.md §1.3 — "레벨은 grand-plaza를 포함한 모든 room에서 실제 값이 보여야 한다",
+    // `docs/decisions.md` 2026-09-11), so every room with a store hydrates on join. This is not the
+    // per-join DB round trip that reasoning used to warn about: `progressStore` is a
+    // `CachedProgressStore` in every real deployment (`index.ts`), so a cold miss happens at most
+    // once per account for the life of the process — every join after that is a synchronous cache
+    // hit, which is what keeps this off the PoC #2 500 CCU join-path budget.
+    if (this.progressStore !== null) {
       void this.hydrateProgressCache(client.sessionId, ownerKey).catch((cause) => {
         console.warn(`[zep-test] could not hydrate progress for ${ownerKey}`, cause);
       });
@@ -700,9 +701,11 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   /**
    * Fills a freshly joined session's {@link PlayerSession.totalExp} from the store, and raises
    * the public `Player.level` schema field to match — the progress twin of
-   * {@link hydrateEquipmentCache}, gated the same way and for the same reason (§5.3): a room with
-   * no monsters never reaches this call at all, so grand-plaza's join path never touches
-   * `player_progress`.
+   * {@link hydrateEquipmentCache}, but gated only on `progressStore !== null`
+   * (design-phase-w2-level-client.md §1.3): every room, grand-plaza included, reaches this call, so
+   * every room's join path touches `player_progress` — at most once per account for the life of the
+   * process, since `progressStore` is a `CachedProgressStore` (`index.ts`) and every join after the
+   * first cold miss never leaves that wrapper's own synchronous `Map.get`.
    *
    * Never awaited by its caller, for {@link hydratePossessionCache}'s reason. Unlike the equipment
    * cache there is no version counter to guard against — this session's own kills only ever
@@ -1013,9 +1016,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
    * §5.5 — today only the weapon slot's `old-dagger`, but the loop costs nothing extra the day a
    * ring picks up the same axis). Looked up by key on every swing rather than cached,
    * `damagePlayer`'s own reasoning: `ITEM_DEFINITIONS` is a handful of rows and `equippedItemKeys`
-   * is the hot value. `level = 1` (no EXP hydrated yet, or a `hasMonsters`-less room) makes this
-   * exactly `PLAYER_ATTACK_DAMAGE + equipment` — today's value, unchanged — which is the anchor
-   * invariant §4.2 requires.
+   * is the hot value. `level = 1` (no EXP hydrated yet, or none ever granted) makes this exactly
+   * `PLAYER_ATTACK_DAMAGE + equipment` — today's value, unchanged — which is the anchor invariant
+   * §4.2 requires.
    */
   private totalAttack(session: PlayerSession): number {
     const level = levelForExp(session.totalExp);
@@ -1468,43 +1471,18 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   }
 
   /**
-   * Runs `task` only after every earlier progress-store call for the same `ownerKey` has fully
-   * settled — never held up by, and never holding up, any other account's chain.
-   *
-   * `awardExp` (a kill) and `applyDeathExpPenalty` (a death) each round-trip to the store on their
-   * own fire-and-forget promise, and nothing about two independent promises guarantees the one
-   * *issued* first is the one that *resolves* first (a slow `grantExp` round trip can still be
-   * in flight when a second monster's queued attack kills the same session and its
-   * `applyDeathPenalty` call — reading and writing the very same account's row — returns first).
-   * Queuing every such call by account fixes the order the *store* sees them in to match the order
-   * they actually happened in: whichever task runs second always starts from what the first one
-   * just wrote, never from a snapshot taken before it landed. This is what lets both callers below
-   * trust the store's answer outright instead of guessing which of two racing totals is fresher
-   * (see `levelSystem-raceCondition.test.ts`, the regression this closes).
-   */
-  private queueProgressUpdate(ownerKey: string, task: () => Promise<void>): Promise<void> {
-    const previous = this.progressQueueByOwner.get(ownerKey) ?? Promise.resolve();
-    const next = previous.then(task, task);
-    this.progressQueueByOwner.set(ownerKey, next);
-    void next.finally(() => {
-      // Only the entry this task itself installed may be cleared — a task that queued behind it
-      // while it was running must keep the map pointed at its own, later link.
-      if (this.progressQueueByOwner.get(ownerKey) === next) {
-        this.progressQueueByOwner.delete(ownerKey);
-      }
-    });
-    return next;
-  }
-
-  /**
    * Files one kill's EXP and, if the store confirms a level-up, patches the public `Player.level`
    * field and fully heals the session (design-phase-w-level-system.md §6, §11 — last-hit only,
    * `awardLoot`'s own rule).
    *
    * Async and never awaited by its caller, `awardLoot`'s own shape and reason: the grant belongs
    * to an account rather than to a session, so it stays correct if the killer leaves mid-flight,
-   * and the room must not stop simulating while a database answers. The store round trip itself
-   * runs inside {@link queueProgressUpdate} — see that method for why.
+   * and the room must not stop simulating while a database answers. Calls `store.grantExp` directly
+   * rather than through a room-owned queue — serializing every store call for one account, from
+   * whichever room instance issued it, is now `CachedProgressStore`'s job, not this room's
+   * (design-phase-w2-level-client.md §1.2, formerly `queueProgressUpdate`/`progressQueueByOwner`
+   * here). `levelSystem-raceCondition.test.ts` is the regression coverage that guarantee still
+   * holds.
    */
   private async awardExp(
     lastHit: LastHit,
@@ -1517,44 +1495,43 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       return;
     }
     const ownerKey = lastHit.ownerKey ?? lastHit.sessionId;
-    await this.queueProgressUpdate(ownerKey, async () => {
-      let total: number;
-      try {
-        total = await store.grantExp(ownerKey, amount);
-      } catch (cause) {
-        console.warn(`[zep-test] could not credit ${amount} exp to ${ownerKey}`, cause);
-        return;
-      }
+    let total: number;
+    try {
+      total = await store.grantExp(ownerKey, amount);
+    } catch (cause) {
+      console.warn(`[zep-test] could not credit ${amount} exp to ${ownerKey}`, cause);
+      return;
+    }
 
-      // Re-resolved after the await, exactly as `awardLoot` does: the killer may have left the room,
-      // or walked through a door into another one, while the store was answering.
-      const session = this.clientsBySession.get(lastHit.sessionId)?.userData;
-      const player = this.state.players.get(lastHit.sessionId);
-      if (!session || !player) {
-        return;
-      }
-      // The store's own answer, always — `queueProgressUpdate` above already guarantees no other
-      // grant or death penalty for this account is still applying when this line runs, so `total`
-      // can never be a stale snapshot overtaking a fresher one already written to the cache.
-      session.totalExp = total;
-      const newLevel = levelForExp(total);
-      if (newLevel > player.level) {
-        player.level = newLevel;
-        // Design §6: a level-up is always a full heal, and it may have just raised the cap itself
-        // (totalMaxHp's own level term) — so this heals to the *new* max, not the old one.
-        session.hp = this.totalMaxHp(session);
-      }
+    // Re-resolved after the await, exactly as `awardLoot` does: the killer may have left the room,
+    // or walked through a door into another one, while the store was answering.
+    const session = this.clientsBySession.get(lastHit.sessionId)?.userData;
+    const player = this.state.players.get(lastHit.sessionId);
+    if (!session || !player) {
+      return;
+    }
+    // The store's own answer, always — the store's own per-account queue (`CachedProgressStore`)
+    // already guarantees no other grant or death penalty for this account is still applying when
+    // this line runs, so `total` can never be a stale snapshot overtaking a fresher one already
+    // written to the cache.
+    session.totalExp = total;
+    const newLevel = levelForExp(total);
+    if (newLevel > player.level) {
+      player.level = newLevel;
+      // Design §6: a level-up is always a full heal, and it may have just raised the cap itself
+      // (totalMaxHp's own level term) — so this heals to the *new* max, not the old one.
+      session.hp = this.totalMaxHp(session);
+    }
 
-      this.clientsBySession.get(lastHit.sessionId)?.send(ServerMessage.ExpGranted, {
-        monsterId,
-        amount,
-        totalExp: total,
-        level: newLevel,
-        expToNextLevel: remainingExpToNextLevel(total),
-        hpMax: this.totalMaxHp(session),
-        hpRemaining: Math.max(0, session.hp),
-      } satisfies ExpGranted);
-    });
+    this.clientsBySession.get(lastHit.sessionId)?.send(ServerMessage.ExpGranted, {
+      monsterId,
+      amount,
+      totalExp: total,
+      level: newLevel,
+      expToNextLevel: remainingExpToNextLevel(total),
+      hpMax: this.totalMaxHp(session),
+      hpRemaining: Math.max(0, session.hp),
+    } satisfies ExpGranted);
   }
 
   /**
@@ -2061,8 +2038,17 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
    * in this codebase.
    *
    * Falls back to the session id when there is no SSO identity, `awardExp`'s own convention: local
-   * development still exercises this path against the in-memory store. The store round trip
-   * itself runs inside {@link queueProgressUpdate} — see that method for why.
+   * development still exercises this path against the in-memory store. Calls `store
+   * .applyDeathPenalty` directly rather than through a room-owned queue, `awardExp`'s own reason
+   * (design-phase-w2-level-client.md §1.2) — including for the `floor` argument below: it is
+   * computed from `session.totalExp` right here, which is this room's best knowledge *at the moment
+   * this call is issued*, not necessarily this account's real level by the time the call actually
+   * runs (a kill and this same session's death landing in the same tick issue a grant and this call
+   * back-to-back, before the grant's own round trip has updated `session.totalExp`). This room no
+   * longer has a queue of its own to delay that read with — `CachedProgressStore.applyDeathPenalty`
+   * re-derives the floor from its own cache once it is actually this call's turn, which is where
+   * that correction now lives. See its doc comment, and `levelSystem-raceCondition.test.ts` for the
+   * regression this still has to pass.
    */
   private async applyDeathExpPenalty(sessionId: string, session: PlayerSession): Promise<void> {
     const store = this.progressStore;
@@ -2073,31 +2059,24 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     if (this.adminOwnerKeys.has(ownerKey)) {
       return;
     }
-    await this.queueProgressUpdate(ownerKey, async () => {
-      // Read only once this task actually starts running, not when the death happened: an
-      // `awardExp` for this same account queued earlier — including one still catching this
-      // session up to a level it just reached — has already applied to `session.totalExp` by the
-      // time `queueProgressUpdate` lets this task run, so the floor below is always the account's
-      // real current level, never the stale one captured back when the fatal hit first landed.
-      const floor = cumulativeExpForLevel(levelForExp(session.totalExp));
-      let result: number | null;
-      try {
-        result = await store.applyDeathPenalty(ownerKey, floor);
-      } catch (cause) {
-        console.warn(`[zep-test] could not apply the death exp penalty to ${ownerKey}`, cause);
-        return;
-      }
-      if (result === null) {
-        return;
-      }
-      // The store's own answer, always — `equip()`'s own rule (`EquipmentChanged.applied`'s doc
-      // comment): it was computed live against the database's own `exp` column, not against this
-      // session's possibly-stale cache, so it is trusted outright rather than compared against it.
-      const current = this.clientsBySession.get(sessionId)?.userData;
-      if (current) {
-        current.totalExp = result;
-      }
-    });
+    const floor = cumulativeExpForLevel(levelForExp(session.totalExp));
+    let result: number | null;
+    try {
+      result = await store.applyDeathPenalty(ownerKey, floor);
+    } catch (cause) {
+      console.warn(`[zep-test] could not apply the death exp penalty to ${ownerKey}`, cause);
+      return;
+    }
+    if (result === null) {
+      return;
+    }
+    // The store's own answer, always — `equip()`'s own rule (`EquipmentChanged.applied`'s doc
+    // comment): it was computed live against the database's own `exp` column, not against this
+    // session's possibly-stale cache, so it is trusted outright rather than compared against it.
+    const current = this.clientsBySession.get(sessionId)?.userData;
+    if (current) {
+      current.totalExp = result;
+    }
   }
 
   /**

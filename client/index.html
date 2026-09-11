@@ -52,7 +52,11 @@
         -->
         <div class="vitals" id="vitals" data-level="ok" hidden>
           <p class="vitals__head">
-            <span class="vitals__label">체력</span>
+            <span class="vitals__title">
+              <!-- Player.level (design-phase-w2-level-client.md §2.1) — real from join, plaza included. -->
+              <span class="vitals__level" id="vitals-level">Lv.1</span>
+              <span class="vitals__label">체력</span>
+            </span>
             <span class="vitals__count" id="vitals-count">30 / 30</span>
           </p>
           <div
@@ -66,6 +70,22 @@
           >
             <span class="vitals__fill" id="vitals-fill"></span>
           </div>
+          <!--
+            EXP. Its only data source is ExpGranted (design §2.1), so it starts at 0% and holds
+            that reading until this session's first kill — the same "assume the default until the
+            first message says otherwise" rule the HP track above already follows for PLAYER_MAX_HP.
+          -->
+          <div
+            class="vitals__exp-track"
+            id="vitals-exp-track"
+            role="progressbar"
+            aria-label="경험치"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          >
+            <span class="vitals__exp-fill" id="vitals-exp-fill"></span>
+          </div>
           <p class="vitals__hint"><kbd class="vitals__key">Space</kbd> 공격</p>
           <!--
             Cooldown mirror, not a guard: the server owns ATTACK_COOLDOWN_MS. Decorative, so it is
@@ -74,6 +94,11 @@
           <span class="vitals__cooldown" aria-hidden="true">
             <span class="vitals__cooldown-fill" id="vitals-cooldown"></span>
           </span>
+          <!--
+            Level-up celebration — procedural only, no new art (playerVitals.ts pulses #vitals-level
+            in the same stroke and hides this again on its own timer).
+          -->
+          <p class="vitals__levelup" id="vitals-levelup" role="status" aria-live="polite" hidden></p>
         </div>
 
         <!--
@@ -457,6 +482,23 @@
               </button>
             </div>
             <ul class="character-menu__list" aria-labelledby="character-menu-title">
+              <!--
+                Level-only stat row (design-phase-w2-level-client.md §2.3): a text row, not a
+                button. Both bonus labels spell out "레벨 보너스" on purpose — the client never
+                learns an equipped item's own attackDamage/maxHp, so a bare "공격력 +X" would read
+                as the total and be wrong the instant a weapon is worn.
+              -->
+              <li class="character-menu__stat-row">
+                <span class="character-menu__stat">
+                  레벨 <span id="character-menu-level">1</span>
+                </span>
+                <span class="character-menu__stat">
+                  레벨 보너스 공격력 +<span id="character-menu-atk-bonus">0</span>
+                </span>
+                <span class="character-menu__stat">
+                  레벨 보너스 최대체력 +<span id="character-menu-hp-bonus">0</span>
+                </span>
+              </li>
               <li>
                 <button type="button" class="character-menu__item" id="character-menu-change-skin">
                   스킨 변경

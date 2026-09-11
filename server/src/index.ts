@@ -11,6 +11,7 @@ import {
 import { runMigrations } from "./db/migrate";
 import { createPool, resolveDatabaseUrl } from "./db/pool";
 import { InMemoryProfileStore, PostgresProfileStore, type ProfileStore } from "./db/profileStore";
+import { CachedProgressStore } from "./db/progressCache";
 import {
   InMemoryProgressStore,
   PostgresProgressStore,
@@ -31,7 +32,12 @@ if (databaseUrl === null) {
   profileStore = new InMemoryProfileStore();
   inventoryStore = new InMemoryInventoryStore();
   bossStateStore = new InMemoryBossStateStore();
-  progressStore = new InMemoryProgressStore();
+  // Wrapped the same as the Postgres-backed path below, and not merely for symmetry: the wrapper's
+  // per-account queue (design-phase-w2-level-client.md §1.2) is what makes a same-tick kill and
+  // death for one account apply in the order they happened rather than the order their promises
+  // settle in, and that ordering problem exists purely in this process's own microtask scheduling —
+  // it does not go away just because this store answers from memory instead of a round trip.
+  progressStore = new CachedProgressStore(new InMemoryProgressStore());
   console.log("[zep-test] DATABASE_URL is not set; profiles, bags, boss timers and EXP live in this process only");
 } else {
   // Anything that throws here refuses the boot, before `listen`. A configured database that
@@ -43,7 +49,10 @@ if (databaseUrl === null) {
   profileStore = new PostgresProfileStore(pool);
   inventoryStore = new PostgresInventoryStore(pool);
   bossStateStore = new PostgresBossStateStore(pool);
-  progressStore = new PostgresProgressStore(pool);
+  // Every room definition shares this one wrapped instance (server.ts:103-110's own spread), which
+  // is what turns join-time hydration into "one query per account, ever, for this process" instead
+  // of one per join (design-phase-w2-level-client.md §1).
+  progressStore = new CachedProgressStore(new PostgresProgressStore(pool));
   console.log(
     applied.length === 0
       ? "[zep-test] database connected; schema already up to date"

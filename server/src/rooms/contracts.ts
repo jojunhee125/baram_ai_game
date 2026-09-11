@@ -447,9 +447,10 @@ export interface PlayerSession {
   /**
    * Cumulative EXP, cached the way `hp` is: never in `RoomState` (design-phase-w-level-system.md
    * §2 — an exact running total is the same kind of "the account's own business" number HP is),
-   * and 0 until a `hasMonsters` room's `hydrateProgressCache` catches it up or this session's own
-   * `awardExp` grants some. `Player.level` (the public schema field) is always
-   * `levelForExp(totalExp)` — never a second value kept in step by hand.
+   * and 0 until `hydrateProgressCache` catches it up (every room with a `progressStore`, including
+   * grand-plaza — design-phase-w2-level-client.md §1.3) or this session's own `awardExp` grants
+   * some. `Player.level` (the public schema field) is always `levelForExp(totalExp)` — never a
+   * second value kept in step by hand.
    */
   totalExp: number;
   /**

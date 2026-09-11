@@ -33,6 +33,13 @@ interface TrackedPlayer {
   tileX: number;
   tileY: number;
   facing: Direction;
+  level: number;
+}
+
+/** What one `update()` call found changed — today just the one thing a caller needs to react to. */
+export interface PlayerUpdateResult {
+  /** True when this patch's `level` differs from the one already tracked — the nameTag's cue to redraw. */
+  levelChanged: boolean;
 }
 
 function directionBase(skin: number, facing: Direction): number {
@@ -105,14 +112,15 @@ export class PlayerSprites {
       tileX: snapshot.tileX,
       tileY: snapshot.tileY,
       facing: snapshot.facing,
+      level: snapshot.level,
     });
     return sprite;
   }
 
-  update(sessionId: string, snapshot: PlayerSnapshot): void {
+  update(sessionId: string, snapshot: PlayerSnapshot): PlayerUpdateResult {
     const player = this.tracked.get(sessionId);
     if (!player) {
-      return;
+      return { levelChanged: false };
     }
 
     // The server applies exactly one tile per accepted step, so anything further is not a walk:
@@ -128,11 +136,16 @@ export class PlayerSprites {
     // ever read it past `add()` — a live change would otherwise render as the old skin forever,
     // until this player left and re-entered view.
     const skinChanged = snapshot.avatarSkin !== player.skin;
+    // Read before overwriting below, same reason as skinChanged: the caller (WorldScene) redraws
+    // the name tag on a change, and nothing here holds a sprite-visible cue for level the way skin
+    // does, so the caller needs this flag rather than a texture diff of its own.
+    const levelChanged = snapshot.level !== player.level;
     if (distance > 0 || turned || skinChanged) this.finishAttack(player);
     player.tileX = snapshot.tileX;
     player.tileY = snapshot.tileY;
     player.facing = snapshot.facing;
     player.skin = snapshot.avatarSkin;
+    player.level = snapshot.level;
     if (skinChanged) {
       player.sprite.stop();
       player.sprite.setTexture(avatarTexture(player.skin), idleFrame(player.skin, player.facing));
@@ -141,7 +154,7 @@ export class PlayerSprites {
 
     if (distance > 0) {
       this.stepTo(player, distance > 1);
-      return;
+      return { levelChanged };
     }
     if (turned || skinChanged) {
       // A refused move still turns the player; nothing to tween, just face the new way.
@@ -151,6 +164,7 @@ export class PlayerSprites {
         player.sprite.setFrame(idleFrame(player.skin, player.facing));
       }
     }
+    return { levelChanged };
   }
 
   remove(sessionId: string): void {

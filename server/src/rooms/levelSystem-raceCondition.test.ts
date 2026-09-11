@@ -9,6 +9,7 @@ import {
   type JoinOptions,
   type TilePosition,
 } from "@zep-test/shared";
+import { CachedProgressStore } from "../db/progressCache";
 import type { ProgressStore } from "../db/progressStore";
 import type { RoomCreateOptions } from "./contracts";
 import { MetaverseRoom } from "./metaverseRoom";
@@ -25,9 +26,15 @@ import { MonsterKind, type MonsterSpawnDefinition, type MonsterType } from "./mo
  * commits, or that `grantExp`'s JS promise resolves before `applyDeathExpPenalty`'s does — the two
  * are separate statements on separate round trips. This file drives that interleaving directly
  * (bypassing the room's own scheduling, which cannot control DB round-trip order) to confirm the
- * fix: `MetaverseRoom.queueProgressUpdate` now serializes every store call for one account, so the
- * room always applies them in the order they were *issued* regardless of which one's DB round trip
- * happens to answer first.
+ * fix.
+ *
+ * Phase W-2a (`docs/design-phase-w2-level-client.md` §1.2, §3.2) moved the serializing queue out of
+ * `MetaverseRoom` (which no longer has one at all) and into `CachedProgressStore`, a decorator
+ * every room definition now shares one instance of (`index.ts`). `RacingProgressStore` below is
+ * therefore wrapped in a `CachedProgressStore` before it is handed to the room, exactly as
+ * production wires `progressStore` — passing the raw store here would leave nothing serializing
+ * `awardExp`/`applyDeathExpPenalty` at all, and this test would once again reproduce the race
+ * instead of proving it fixed.
  */
 
 const OPEN_CENTRE: TilePosition = { tileX: 78, tileY: 70 };
@@ -178,12 +185,20 @@ class RacingProgressStore implements ProgressStore {
 describe("VERIFY W-1 fix: awardExp and applyDeathExpPenalty for the same account are serialized", () => {
   it("applies a kill and the same session's immediately following death in the order they happened, never the order their DB round trips resolve", async () => {
     const store = new RacingProgressStore();
-    const room = await createRoom({ progressStore: store });
+    // Wrapped exactly as `index.ts` wraps the real store — see this file's own doc comment for why
+    // the raw store cannot be handed to the room directly any more.
+    const cached = new CachedProgressStore(store);
+    const room = await createRoom({ progressStore: cached });
     try {
       const owner = "owner-race";
       const client = join(room, "victim", owner);
       place(room, "victim", OPEN_CENTRE);
       assert.ok(client.userData);
+      // Lets join's own fire-and-forget `hydrateProgressCache` (now ungated — design-phase-w2-
+      // level-client.md §1.3) settle before this test starts driving its own precise timeline below;
+      // otherwise that hydration would itself occupy the front of `owner`'s queue in `cached` when
+      // the kill below tries to enqueue behind it.
+      await flush();
 
       // Precondition: currently level 9, one EXP short of leveling to 10, and the store's live
       // ledger already agrees (this is what a real hydrateProgressCache would have produced).
@@ -284,6 +299,81 @@ describe("VERIFY W-1 fix: awardExp and applyDeathExpPenalty for the same account
       );
     } finally {
       dispose(room);
+    }
+  });
+});
+
+describe("VERIFY W-2a: the same account's kill and death are serialized across two different room instances, not just within one", () => {
+  it("a grant issued by one room instance and a death penalty issued by another, for the same account, still apply in issue order", async () => {
+    // The race the test above drives is entirely inside one `MetaverseRoom` — W-1's own scope
+    // (design-phase-w2-level-client.md §1.2). This is the *new* window W-2a opens: the same
+    // account present in two independent room instances at once (one tab in each), each issuing
+    // its own store call around the same moment. Both instances are handed the *same*
+    // `CachedProgressStore`, exactly as `server.ts:103-110` shares one `progressStore` reference
+    // across every room definition — that shared instance, not either room, is what has to
+    // serialize this.
+    const store = new RacingProgressStore();
+    const cached = new CachedProgressStore(store);
+    const roomWithTheKill = await createRoom({ progressStore: cached });
+    const roomWithTheDeath = await createRoom({ progressStore: cached });
+    try {
+      const owner = "owner-cross-room";
+      const killer = join(roomWithTheKill, "killer", owner);
+      place(roomWithTheKill, "killer", OPEN_CENTRE);
+      const victim = join(roomWithTheDeath, "victim", owner);
+      place(roomWithTheDeath, "victim", OPEN_CENTRE);
+      await flush(); // let each room's own join-time hydrate settle first — same reason as above
+
+      const floor9 = cumulativeExpForLevel(9);
+      const threshold10 = cumulativeExpForLevel(10);
+      const preKillExp = threshold10 - 1;
+      assert.ok(killer.userData);
+      // Fetched via `clientsBySession`, `levelSystem-raceCondition.test.ts`'s own established
+      // reason above: this is the actual `PlayerSession` object the room itself holds (the
+      // `FakeClient.userData` field is typed to a narrower shape for the test file's own
+      // convenience), and it must be the *same* reference `applyDeathExpPenalty` reads the floor
+      // from and later writes back to.
+      const victimSession = roomWithTheDeath["clientsBySession"].get("victim")?.userData;
+      assert.ok(victimSession);
+      killer.userData.totalExp = preKillExp;
+      victimSession.totalExp = preKillExp; // the second tab's own, equally stale, bookkeeping
+      store.seed(preKillExp);
+
+      const overshoot = Math.max(50, Math.round(threshold10 * 0.05));
+      assert.ok(threshold10 + overshoot < cumulativeExpForLevel(11), "precondition: still within level 10");
+      const grantAmount = overshoot + 1;
+
+      // 1) The kill, issued from `roomWithTheKill`. Its `grantExp` round trip is held open.
+      const lastHit = { sessionId: "killer", ownerKey: owner };
+      const awardExpPromise = roomWithTheKill["awardExp"](lastHit, "m", grantAmount, 1000);
+
+      // 2) Before that resolves, the *other* tab's session dies — issued from a room instance the
+      //    grant above knows nothing about. `roomWithTheDeath` has no queue of its own any more
+      //    (design-phase-w2-level-client.md §1.2); only `cached`'s shared, per-owner queue can stop
+      //    this from computing its floor off `preKillExp` and applying before the grant does.
+      const deathPenaltyPromise = roomWithTheDeath["applyDeathExpPenalty"]("victim", victimSession);
+      await flush();
+
+      assert.equal(store.liveExp(), preKillExp + grantAmount, "the store's live ledger already moved");
+      assert.equal(killer.userData.totalExp, preKillExp, "roomWithTheKill hasn't applied its own grant yet");
+
+      // 3) The grant's round trip finally returns; the queued death penalty runs immediately after.
+      store.releaseGrant();
+      await awardExpPromise;
+      await deathPenaltyPromise;
+      await flush();
+
+      const finalExp = store.liveExp();
+      assert.ok(finalExp < preKillExp + grantAmount, "the death penalty still cut 1% off the just-earned total");
+      assert.ok(
+        finalExp >= threshold10,
+        "floored at level 10's own minimum — the cross-room death happened after the cross-room kill, never before it",
+      );
+      assert.ok(finalExp > floor9, "nowhere near level 9's much lower floor, which the stale second tab would have used");
+      assert.equal(victimSession.totalExp, finalExp, "the death penalty's own room learned the store's true answer");
+    } finally {
+      dispose(roomWithTheKill);
+      dispose(roomWithTheDeath);
     }
   });
 });

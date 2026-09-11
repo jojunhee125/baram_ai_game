@@ -5,6 +5,7 @@ import {
   type TilePosition,
 } from "@zep-test/shared";
 import type { PlayerSnapshot } from "../net/roomConnection";
+import type { NameTags } from "./nameTags";
 import type { PlayerSprites } from "./playerSprites";
 
 /**
@@ -64,6 +65,8 @@ export class LocalPlayer {
     private readonly sessionId: string,
     spawn: PlayerSnapshot,
     private readonly sprites: PlayerSprites,
+    /** Own nameTag redraw on a level change (§below) — the same renderer WorldScene's own remote branch uses. */
+    private readonly nameTags: NameTags,
     private readonly sendMove: (dir: Direction) => void,
     private readonly isWalkable: WalkabilityOracle,
   ) {
@@ -167,6 +170,18 @@ export class LocalPlayer {
     if (snapshot.avatarSkin !== this.predicted.avatarSkin) {
       this.predicted = { ...this.predicted, avatarSkin: snapshot.avatarSkin };
       this.sprites.update(this.sessionId, this.predicted);
+    }
+
+    // Same reasoning and the same "nothing to reconcile, just adopt the server's value" treatment
+    // as avatarSkin above: level has no local prediction either, and unlike avatarSkin it also
+    // never shows on the sprite itself, only on the name tag — so this redraws that directly
+    // rather than routing through `sprites.update()`.
+    if (snapshot.level !== this.predicted.level) {
+      this.predicted = { ...this.predicted, level: snapshot.level };
+      const sprite = this.sprites.get(this.sessionId);
+      if (sprite) {
+        this.nameTags.add(this.sessionId, sprite, `Lv.${snapshot.level} ${snapshot.nickname}`);
+      }
     }
 
     const reached = this.pendingPath.findIndex((tile) => sameTile(tile, snapshot));

@@ -3,6 +3,7 @@ import {
   LANDMARK_DEFINITIONS,
   TILE_SIZE_PX,
   type ChatBroadcast,
+  type ExpGranted,
   type JoinOptions,
   type MonsterHit,
   type PlayerHit,
@@ -148,6 +149,8 @@ export class WorldScene extends Phaser.Scene {
    */
   private skinPickerOpen = false;
   private regionGuide: RegionGuide | null = null;
+  /** The local player's own level, last seen. Compared on every `ExpGranted` to spot a level-up. */
+  private lastKnownLevel = 1;
 
   constructor() {
     super(WorldScene.KEY);
@@ -180,6 +183,7 @@ export class WorldScene extends Phaser.Scene {
     this.lastStepAt = Number.NEGATIVE_INFINITY;
     this.transitioning = false;
     this.skinPickerOpen = false;
+    this.lastKnownLevel = 1;
   }
 
   preload(): void {
@@ -304,6 +308,7 @@ export class WorldScene extends Phaser.Scene {
         this.inventoryPanel?.applyEquipmentChange(event);
         this.weapon?.applyEquipmentChange(event);
       },
+      onExpGranted: (event) => this.applyExpGranted(event),
       onMoveRejected: (correction) => this.localPlayer?.applyRejection(correction),
       onTeleported: (destination) => this.localPlayer?.applyTeleport(destination),
       onChat: (message) => this.showChat(message),
@@ -356,6 +361,15 @@ export class WorldScene extends Phaser.Scene {
     });
     // attach() replays the players already in view, so addPlayer() normally does this first.
     this.initLocalPlayer();
+    // The character menu's stat row (design §2.3) needs an initial value the moment it exists —
+    // built after attach()'s addPlayer() replay already ran, so this reads the level straight off
+    // the snapshot that replay stored rather than waiting for this room's first ExpGranted, which
+    // may never come (this room might have no monsters at all).
+    const selfSnapshot = this.connection.players.get(this.connection.sessionId);
+    if (selfSnapshot) {
+      this.lastKnownLevel = selfSnapshot.level;
+      this.characterMenu.applyLevel(selfSnapshot.level);
+    }
     hideBootStatus();
     // No-op on the first boot, where the overlay is already clear; on a room hop this is the
     // far side of the wipe that hop() drew.
@@ -696,8 +710,9 @@ export class WorldScene extends Phaser.Scene {
 
   private addPlayer(sessionId: string, snapshot: PlayerSnapshot): void {
     const sprite = this.players.add(sessionId, snapshot);
-    this.nameTags.add(sessionId, sprite, snapshot.nickname);
+    this.nameTags.add(sessionId, sprite, `Lv.${snapshot.level} ${snapshot.nickname}`);
     if (sessionId === this.connection.sessionId) {
+      this.vitals?.setLevel(snapshot.level);
       this.initLocalPlayer();
     }
   }
@@ -709,7 +724,27 @@ export class WorldScene extends Phaser.Scene {
       this.localPlayer.applyServerState(snapshot);
       return;
     }
-    this.players.update(sessionId, snapshot);
+    const { levelChanged } = this.players.update(sessionId, snapshot);
+    if (levelChanged) {
+      const sprite = this.players.get(sessionId);
+      if (sprite) {
+        this.nameTags.add(sessionId, sprite, `Lv.${snapshot.level} ${snapshot.nickname}`);
+      }
+    }
+  }
+
+  /**
+   * One kill's EXP (design-phase-w2-level-client.md §2.6). Level itself only ever changes here —
+   * the EXP bar, the level-up banner and the character menu's stat row all recompute off this one
+   * message, so nothing else needs to feed any of them.
+   */
+  private applyExpGranted(event: ExpGranted): void {
+    this.vitals?.applyExpGranted(event);
+    this.characterMenu?.applyLevel(event.level);
+    if (event.level > this.lastKnownLevel) {
+      this.vitals?.announceLevelUp(event.level);
+    }
+    this.lastKnownLevel = event.level;
   }
 
   private showChat(message: ChatBroadcast): void {
@@ -737,6 +772,7 @@ export class WorldScene extends Phaser.Scene {
       connection.sessionId,
       snapshot,
       this.players,
+      this.nameTags,
       (dir) => connection.sendMove(dir),
       (tileX, tileY) => this.isWalkable(tileX, tileY),
     );

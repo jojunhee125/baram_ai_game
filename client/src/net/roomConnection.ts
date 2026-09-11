@@ -10,6 +10,7 @@ import {
   type EquipItemRequest,
   type EquipmentChanged,
   type EquipmentSlot,
+  type ExpGranted,
   type InteractableEntered,
   type InteractableMarker,
   type ItemGranted,
@@ -54,6 +55,8 @@ export interface PlayerSnapshot {
   tileY: number;
   facing: Direction;
   avatarSkin: number;
+  /** Public like `nickname` (design-phase-w-level-system.md §2) — real from join, every room. */
+  level: number;
 }
 
 /**
@@ -106,6 +109,8 @@ export interface RoomEvents {
   onItemGranted?(event: ItemGranted): void;
   /** The account's equipped item slot changed — or an equip/unequip request was ignored. */
   onEquipmentChanged?(event: EquipmentChanged): void;
+  /** One kill's EXP, unicast to the killer. A `level` greater than what was last known is a level-up. */
+  onExpGranted?(event: ExpGranted): void;
   onChat?(message: ChatBroadcast): void;
   onMoveRejected?(correction: MoveRejected): void;
   /** The local player stepped onto a portal trigger; the consumer owns the room transition. */
@@ -393,6 +398,9 @@ export class RoomConnection {
     this.room.onMessage(ServerMessage.EquipmentChanged, (event: EquipmentChanged) => {
       this.events.onEquipmentChanged?.(event);
     });
+    this.room.onMessage(ServerMessage.ExpGranted, (event: ExpGranted) => {
+      this.events.onExpGranted?.(event);
+    });
   }
 
   /**
@@ -498,5 +506,6 @@ function toSnapshot(player: Player): PlayerSnapshot {
     // `facing` crosses the wire as uint8; the server only ever writes Direction values.
     facing: player.facing as Direction,
     avatarSkin: player.avatarSkin,
+    level: player.level,
   };
 }

@@ -566,7 +566,7 @@ test("classic normal attack plays directional frames and cancels safely", async 
     const frames = [];
     const states = [];
     for (const facing of [0, 1, 2, 3] as const) {
-      const state = { nickname: "test", tileX: 5, tileY: 5, facing, avatarSkin: 0 };
+      const state = { nickname: "test", tileX: 5, tileY: 5, facing, avatarSkin: 0, level: 1 };
       const sprite = players.add("self", state);
       players.attack("self", facing);
       const seen = new Set<number>();
@@ -583,7 +583,7 @@ test("classic normal attack plays directional frames and cancels safely", async 
       states.push({ texture: sprite.texture.key, width: sprite.displayWidth, angle: sprite.angle });
       players.remove("self");
     }
-    const state = { nickname: "test", tileX: 5, tileY: 5, facing: 0 as const, avatarSkin: 0 };
+    const state = { nickname: "test", tileX: 5, tileY: 5, facing: 0 as const, avatarSkin: 0, level: 1 };
     const sprite = players.add("self", state);
     players.attack("self", 0);
     players.remove("self");
