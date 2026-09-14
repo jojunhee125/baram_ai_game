@@ -1,6 +1,8 @@
 import type { Pool } from "pg";
 import { markDatabaseDegraded, markDatabaseOk } from "./status";
 
+export type ProgressListener = (totalExp: number, reason: "grant" | "penalty") => void;
+
 /**
  * One account's cumulative EXP (design-phase-w-level-system.md §5.1). Level is always derived
  * from this via `levelForExp` (`@zep-test/shared`, `leveling.ts`) — no `level` column exists here,
@@ -10,6 +12,9 @@ import { markDatabaseDegraded, markDatabaseOk } from "./status";
  * Keyed by the SSO `sub`, `ProfileStore`'s own convention.
  */
 export interface ProgressStore {
+  /** Observes committed writes in account order; no initial snapshot. Returns an unsubscribe function. */
+  subscribe?(ownerKey: string, listener: ProgressListener): () => void;
+
   /** Never granted yet is `null` — the store invents no default; callers treat that as exp 0 / level 1. */
   getExp(ownerKey: string): Promise<number | null>;
 

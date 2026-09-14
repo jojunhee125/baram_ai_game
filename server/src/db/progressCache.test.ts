@@ -66,6 +66,25 @@ class DeferredStubStore implements ProgressStore {
   }
 }
 
+it("account progress only notifies successful writes and isolates subscriber failures", async (context) => {
+  context.mock.method(console, "warn", () => {});
+  const inner = new DeferredStubStore();
+  const cache = new CachedProgressStore(inner);
+  const events: number[] = [];
+  cache.subscribe("owner-events", () => { throw new Error("subscriber failed"); });
+  const unsubscribe = cache.subscribe("owner-events", (total) => events.push(total));
+  const grant = inner.grantExp.bind(inner);
+  inner.grantExp = () => Promise.reject(new Error("write failed"));
+  await assert.rejects(cache.grantExp("owner-events", 10), /write failed/);
+  assert.deepEqual(events, []);
+  inner.grantExp = grant;
+  assert.equal(await cache.grantExp("owner-events", 10), 10);
+  assert.deepEqual(events, [10]);
+  unsubscribe();
+  await cache.grantExp("owner-events", 10);
+  assert.deepEqual(events, [10]);
+});
+
 it("recovers the owner queue after handled read and grant failures", async () => {
   const inner = new DeferredStubStore();
   let rejectRead = true;

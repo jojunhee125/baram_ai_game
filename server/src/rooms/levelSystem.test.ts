@@ -261,6 +261,7 @@ async function flush(): Promise<void> {
 }
 
 function dispose(room: MetaverseRoom): void {
+  room.onDispose();
   room.setPatchRate(null);
 }
 
@@ -285,6 +286,90 @@ class CountingProgressStore implements ProgressStore {
 }
 
 // -- anchor ----------------------------------------------------------------------------------------
+
+it("account progress synchronizes grants and penalties across rooms without rewarding other accounts", async () => {
+  const store = new CachedProgressStore(new InMemoryProgressStore());
+  const first = await createRoom([], { progressStore: store });
+  const second = await createRoom([], { progressStore: store });
+  try {
+    const actor = join(first, "actor", undefined, "shared-owner");
+    const peer = join(second, "peer", undefined, "shared-owner");
+    const other = join(second, "other", undefined, "other-owner");
+    await flush();
+    actor.userData!.hp = 40;
+    peer.userData!.hp = 30;
+    const total = cumulativeExpForLevel(10) + 50;
+    await first["awardExp"]({ sessionId: "actor", ownerKey: "shared-owner" }, "kill", total, 1000);
+    const cap = PLAYER_MAX_HP + 9 * HP_PER_LEVEL;
+    for (const [room, client] of [[first, actor], [second, peer]] as const) {
+      assert.equal(client.userData!.totalExp, total);
+      assert.equal(room.state.players.get(client.sessionId)?.level, 10);
+      assert.equal(room["totalAttack"](asRoomClient(client).userData!), PLAYER_ATTACK_DAMAGE + 9 * ATTACK_PER_LEVEL);
+      assert.equal(room["totalMaxHp"](asRoomClient(client).userData!), cap);
+      assert.equal(client.userData!.hp, cap);
+    }
+    assert.equal(other.userData!.totalExp, 0);
+    assert.equal(second.state.players.get("other")?.level, 1);
+    assert.equal(sentOfType<ExpGranted>(actor, ServerMessage.ExpGranted).length, 1);
+    assert.equal(sentOfType<ExpGranted>(peer, ServerMessage.ExpGranted).length, 0);
+    kill(first, "actor", 13, 1001);
+    kill(second, "peer", cap, 1002);
+    await flush();
+    const afterDeath = Math.max(cumulativeExpForLevel(10), total - Math.round(total * 0.01));
+    assert.equal(actor.userData!.totalExp, afterDeath);
+    assert.equal(peer.userData!.totalExp, afterDeath);
+    assert.equal(actor.userData!.hp, cap - 13);
+    assert.equal(first.state.players.get("actor")?.level, 10);
+  } finally {
+    dispose(first);
+    dispose(second);
+  }
+});
+
+it("account progress rejects an initial snapshot overtaken by a lower death total", async () => {
+  const store = new CachedProgressStore(new InMemoryProgressStore());
+  await store.grantExp("snapshot-owner", 1000);
+  let resolveRead!: (value: number) => void;
+  const snapshot = new Promise<number>((resolve) => { resolveRead = resolve; });
+  store.getExp = () => snapshot;
+  const room = await createRoom([], { progressStore: store });
+  try {
+    const client = join(room, "snapshot", undefined, "snapshot-owner");
+    await store.applyDeathPenalty("snapshot-owner", cumulativeExpForLevel(levelForExp(1000)));
+    assert.equal(client.userData!.totalExp, 990);
+    resolveRead(1000);
+    await flush();
+    assert.equal(client.userData!.totalExp, 990);
+    assert.equal(room.state.players.get("snapshot")?.level, levelForExp(990));
+  } finally {
+    dispose(room);
+  }
+});
+
+it("account progress unsubscribes on leave and disposal and hydrates a later arrival from cache", async () => {
+  const inner = new CountingProgressStore();
+  const store = new CachedProgressStore(inner);
+  const first = await createRoom([], { progressStore: store });
+  const second = await createRoom([], { progressStore: store });
+  try {
+    const left = join(first, "left", undefined, "lifecycle-owner");
+    const disposed = join(second, "disposed", undefined, "lifecycle-owner");
+    await flush();
+    assert.equal(inner.calls, 1);
+    first.onLeave(asRoomClient(left));
+    second.onDispose();
+    await store.grantExp("lifecycle-owner", 1000);
+    assert.equal(left.userData!.totalExp, 0);
+    assert.equal(disposed.userData!.totalExp, 0);
+    const arrival = join(first, "arrival", undefined, "lifecycle-owner");
+    await flush();
+    assert.equal(arrival.userData!.totalExp, 1000);
+    assert.equal(inner.calls, 2);
+  } finally {
+    dispose(first);
+    dispose(second);
+  }
+});
 
 it("hydrates saved high-level EXP with full level-scaled HP", async () => {
   const store = new InMemoryProgressStore();

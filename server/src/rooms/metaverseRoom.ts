@@ -253,6 +253,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   private bossStateStore: BossStateStore | null = null;
   /** Where a killer's cumulative EXP is filed. Null in every room built without one — see {@link RoomCreateOptions.progressStore}. */
   private progressStore: ProgressStore | null = null;
+  private readonly progressSubscriptions = new Map<string, { version: number; unsubscribe?: () => void }>();
   /** Death EXP penalty exemptions (design-phase-w-level-system.md §11.0). Empty unless configured. */
   private adminOwnerKeys: ReadonlySet<string> = new Set();
   /** The enforced join cap — {@link RoomCreateOptions.realCapacity}, falling back to `maxClients`. */
@@ -536,9 +537,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       // nothing could undo.
       hp: PLAYER_MAX_HP,
       lastDamagedAt: 0,
-      // 0 until hydrateProgressCache (below, every room with a progressStore) or this session's own
-      // awardExp raises it. A session that never kills anything and joined before the store
-      // answered stays at level 1 for that visit — design-phase-w2-level-client.md §1.3.
+      // Hydration supplies the initial value; account subscriptions keep every active session current.
       totalExp: 0,
       ownerKey: client.auth?.ssoUserId ?? null,
       ownedPossessionKeys: new Set(),
@@ -590,6 +589,15 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // once per account for the life of the process — every join after that is a synchronous cache
     // hit, which is what keeps this off the PoC #2 500 CCU join-path budget.
     if (this.progressStore !== null) {
+      const binding: { version: number; unsubscribe?: () => void } = { version: 0 };
+      this.progressSubscriptions.set(client.sessionId, binding);
+      binding.unsubscribe = this.progressStore.subscribe?.(ownerKey, (total, reason) => {
+        if (this.progressSubscriptions.get(client.sessionId) !== binding) {
+          return;
+        }
+        binding.version += 1;
+        this.updateProgress(client.sessionId, total, reason === "grant");
+      });
       void this.hydrateProgressCache(client.sessionId, ownerKey).catch((cause) => {
         console.warn(`[zep-test] could not hydrate progress for ${ownerKey}`, cause);
       });
@@ -707,34 +715,47 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
    * process, since `progressStore` is a `CachedProgressStore` (`index.ts`) and every join after the
    * first cold miss never leaves that wrapper's own synchronous `Map.get`.
    *
-   * Never awaited by its caller, for {@link hydratePossessionCache}'s reason. Unlike the equipment
-   * cache there is no version counter to guard against — this session's own kills only ever
-   * *increase* `totalExp` via {@link awardExp}, so the one compare below (never move the cache
-   * backwards) is the whole of the correctness this needs: a fast session that already leveled up
-   * once before this read resolves keeps that newer, larger total.
+   * Never awaited by its caller. A subscription version rejects snapshots overtaken by either
+   * a grant or a penalty, including a newer total that is smaller than the snapshot.
    */
   private async hydrateProgressCache(sessionId: string, ownerKey: string): Promise<void> {
     const store = this.progressStore;
     if (store === null) {
       return;
     }
+    const binding = this.progressSubscriptions.get(sessionId);
+    const version = binding?.version;
     const exp = await store.getExp(ownerKey);
+    if (this.progressSubscriptions.get(sessionId) !== binding || binding?.version !== version) {
+      return;
+    }
     const current = this.clientsBySession.get(sessionId)?.userData;
     const player = this.state.players.get(sessionId);
     if (!current || !player || exp === null || exp <= current.totalExp) {
       return;
     }
-    const oldMaxHp = this.totalMaxHp(current);
-    current.totalExp = exp;
-    const level = levelForExp(exp);
-    if (level > player.level) {
-      player.level = level;
+    this.updateProgress(sessionId, exp, false);
+  }
+
+  private updateProgress(sessionId: string, total: number, healOnLevelUp: boolean): void {
+    const session = this.clientsBySession.get(sessionId)?.userData;
+    const player = this.state.players.get(sessionId);
+    if (!session || !player) {
+      return;
     }
-    const newMaxHp = this.totalMaxHp(current);
-    current.hp = Math.min(newMaxHp, current.hp + newMaxHp - oldMaxHp);
+    const oldLevel = levelForExp(session.totalExp);
+    const oldMaxHp = this.totalMaxHp(session);
+    session.totalExp = total;
+    player.level = levelForExp(total);
+    const newMaxHp = this.totalMaxHp(session);
+    session.hp = healOnLevelUp && player.level > oldLevel
+      ? newMaxHp
+      : Math.min(newMaxHp, session.hp + newMaxHp - oldMaxHp);
   }
 
   onLeave(client: RoomClient): void {
+    this.progressSubscriptions.get(client.sessionId)?.unsubscribe?.();
+    this.progressSubscriptions.delete(client.sessionId);
     const player = this.state.players.get(client.sessionId);
     // The leaver's tile has to be read before the `state.players` deletion below. Where the
     // call itself sits among the deletions does not matter: `to` null makes it touch only the
@@ -755,6 +776,13 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // judgement (design §6.6) — see {@link leaveBossCombat}, which both paths share.
     // `monsterRuntimes` is empty in a room with no monsters, so this costs nothing there.
     this.leaveBossCombat(client.sessionId, Date.now());
+  }
+
+  onDispose(): void {
+    for (const binding of this.progressSubscriptions.values()) {
+      binding.unsubscribe?.();
+    }
+    this.progressSubscriptions.clear();
   }
 
   private handleMove(client: RoomClient, message: MoveRequest): void {
@@ -1513,25 +1541,19 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     if (!session || !player) {
       return;
     }
-    // The store's own answer, always — the store's own per-account queue (`CachedProgressStore`)
-    // already guarantees no other grant or death penalty for this account is still applying when
-    // this line runs, so `total` can never be a stale snapshot overtaking a fresher one already
-    // written to the cache.
-    session.totalExp = total;
-    const newLevel = levelForExp(total);
-    if (newLevel > player.level) {
-      player.level = newLevel;
-      // Design §6: a level-up is always a full heal, and it may have just raised the cap itself
-      // (totalMaxHp's own level term) — so this heals to the *new* max, not the old one.
-      session.hp = this.totalMaxHp(session);
+    // Subscriptions apply committed writes in order before this continuation; do not replay one
+    // after a newer account update, or heal the killer twice. Plain stores retain their old path.
+    if (this.progressSubscriptions.get(lastHit.sessionId)?.unsubscribe === undefined) {
+      this.updateProgress(lastHit.sessionId, total, true);
     }
+    const newLevel = levelForExp(session.totalExp);
 
     this.clientsBySession.get(lastHit.sessionId)?.send(ServerMessage.ExpGranted, {
       monsterId,
       amount,
-      totalExp: total,
+      totalExp: session.totalExp,
       level: newLevel,
-      expToNextLevel: remainingExpToNextLevel(total),
+      expToNextLevel: remainingExpToNextLevel(session.totalExp),
       hpMax: this.totalMaxHp(session),
       hpRemaining: Math.max(0, session.hp),
     } satisfies ExpGranted);
@@ -2073,12 +2095,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     if (result === null) {
       return;
     }
-    // The store's own answer, always — `equip()`'s own rule (`EquipmentChanged.applied`'s doc
-    // comment): it was computed live against the database's own `exp` column, not against this
-    // session's possibly-stale cache, so it is trusted outright rather than compared against it.
-    const current = this.clientsBySession.get(sessionId)?.userData;
-    if (current) {
-      current.totalExp = result;
+    if (this.progressSubscriptions.get(sessionId)?.unsubscribe === undefined) {
+      this.updateProgress(sessionId, result, false);
     }
   }
 

@@ -1,5 +1,5 @@
 import { cumulativeExpForLevel, levelForExp } from "@zep-test/shared";
-import type { ProgressStore } from "./progressStore";
+import type { ProgressListener, ProgressStore } from "./progressStore";
 
 /**
  * A process-scoped read-through/write-through mirror over a `ProgressStore`
@@ -38,8 +38,39 @@ export class CachedProgressStore implements ProgressStore {
   private readonly exp = new Map<string, number | null>();
   /** Tail of the in-flight chain per account, the exact shape `MetaverseRoom.queueProgressUpdate` had. */
   private readonly queue = new Map<string, Promise<unknown>>();
+  private readonly listeners = new Map<string, Set<ProgressListener>>();
 
   constructor(private readonly inner: ProgressStore) {}
+
+  subscribe(ownerKey: string, listener: ProgressListener): () => void {
+    let listeners = this.listeners.get(ownerKey);
+    if (listeners === undefined) {
+      listeners = new Set();
+      this.listeners.set(ownerKey, listeners);
+    }
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0 && this.listeners.get(ownerKey) === listeners) {
+        this.listeners.delete(ownerKey);
+      }
+    };
+  }
+
+  private notify(ownerKey: string, total: number, reason: "grant" | "penalty"): void {
+    const listeners = this.listeners.get(ownerKey);
+    if (listeners === undefined) {
+      return;
+    }
+    for (const listener of listeners) {
+      try {
+        listener(total, reason);
+      } catch (cause) {
+        // A subscriber failure must not turn a committed write into a failed grant.
+        console.warn("[zep-test] could not synchronize account progress", cause);
+      }
+    }
+  }
 
   /**
    * A cache hit is a synchronous `Map.has`/`Map.get` pair wrapped in `Promise.resolve` — it does
@@ -71,6 +102,7 @@ export class CachedProgressStore implements ProgressStore {
     return this.enqueue(ownerKey, async () => {
       const total = await this.inner.grantExp(ownerKey, amount);
       this.exp.set(ownerKey, total);
+      this.notify(ownerKey, total, "grant");
       return total;
     });
   }
@@ -108,6 +140,9 @@ export class CachedProgressStore implements ProgressStore {
       // Mirrored unconditionally, including `null`: a `null` here means the inner store confirms
       // this account has no row at all, which is exactly the same confirmed answer `getExp` caches.
       this.exp.set(ownerKey, result);
+      if (result !== null) {
+        this.notify(ownerKey, result, "penalty");
+      }
       return result;
     });
   }
