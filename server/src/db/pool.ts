@@ -47,6 +47,8 @@ export async function createPool(databaseUrl: string): Promise<Pool> {
     idleTimeoutMillis: 30_000,
     // Never wait forever: an unresponsive database must not hold a request handler open.
     connectionTimeoutMillis: 5_000,
+    statement_timeout: 5_000,
+    query_timeout: 10_000,
     // No `ssl` option on purpose — KAD's internal Postgres does not speak TLS, and `pg`
     // connects in plaintext when the option is absent. Nothing to do is the correct action.
   });

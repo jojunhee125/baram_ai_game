@@ -122,13 +122,14 @@ export class CachedProgressStore implements ProgressStore {
     const previous = this.queue.get(ownerKey) ?? Promise.resolve();
     const next = previous.then(task, task);
     this.queue.set(ownerKey, next);
-    void next.finally(() => {
+    const cleanup = () => {
       // Only the entry this task itself installed may be cleared — a task that queued behind it
       // while it was running must keep the map pointed at its own, later link.
       if (this.queue.get(ownerKey) === next) {
         this.queue.delete(ownerKey);
       }
-    });
+    };
+    void next.then(cleanup, cleanup);
     return next;
   }
 }

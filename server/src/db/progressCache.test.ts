@@ -66,6 +66,38 @@ class DeferredStubStore implements ProgressStore {
   }
 }
 
+it("recovers the owner queue after handled read and grant failures", async () => {
+  const inner = new DeferredStubStore();
+  let rejectRead = true;
+  let rejectGrant = true;
+  const cache = new CachedProgressStore({
+    getExp: (ownerKey) => {
+      if (rejectRead) {
+        rejectRead = false;
+        return Promise.reject(new Error("read unavailable"));
+      }
+      return inner.getExp(ownerKey);
+    },
+    grantExp: (ownerKey, amount) => {
+      if (rejectGrant) {
+        rejectGrant = false;
+        return Promise.reject(new Error("grant unavailable"));
+      }
+      return inner.grantExp(ownerKey, amount);
+    },
+    applyDeathPenalty: (ownerKey, floor) => inner.applyDeathPenalty(ownerKey, floor),
+  });
+
+  await assert.rejects(cache.getExp("owner-retry"), /read unavailable/);
+  assert.equal(await cache.getExp("owner-retry"), null);
+  const rejectedGrant = assert.rejects(cache.grantExp("owner-retry", 10), /grant unavailable/);
+  const nextGrant = cache.grantExp("owner-retry", 7);
+  await rejectedGrant;
+  assert.equal(await nextGrant, 7);
+  assert.equal(await cache.getExp("owner-retry"), 7);
+  await tick();
+});
+
 /** Resolves after two macrotask turns — enough for other queued callers to also reach `acquire()`. */
 function tick(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));

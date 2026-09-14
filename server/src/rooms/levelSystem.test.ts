@@ -286,6 +286,40 @@ class CountingProgressStore implements ProgressStore {
 
 // -- anchor ----------------------------------------------------------------------------------------
 
+it("hydrates saved high-level EXP with full level-scaled HP", async () => {
+  const store = new InMemoryProgressStore();
+  await store.grantExp("owner-hp", cumulativeExpForLevel(LEVEL_CAP));
+  const room = await createRoom([], { progressStore: new CachedProgressStore(store) });
+  try {
+    const visitor = join(room, "visitor-hp", undefined, "owner-hp");
+    await flush();
+    assert.equal(room.state.players.get("visitor-hp")?.level, LEVEL_CAP);
+    assert.equal(visitor.userData?.hp, PLAYER_MAX_HP + (LEVEL_CAP - 1) * HP_PER_LEVEL);
+  } finally {
+    dispose(room);
+  }
+});
+
+it("preserves damage taken while saved EXP hydration is pending", async () => {
+  const store = new InMemoryProgressStore();
+  let resolveRead!: (exp: number) => void;
+  const pendingExp = new Promise<number>((resolve) => { resolveRead = resolve; });
+  store.getExp = () => pendingExp;
+  const room = await createRoom([], { progressStore: store });
+  try {
+    const visitor = join(room, "visitor-delayed", undefined, "owner-delayed");
+    place(room, "visitor-delayed", OPEN_CENTRE);
+    kill(room, "visitor-delayed", 17, 1000);
+    assert.equal(visitor.userData?.hp, PLAYER_MAX_HP - 17);
+    resolveRead(cumulativeExpForLevel(11));
+    await flush();
+    assert.equal(room.state.players.get("visitor-delayed")?.level, 11);
+    assert.equal(visitor.userData?.hp, PLAYER_MAX_HP + 10 * HP_PER_LEVEL - 17);
+  } finally {
+    dispose(room);
+  }
+});
+
 describe("VERIFY the level-1 anchor (§4.2)", () => {
   it("a fresh level-1 session deals and takes exactly today's numbers, with no progressStore at all", async () => {
     const faced = { tileX: OPEN_CENTRE.tileX + 1, tileY: OPEN_CENTRE.tileY };
@@ -471,7 +505,7 @@ describe("VERIFY the death EXP penalty (§11.0)", () => {
       await flush(); // let hydrateProgressCache catch the session cache up to 1000 first
       assert.equal(victim.userData?.totalExp, 1000, "precondition: hydration really ran");
 
-      kill(room, "victim", PLAYER_MAX_HP, 1000);
+      kill(room, "victim", victim.userData!.hp, 1000);
       await flush();
 
       assert.equal(await store.getExp("owner-c"), 990, "1000 - round(1000 * 0.01) = 990");
@@ -497,7 +531,7 @@ describe("VERIFY the death EXP penalty (§11.0)", () => {
       await flush();
       assert.equal(levelForExp(victim.userData?.totalExp ?? -1), 9, "precondition: level 9 after hydration");
 
-      kill(room, "victim", PLAYER_MAX_HP, 1000);
+      kill(room, "victim", victim.userData!.hp, 1000);
       await flush();
 
       assert.equal(await store.getExp("owner-d"), floor, "clamped at the level-9 floor, not total - the raw cut");
@@ -516,7 +550,7 @@ describe("VERIFY the death EXP penalty (§11.0)", () => {
       place(room, "victim", OPEN_CENTRE);
       await flush();
 
-      kill(room, "victim", PLAYER_MAX_HP, 1000);
+      kill(room, "victim", victim.userData!.hp, 1000);
       await flush();
 
       assert.equal(await store.getExp("owner-e"), 40, "round(40 * 0.01) === 0, so nothing is actually cut");
@@ -538,7 +572,7 @@ describe("VERIFY the death EXP penalty (§11.0)", () => {
       await flush();
       assert.equal(victim.userData?.totalExp, 1000, "precondition: hydration really ran");
 
-      kill(room, "victim", PLAYER_MAX_HP, 1000);
+      kill(room, "victim", victim.userData!.hp, 1000);
       await flush();
 
       assert.equal(await store.getExp("owner-admin"), 1000, "the allowlisted account loses nothing");

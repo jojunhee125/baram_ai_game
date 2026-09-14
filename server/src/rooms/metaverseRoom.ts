@@ -724,11 +724,14 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     if (!current || !player || exp === null || exp <= current.totalExp) {
       return;
     }
+    const oldMaxHp = this.totalMaxHp(current);
     current.totalExp = exp;
     const level = levelForExp(exp);
     if (level > player.level) {
       player.level = level;
     }
+    const newMaxHp = this.totalMaxHp(current);
+    current.hp = Math.min(newMaxHp, current.hp + newMaxHp - oldMaxHp);
   }
 
   onLeave(client: RoomClient): void {
