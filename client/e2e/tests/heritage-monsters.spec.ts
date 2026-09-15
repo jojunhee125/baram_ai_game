@@ -553,16 +553,16 @@ test("9 concurrency: a turn or replacement during movement cannot revive a remov
 
 test("classic normal attack plays directional frames and cancels safely", async ({ harness }) => {
   const result = await harness.evaluate(async h => {
-    const { PlayerSprites, registerAvatarAnimations } = await import("/src/world/playerSprites.ts");
+    const { PlayerSprites } = await import("/src/world/playerSprites.ts");
+    const { createAvatarArt } = await import("/src/world/avatarArt.ts");
+    const art = createAvatarArt(h.scene);
     await new Promise<void>(resolve => {
-      h.scene.load.spritesheet("avatar", "/sprites/avatar.png", { frameWidth: 32, frameHeight: 32 });
-      h.scene.load.spritesheet("heritage-adventurer", "/sprites/heritage-adventurer.png", { frameWidth: 362, frameHeight: 362 });
-      h.scene.load.spritesheet("classic-adventurer-attack", "/sprites/classic-adventurer-attack.png", { frameWidth: 362, frameHeight: 362 });
+      art.preload();
       h.scene.load.once("complete", resolve);
       h.scene.load.start();
     });
-    registerAvatarAnimations(h.scene);
-    const players = new PlayerSprites(h.scene);
+    art.prepare();
+    const players = new PlayerSprites(h.scene, art);
     const frames = [];
     const states = [];
     for (const facing of [0, 1, 2, 3] as const) {
@@ -571,8 +571,8 @@ test("classic normal attack plays directional frames and cancels safely", async 
       players.attack("self", facing);
       const seen = new Set<number>();
       await h.waitFor(() => {
-        if (sprite.texture.key !== "classic-adventurer-attack") return true;
-        seen.add(Number(sprite.frame.name));
+        if (sprite.texture.key !== "avatar:/sprites/classic-adventurer-attack.png") return true;
+        seen.add(sprite.frame.cutY / 362 * 3 + sprite.frame.cutX / 362);
         return false;
       });
       frames.push([...seen]);
@@ -592,8 +592,8 @@ test("classic normal attack plays directional frames and cancels safely", async 
   });
   expect(result.frames).toEqual([[0, 1, 2], [3, 4, 8], [6, 7, 5], [9, 10, 11]]);
   for (let i = 0; i < result.states.length; i += 2) {
-    expect(result.states[i]).toEqual({ texture: "heritage-adventurer", width: 48, angle: 0 });
-    expect(result.states[i + 1]).toEqual({ texture: "avatar", width: 32, angle: 0 });
+    expect(result.states[i]).toEqual({ texture: "avatar:/sprites/heritage-adventurer.png", width: 48, angle: 0 });
+    expect(result.states[i + 1]).toEqual({ texture: "avatar:/sprites/avatar.png", width: 32, angle: 0 });
   }
   expect(result).toMatchObject({ removed: true, tracked: false });
 });

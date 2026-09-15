@@ -1,15 +1,7 @@
 import { AVATAR_SKIN_COUNT } from "@zep-test/shared";
+import { AVATAR_CATALOG, resolveAvatarPreview, type AvatarCatalog } from "../world/avatarArt";
 
-/**
- * Previews are the walk sheet itself at 2x, so the picker ships no new art and can never offer a
- * skin the world would not draw. Geometry of `assets/sprites/avatar.png`: three frame columns,
- * one row per direction, four directions per skin, 32px cells.
- */
 const PREVIEW_PX = 64;
-/** Middle column of the three, which is the standing frame. */
-const PREVIEW_COLUMN_PX = PREVIEW_PX;
-/** A skin owns four direction rows; row 0 of its block faces the camera. */
-const PREVIEW_BLOCK_PX = PREVIEW_PX * 4;
 
 /** Lives here rather than in CSS because arrow-key row jumps need the same number. */
 const COLUMNS = 6;
@@ -41,20 +33,13 @@ const startButton = document.querySelector<HTMLButtonElement>("#avatar-picker-st
  * the only way to leave without picking (§2.4); the boot call passes through the same branch
  * but has no reason to trigger it.
  */
-export function chooseAvatarSkin(initialSkin: number): Promise<number> {
+export function chooseAvatarSkin(initialSkin: number, catalog: AvatarCatalog = AVATAR_CATALOG): Promise<number> {
   return new Promise((resolve) => {
-    const cells = buildCells();
+    const { cells, dispose } = buildCells(catalog);
     const columns = Math.min(COLUMNS, cells.length);
     let selected = 0;
 
     grid.style.setProperty("--picker-columns", String(columns));
-    // The sheet's full height at 2x, so `background-size` follows AVATAR_SKIN_COUNT instead of
-    // CSS carrying a second copy of it that would silently squash every preview when it changes.
-    grid.style.setProperty(
-      "--picker-sheet-height",
-      `${AVATAR_SKIN_COUNT * PREVIEW_BLOCK_PX}px`,
-    );
-
     const select = (next: number): void => {
       const cell = cells[next];
       if (!cell) {
@@ -69,6 +54,7 @@ export function chooseAvatarSkin(initialSkin: number): Promise<number> {
     };
 
     const finish = (): void => {
+      dispose();
       grid.removeEventListener("keydown", handleGridKey);
       startButton.removeEventListener("click", finish);
       panel.hidden = true;
@@ -123,8 +109,10 @@ export function chooseAvatarSkin(initialSkin: number): Promise<number> {
   });
 }
 
-function buildCells(): HTMLButtonElement[] {
+function buildCells(catalog: AvatarCatalog): { cells: HTMLButtonElement[]; dispose(): void } {
   const cells: HTMLButtonElement[] = [];
+  const images: HTMLImageElement[] = [];
+  let disposed = false;
   for (let skin = 0; skin < AVATAR_SKIN_COUNT; skin += 1) {
     const cell = document.createElement("button");
     cell.type = "button";
@@ -136,17 +124,65 @@ function buildCells(): HTMLButtonElement[] {
 
     const preview = document.createElement("span");
     preview.className = "picker__preview";
-    preview.style.backgroundPosition = `-${PREVIEW_COLUMN_PX}px -${skin * PREVIEW_BLOCK_PX}px`;
-    if (skin === 0) {
-      preview.style.backgroundImage = 'url("/sprites/heritage-adventurer.png")';
-      preview.style.backgroundSize = "192px 256px";
-      preview.style.backgroundPosition = "-64px 0";
-      cell.title = "청록 도포 · 새로운 모험가";
-    }
+    preview.setAttribute("aria-hidden", "true");
+    const unavailable = new Set<string>();
+    let previewCatalog = catalog;
+    const loadPreview = (): void => {
+      if (disposed) return;
+      const visual = resolveAvatarPreview(skin, previewCatalog, (path) => !unavailable.has(path));
+      if (!visual) {
+        preview.textContent = "미리보기 없음";
+        cell.title = "이미지를 불러오지 못했습니다. 캐릭터 번호로 선택할 수 있습니다.";
+        cell.removeAttribute("aria-busy");
+        return;
+      }
+      preview.textContent = "불러오는 중";
+      cell.setAttribute("aria-busy", "true");
+      const image = new Image();
+      images.push(image);
+      image.onload = () => {
+        if (disposed) return;
+        const { manifest, frame, path } = visual;
+        const texture = manifest.textures[frame.texture]!;
+        if (image.naturalWidth !== texture.width || image.naturalHeight !== texture.height) {
+          const entry = catalog.get(skin)!;
+          if (manifest !== entry.legacy) {
+            previewCatalog = new Map([[skin, { primary: entry.legacy, legacy: entry.legacy }]]);
+          } else unavailable.add(path);
+          loadPreview();
+          return;
+        }
+        const scale = PREVIEW_PX / Math.max(manifest.displaySize.width, manifest.displaySize.height);
+        const width = manifest.displaySize.width * scale;
+        const height = manifest.displaySize.height * scale;
+        const scaleX = width / frame.rect.width;
+        const scaleY = height / frame.rect.height;
+        preview.textContent = "";
+        preview.style.width = `${width}px`;
+        preview.style.height = `${height}px`;
+        preview.style.backgroundImage = `url(${JSON.stringify(path)})`;
+        preview.style.backgroundSize = `${texture.width * scaleX}px ${texture.height * scaleY}px`;
+        preview.style.backgroundPosition = `${-frame.rect.x * scaleX}px ${-frame.rect.y * scaleY}px`;
+        cell.removeAttribute("aria-busy");
+      };
+      image.onerror = () => {
+        if (disposed) return;
+        unavailable.add(visual.path);
+        loadPreview();
+      };
+      image.src = visual.path;
+    };
+    loadPreview();
     cell.append(preview);
 
     cells.push(cell);
   }
   grid.replaceChildren(...cells);
-  return cells;
+  return { cells, dispose: () => {
+    disposed = true;
+    for (const image of images) {
+      image.onload = null;
+      image.onerror = null;
+    }
+  } };
 }

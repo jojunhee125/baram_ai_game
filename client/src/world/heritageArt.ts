@@ -1,14 +1,10 @@
 import Phaser from "phaser";
-import { Direction, TILE_SIZE_PX } from "@zep-test/shared";
+import { TILE_SIZE_PX } from "@zep-test/shared";
 
-export const HERITAGE_AVATAR = "heritage-adventurer";
 export const HERITAGE_ENVIRONMENT = "heritage-environment";
 export const HERITAGE_TERRAIN_SOURCE = "heritage-terrain-source";
 export const HERITAGE_TILESET = "heritage-tiles";
 export const CLASSIC_VILLAGE_SOURCE = "classic-village-ground";
-export const HERITAGE_SKIN = 0;
-export const HERITAGE_CELL = 362;
-export const HERITAGE_DISPLAY = 48;
 
 export function usesClassicTerrain(mapKey: string): boolean {
   return mapKey === "plaza" || mapKey === "hunting-ground" || mapKey === "hunting-den";
@@ -64,23 +60,6 @@ export function registerHeritageTerrain(scene: Phaser.Scene, mapKey = ""): strin
   }
   texture.refresh();
   return textureKey;
-}
-
-export function avatarTexture(skin: number): string {
-  return skin === HERITAGE_SKIN ? HERITAGE_AVATAR : "avatar";
-}
-
-export function styleAvatar(sprite: Phaser.GameObjects.Sprite, skin: number): void {
-  sprite.setDisplaySize(skin === HERITAGE_SKIN ? HERITAGE_DISPLAY : TILE_SIZE_PX,
-    skin === HERITAGE_SKIN ? HERITAGE_DISPLAY : TILE_SIZE_PX);
-  sprite.setOrigin(0.5, skin === HERITAGE_SKIN ? 0.96 : 1);
-}
-
-export function heritageWalkFrames(direction: Direction): number[] {
-  // The generated side rows swap their third poses; map each pose to its actual facing.
-  if (direction === Direction.Left) return [3, 4, 8, 4];
-  if (direction === Direction.Right) return [6, 7, 5, 7];
-  return [direction * 3, direction * 3 + 1, direction * 3 + 2, direction * 3 + 1];
 }
 
 interface Decoration { frame: number; x: number; y: number; size: number }

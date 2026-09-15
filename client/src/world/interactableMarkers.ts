@@ -1,18 +1,10 @@
 import Phaser from "phaser";
 import { Direction, InteractableKind, TILE_SIZE_PX } from "@zep-test/shared";
 import type { InteractableMarkerPosition } from "../net/roomConnection";
-import { AVATAR_TEXTURE } from "./playerSprites";
+import type { AvatarArt } from "./avatarArt";
 
 /** The layer portal pads use: above the tile layers, below every avatar. See portalMarkers.ts. */
 const MARKER_DEPTH = 1;
-
-/**
- * `avatar.png`'s layout, duplicated from playerSprites.ts's `directionBase`/`idleFrame` rather
- * than imported: the same relationship `monsterSprites.ts` has with it (a skin/kindIndex swap
- * over one small formula isn't worth a shared helper for two call sites), see design doc §1.8.
- */
-const FRAMES_PER_DIRECTION = 3;
-const DIRECTIONS_PER_SKIN = 4;
 
 const PLATE_SIZE_PX = 24;
 const PLATE_CORNER_PX = 6;
@@ -58,10 +50,11 @@ function glyphFor(kind: string): string {
 export function drawInteractableMarkers(
   scene: Phaser.Scene,
   markers: readonly InteractableMarkerPosition[],
+  art: AvatarArt,
 ): void {
   for (const { tileX, tileY, kind, avatarSkin } of markers) {
     if (kind === InteractableKind.Npc) {
-      addNpcStandee(scene, tileX, tileY, avatarSkin ?? 0);
+      addNpcStandee(scene, tileX, tileY, avatarSkin ?? 0, art);
       continue;
     }
 
@@ -82,14 +75,13 @@ export function drawInteractableMarkers(
  * signboard lying on the ground. Always idle, facing Down: this NPC never turns or walks, so one
  * fixed frame is the whole of it (no animation object, unlike a real player).
  */
-function addNpcStandee(scene: Phaser.Scene, tileX: number, tileY: number, avatarSkin: number): void {
+function addNpcStandee(scene: Phaser.Scene, tileX: number, tileY: number, avatarSkin: number, art: AvatarArt): void {
   const x = tileX * TILE_SIZE_PX + TILE_SIZE_PX / 2;
   const y = (tileY + 1) * TILE_SIZE_PX;
-  const base = (avatarSkin * DIRECTIONS_PER_SKIN + Direction.Down) * FRAMES_PER_DIRECTION;
-  const idle = base + 1;
-
-  const sprite = scene.add.sprite(x, y, AVATAR_TEXTURE, idle);
-  sprite.setOrigin(0.5, 1);
+  const visual = art.resolve(avatarSkin, "idle", Direction.Down);
+  if (!visual) throw new Error(`NPC avatar ${avatarSkin} is unavailable`);
+  const sprite = scene.add.sprite(x, y, "__DEFAULT");
+  art.apply(sprite, visual, false);
   sprite.setDepth(y);
 }
 

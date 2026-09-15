@@ -1,3 +1,4 @@
+export * from "./avatarManifest";
 export * from "./camera";
 export * from "./constants";
 export * from "./geometry";

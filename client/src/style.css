@@ -1799,17 +1799,14 @@ body {
   outline-offset: 2px;
 }
 
-/*
- * The walk sheet at 2x. Three frame columns wide (96px -> 192px); the height is the whole sheet,
- * so avatarPicker.ts sets it from AVATAR_SKIN_COUNT rather than baking the skin count in here.
- */
 .picker__preview {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 64px;
   height: 64px;
-  background-image: url("/sprites/avatar.png");
   background-repeat: no-repeat;
-  background-size: 192px var(--picker-sheet-height);
+  font-size: 12px;
   image-rendering: pixelated;
 }
 

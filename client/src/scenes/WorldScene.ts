@@ -31,6 +31,7 @@ import { ObjectPanel } from "../ui/objectPanel";
 import { PlayerVitals } from "../ui/playerVitals";
 import { PortalDenialBanner } from "../ui/portalDenialBanner";
 import { ChatBubbles } from "../world/chatBubbles";
+import { createAvatarArt, type AvatarArt } from "../world/avatarArt";
 import { CombatEffects, type DamageTone } from "../world/combatEffects";
 import { drawInteractableMarkers } from "../world/interactableMarkers";
 import { LocalPlayer } from "../world/localPlayer";
@@ -50,13 +51,10 @@ import {
 } from "../world/monsterSprites";
 import { NameTags } from "../world/nameTags";
 import { drawPortalMarkers } from "../world/portalMarkers";
-import { CLASSIC_VILLAGE_SOURCE, drawHeritageEnvironment, HERITAGE_AVATAR, HERITAGE_CELL, HERITAGE_ENVIRONMENT, HERITAGE_TERRAIN_SOURCE, registerHeritageTerrain, usesClassicTerrain } from "../world/heritageArt";
+import { CLASSIC_VILLAGE_SOURCE, drawHeritageEnvironment, HERITAGE_ENVIRONMENT, HERITAGE_TERRAIN_SOURCE, registerHeritageTerrain, usesClassicTerrain } from "../world/heritageArt";
 import { RegionGuide } from "../ui/regionGuide";
 import {
-  AVATAR_TEXTURE,
-  AVATAR_ATTACK_TEXTURE,
   PlayerSprites,
-  registerAvatarAnimations,
   STEP_TWEEN_MS,
 } from "../world/playerSprites";
 import { ITEM_TEXTURE, OLD_DAGGER_ITEM_KEY, WeaponVisualState, itemFrame } from "../world/weaponVisual";
@@ -114,6 +112,7 @@ export class WorldScene extends Phaser.Scene {
   static readonly KEY = "world";
 
   private players!: PlayerSprites;
+  private avatarArt!: AvatarArt;
   private monsters!: MonsterSprites;
   private monsterHealth!: MonsterHealthBars;
   private effects!: CombatEffects;
@@ -187,18 +186,18 @@ export class WorldScene extends Phaser.Scene {
   }
 
   preload(): void {
+    this.avatarArt = createAvatarArt(this);
+    this.avatarArt.preload();
     this.load.image(HERITAGE_TERRAIN_SOURCE, "/tilesets/heritage-terrain.png");
     if (usesClassicTerrain(this.mapKey)) {
       this.load.image(CLASSIC_VILLAGE_SOURCE, "/tilesets/classic-village-ground.png");
     }
-    this.load.spritesheet(HERITAGE_AVATAR, "/sprites/heritage-adventurer.png", {
-      frameWidth: HERITAGE_CELL, frameHeight: HERITAGE_CELL,
-    });
-    this.load.spritesheet(AVATAR_ATTACK_TEXTURE, "/sprites/classic-adventurer-attack.png", {
-      frameWidth: HERITAGE_CELL, frameHeight: HERITAGE_CELL,
-    });
     this.load.image(HERITAGE_ENVIRONMENT, "/sprites/heritage-environment.png");
     const onLoadError = (file: Phaser.Loader.File): void => {
+      if (this.avatarArt.isTextureKey(file.key)) {
+        console.warn(`Avatar image unavailable: ${file.key}; checking same-skin fallback.`);
+        return;
+      }
       if (isHeritageMonsterTexture(file.key)) {
         console.warn(`Monster image unavailable: ${file.key}; using legacy art.`);
         return;
@@ -211,10 +210,6 @@ export class WorldScene extends Phaser.Scene {
 
     this.load.tilemapTiledJSON(this.mapKey, `/maps/${this.mapKey}.json`);
     this.load.image(TILESET_KEY, `/tilesets/${TILESET_KEY}.png`);
-    this.load.spritesheet(AVATAR_TEXTURE, "/sprites/avatar.png", {
-      frameWidth: TILE_SIZE_PX,
-      frameHeight: TILE_SIZE_PX,
-    });
     // Loaded in every room, not just the ones with spawners: the sheet is a few kilobytes, and
     // making it conditional would mean the loader has to know which rooms have monsters — a
     // second copy of a fact the server owns, and one that would fail as a blank sprite.
@@ -240,13 +235,13 @@ export class WorldScene extends Phaser.Scene {
 
   create(): void {
     try {
+      this.avatarArt.prepare();
       this.world = this.buildWorld();
       drawPortalMarkers(this, this.connection.portalMarkers);
-      drawInteractableMarkers(this, this.connection.interactableMarkers);
-      registerAvatarAnimations(this);
+      drawInteractableMarkers(this, this.connection.interactableMarkers, this.avatarArt);
       const monsterArt = prepareHeritageMonsterArt(this);
       registerMonsterAnimations(this, monsterArt);
-      this.players = new PlayerSprites(this);
+      this.players = new PlayerSprites(this, this.avatarArt);
       this.monsters = new MonsterSprites(this, monsterArt);
       this.monsterHealth = new MonsterHealthBars(this);
       this.effects = new CombatEffects(this);
