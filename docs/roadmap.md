@@ -1,11 +1,11 @@
 # 2009–2010 PC 감성 MMORPG 로드맵
 
-기준일: 2026-09-14. 사용자 확정 시각 기준: **2009–2010년 PC 바람의나라**.
+기준일: 2026-09-16. 사용자 확정 시각 기준: **2009–2010년 PC 바람의나라**.
 캐릭터 비례·도트 밀도·장비 실루엣과 마을에서 준비하고 사냥한 뒤 돌아오는 MMORPG 경험을 함께 만든다.
 이 문서가 앞으로의 **단일 실행 로드맵**이다. 기존 Phase 목록·백로그의 미완료 항목은 자동 승계하지 않는다.
 과거 설계는 구현 근거로 참조하되 향후 우선순위는 이 문서를 따른다.
 이전 서버 완료 사항은 [완료 이력](history/server-completed-2026-09-14.md), 방향 전환 근거는 [결정 기록](decisions.md)에 보존한다.
-`R01`은 **IN PROGRESS**, `R02–R10`은 **PLANNED**다. manifest 계약과 runtime 연결을 구현했으며 master 제작·시각 승인·배포는 남아 있다.
+`R01`은 **IN PROGRESS**, `R02–R10`은 **PLANNED**다. manifest와 runtime 연결에 이어 skin 0의 native 48px master와 4방향 대기·걷기를 게임에 적용하고 검증했다. 시대 reference 픽셀 대조·사용자 시각 승인·운영 배포는 남아 있다.
 
 ## 1. 도달할 게임 경험
 
@@ -24,16 +24,16 @@
 
 | 확인한 기반 | 확장 방향 | 근거 |
 |---|---|---|
-| 24종, 16px 원화를 2배 확대한 32px 셀, 4방향 × 3포즈 | 공통 몸체·발 기준점·팔레트의 스킨 | [import-avatar.mjs](../tools/import-avatar.mjs), [constants.ts](../shared/src/constants.ts) |
-| skin 0만 362px 셀을 48px로 표시, 다른 스킨은 32px 표시 | native pixel 규격과 표시 배율 분리 | [avatarManifest.ts](../shared/src/avatarManifest.ts), [avatarArt.ts](../client/src/world/avatarArt.ts) |
-| 이동 3개 고유 포즈, 전용 공격은 skin 0 중심 | 대기·걷기·공격·시전·피격·사망과 장비 합성 | [playerSprites.ts](../client/src/world/playerSprites.ts) |
+| 24개 skin ID 유지; skin 0은 master, 나머지 23종은 16px 원화 기반 legacy | 공통 몸체·발 기준점·팔레트의 스킨 | [import-avatar.mjs](../tools/import-avatar.mjs), [masterAvatar.ts](../client/src/world/masterAvatar.ts) |
+| skin 0은 native 48px master 후보를 48px로 표시, 나머지는 legacy 유지 | native pixel 규격의 시각 승인 | [masterAvatar.ts](../client/src/world/masterAvatar.ts), [avatarArt.ts](../client/src/world/avatarArt.ts) |
+| skin 0은 4방향 대기·걷기 master, 미제작 동작은 idle fallback과 기존 공격 효과 | 대기·걷기·공격·시전·피격·사망과 장비 합성 | [playerSprites.ts](../client/src/world/playerSprites.ts) |
 | 캐릭터 단일 sprite, 무기 표현 old-dagger 중심 | 장비 데이터와 실제 외형 layer 연결 | [weaponVisual.ts](../client/src/world/weaponVisual.ts), [playerSprites.ts](../client/src/world/playerSprites.ts) |
 | EXP 성장, 레벨 상한 30 | 직업·스킬·장비에 따른 선택 | [leveling.ts](../shared/src/leveling.ts) |
 | 이동·채팅·NPC·포털·전투·몬스터·보스·드롭·인벤토리 기반 | 퀘스트·경제·파티로 연결된 플레이 | [room 구현](../server/src/rooms/metaverseRoom.ts) |
 
 직업/MP/퀘스트/경제/파티는 신규 계약으로 계획한다. 다른 branch 전체의 구현 부재를 입증한 목록은 아니다.
 `0e2ac52`의 DB 대기 제한·입장 HP와 `ef35d75`의 계정별 session 성장 동기화는 현재 작업 기반에 포함된다.
-이는 `main` 병합·운영 배포 완료를 의미하지 않는다. 완료 범위와 검증은 완료 이력을 따른다.
+해당 서버 변경은 현재 `main`에 포함되어 있다. 운영 배포 여부는 별도이며, 완료 범위와 검증은 완료 이력을 따른다.
 
 ## 3. 환경과 의존성
 
@@ -45,14 +45,15 @@
 
 서버 계약 준비와 현재 PC의 화면 구현은 별도 완료 조건이다. 원격에서 시각 구현을 완료했다고 보고하지 않는다.
 2026-09-15에는 첫 실행 항목의 shared/offline manifest·legacy adapter와 client runtime 연결까지 구현했다.
-플레이어·NPC·선택기가 같은 catalog를 사용하며, NPC skin 0도 플레이어와 같은 heritage 외형으로 표시한다. 새 원화 제작·master 승인·유료 생성은 후속 단계다.
+플레이어·NPC·선택기가 같은 catalog를 사용한다. 2026-09-16에는 skin 0의 master 후보를 등록하고 현재 PC의 실제 광장 화면에서 확인했다. shared 26개·browser 16개, client typecheck·build와 atlas 재현성 검사가 통과했다. native 48px 규격과 외형의 사용자 시각 승인은 남아 있다. [구현 기록](master-adventurer.md)
+Git 작업·commit·push는 `main`에서만 수행하며 새 branch를 만들지 않는다. [프로젝트 규칙](../AGENTS.md)
 V1은 계정당 캐릭터 1개를 유지한다. 다중 슬롯은 현재 계정 기반 성장/인벤토리에서 `characterId`와 저장 이관을 먼저 설계한 뒤 UI를 추가한다.
 
 ## 4. 마일스톤
 
 | ID · 상태 | 결과 | 선행 | GitHub / 서버 | 현재 PC 전용 | 완료 조건 |
 |---|---|---|---|---|---|
-| **R01 · IN PROGRESS** | 시대 기준·golden master | 없음 | manifest·legacy 호환 계약 | reference pack·1x/4x 비교·master 4방향 | 비례·발 기준점·native 규격 승인 |
+| **R01 · IN PROGRESS** | 시대 기준·golden master | 없음 | manifest·legacy 호환 계약 구현됨 | master 4방향 대기·걷기 적용, 1x/4x·맵 화면 검증됨 | 시대 reference 픽셀 대조와 비례·발 기준점·native 규격 사용자 승인 |
 | **R02 · PLANNED** | 동작·장비 표현 | R01 | frame/layer 계약·offline 합성 | 6동작 master·대표 의상 3종·무기/투구 | 방향 오류·발 흔들림 없이 전투/장비 변경 |
 | **R03 · PLANNED** | 마을·첫 사냥 목표 | R01, R02 대표 스킨 | 대화·퀘스트 저장·처치 목표 | 마을/사냥터 각 1곳·대화/목표 화면 | 수락→사냥→귀환, 재접속 후 진행 유지 |
 | **R04 · PLANNED** | 정산·첫 플레이 루프 | R03 | 지급 ID·원자적 자산 변경·상점/소모품 | 구매·회복·보상·장비 비교 UI | 중복 보상 없이 20–30분 루프 완주 |
@@ -75,6 +76,9 @@ R07은 첫 테마·첫 보스부터 완성한다. R10은 앞 단계 플레이가
 - 날짜/출처가 확인된 시대 reference에서 몸/머리 비례·얼굴·외곽선·명암·발 위치를 기록한다.
 - native 48×48은 현행 표시 크기에서 출발한 후보이며 당시 게임의 원본 크기라는 뜻이 아니다.
 - 4방향 대기 master와 manifest부터 승인한다. 미확정 규격은 `[needs verification]`으로 남긴다.
+- 현재 구현: 48×48px 셀 16개를 192×192px atlas로 구성하고, 20색 팔레트·발 기준점 `(24, 46)`을 적용했다. 4방향 대기와 걷기 `[1, 2, 3, 2]`를 player·NPC·선택창에 연결했다.
+- 공격·시전·피격·사망의 전용 원화는 미제작이며 idle fallback을 사용한다. 공격 판정과 기존 공격 효과는 유지한다. `native60`은 manifest 계약명이며 60프레임 제작 완료를 의미하지 않는다.
+- [1x/4x 비교와 실제 맵 화면](master-adventurer.md)을 검증했다. 시대 reference 픽셀 대조와 사용자 외형 승인이 남아 있으므로 R01 전체 완료로 표시하지 않는다.
 
 ### R02 — 제대로 움직이는 캐릭터
 
@@ -152,9 +156,9 @@ R07은 첫 테마·첫 보스부터 완성한다. R10은 앞 단계 플레이가
 | 순서 | 작업 | 범위·산출물 | 완료 판단 |
 |---|---|---|---|
 | **1 · 구현됨** | Avatar manifest와 legacy adapter·runtime 연결 | shared/offline 계약과 현재 PC의 player·NPC·picker 공통 표시 | 24개 ID·native60 계약·offline 검사, browser 14개·legacy 96개 pixel 비교 통과. [구현 기록](avatar-manifest.md) |
-| **2** | Master 1종 대기/걷기 | 현재 PC: reference 확정→4방향 idle/walk atlas 적용 | 1x/4x 비교와 맵 화면에서 비례·방향·발 위치 승인 |
+| **2 · 구현됨 / 시각 승인 대기** | Master 1종 대기/걷기 | 현재 PC: skin 0 native 48px, 4방향 idle/walk atlas 적용 | shared 26개·browser 16개·build·atlas 재현성 통과. 1x/4x와 맵 화면 사용자 시각 승인 대기. [구현 기록](master-adventurer.md) |
 | **3** | 첫 퀘스트 상태·처치 목표 | GitHub/server: 퀘스트 1개 저장/진행. R04 전 지급 비활성 | 재접속 후 진행 유지, 해당 처치 이벤트만 갱신 |
 
-실제 착수 순서는 1→2→3이다. 현재 PC 시각 작업 중 3의 서버 준비는 독립 병행 가능하다.
-새 atlas는 [avatarArt.ts](../client/src/world/avatarArt.ts)의 `AVATAR_REPLACEMENTS`에 승인 manifest로 등록한다. 현재 registry는 비어 있으며 master 제작·4방향 비교 승인이 다음 작업이다.
+1·2의 코드 구현은 완료했다. 현재 남은 판단은 master의 사용자 시각 승인이고, 다음 코드 작업은 3의 첫 퀘스트 상태·처치 목표다. 3은 아직 착수하지 않았으며 R04 전 보상 지급은 활성화하지 않는다.
+새 atlas는 [avatarArt.ts](../client/src/world/avatarArt.ts)의 `AVATAR_REPLACEMENTS`에 등록되어 있다. 4방향·발 위치·fallback·실제 맵 표시 검증은 통과했고, 시대 reference 픽셀 대조와 사용자 시각 승인은 남아 있다. [master 제작·적용 기록](master-adventurer.md)
 완료 기록에는 ID·실제 변경·좁은 확인 근거·commit·push 상태를 남긴다. 계획 전체를 한 번에 완료 표시하지 않는다.

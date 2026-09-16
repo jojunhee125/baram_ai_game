@@ -3,9 +3,10 @@ import {
   createLegacyAvatarManifests, Direction, resolveAvatarClip, validateAvatarManifest,
   type AvatarAction, type AvatarClip, type AvatarFrame, type AvatarManifest,
 } from "@zep-test/shared";
+import { MASTER_AVATAR_MANIFEST } from "./masterAvatar";
 
 export type AvatarCatalog = ReadonlyMap<number, { primary: AvatarManifest; legacy: AvatarManifest }>;
-export const AVATAR_REPLACEMENTS: readonly AvatarManifest[] = [];
+export const AVATAR_REPLACEMENTS: readonly AvatarManifest[] = [MASTER_AVATAR_MANIFEST];
 
 export function createAvatarCatalog(replacements: readonly AvatarManifest[] = AVATAR_REPLACEMENTS): AvatarCatalog {
   const catalog = new Map(createLegacyAvatarManifests().map((legacy) => [legacy.skinId, { primary: legacy, legacy }]));
