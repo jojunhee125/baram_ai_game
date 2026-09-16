@@ -91,6 +91,8 @@ R07은 첫 테마·첫 보스부터 완성한다. R10은 앞 단계 플레이가
 - 안내 NPC·상점 NPC와 사냥 목표 1개, 귀환 동선을 연결한다.
 - 퀘스트 수락/진행/완료를 저장하고 기존 처치 이벤트에 연결한다.
 - 초기에는 처치 목표 하나로 제한한다. 지급은 R04 연결까지 비활성화한다.
+- 2026-09-16 서버 구현: 기존 안내 NPC가 `first-hunt`(다람쥐 3마리)를 제시하고, 계정별 수락·진행·완료를 `quest_progress`에 저장한다. 요구 수량은 코드 테이블에만 있고 저장하지 않는다. [구현 기록](implementation-2026-09-16-quest-state.md)
+- 남은 것: 퀘스트 패널·트래커 UI(현재 PC), 상점 NPC와 귀환 동선, 실제 Postgres 동시성 확인.
 
 ### R04 — 믿을 수 있는 보상
 
@@ -157,8 +159,8 @@ R07은 첫 테마·첫 보스부터 완성한다. R10은 앞 단계 플레이가
 |---|---|---|---|
 | **1 · 구현됨** | Avatar manifest와 legacy adapter·runtime 연결 | shared/offline 계약과 현재 PC의 player·NPC·picker 공통 표시 | 24개 ID·native60 계약·offline 검사, browser 14개·legacy 96개 pixel 비교 통과. [구현 기록](avatar-manifest.md) |
 | **2 · 구현됨 / 시각 승인 대기** | Master 1종 대기/걷기 | 현재 PC: skin 0 native 48px, 4방향 idle/walk atlas 적용 | shared 26개·browser 16개·build·atlas 재현성 통과. 1x/4x와 맵 화면 사용자 시각 승인 대기. [구현 기록](master-adventurer.md) |
-| **3** | 첫 퀘스트 상태·처치 목표 | GitHub/server: 퀘스트 1개 저장/진행. R04 전 지급 비활성 | 재접속 후 진행 유지, 해당 처치 이벤트만 갱신 |
+| **3 · 서버 구현됨 / 화면 없음** | 첫 퀘스트 상태·처치 목표 | 서버: `first-hunt`(다람쥐 3마리) 수락·진행·완료 저장, 처치 이벤트 연결. 지급 경로 없음 | 서버 972개 통과(재접속 유지·해당 종만 갱신 포함). 클라이언트 UI는 미착수. [구현 기록](implementation-2026-09-16-quest-state.md) |
 
-1·2의 코드 구현은 완료했다. 현재 남은 판단은 master의 사용자 시각 승인이고, 다음 코드 작업은 3의 첫 퀘스트 상태·처치 목표다. 3은 아직 착수하지 않았으며 R04 전 보상 지급은 활성화하지 않는다.
+1·2·3의 서버 코드 구현은 완료했다. 현재 남은 판단은 master의 사용자 시각 승인이고, 다음 코드 작업은 3의 클라이언트 절반(퀘스트 패널·트래커)이다. 보상 지급은 R04 정산 설계까지 계속 비활성이며, 3에는 지급 경로 자체가 없다.
 새 atlas는 [avatarArt.ts](../client/src/world/avatarArt.ts)의 `AVATAR_REPLACEMENTS`에 등록되어 있다. 4방향·발 위치·fallback·실제 맵 표시 검증은 통과했고, 시대 reference 픽셀 대조와 사용자 시각 승인은 남아 있다. [master 제작·적용 기록](master-adventurer.md)
 완료 기록에는 ID·실제 변경·좁은 확인 근거·commit·push 상태를 남긴다. 계획 전체를 한 번에 완료 표시하지 않는다.

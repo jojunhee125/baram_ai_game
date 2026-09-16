@@ -55,6 +55,12 @@ export const ClientMessage = {
   ChangeSkin: "avatar:change-skin",
   /** Same-room half of the landmark panel; the cross-room half rejoins via JoinOptions.arriveAtLandmark. */
   WarpToLandmark: "landmark:warp",
+  /**
+   * Accepts a quest the NPC panel just offered (roadmap R03). Idempotent end to end — the store's
+   * upsert returns the existing row rather than resetting a counter — so a replayed or duplicated
+   * message costs a round trip and changes nothing.
+   */
+  AcceptQuest: "quest:accept",
 } as const;
 
 export type ClientMessage = (typeof ClientMessage)[keyof typeof ClientMessage];
@@ -134,6 +140,20 @@ export interface WarpToLandmarkRequest {
   landmarkId: string;
 }
 
+/**
+ * Names a quest by id ({@link QuestState.questId}, from the offer the NPC panel carried). Ignored
+ * in silence when this room holds no NPC offering it — an unknown id, or one belonging to a giver
+ * in another room, the same room-narrowed boundary {@link QuizAnswerRequest} resolves against.
+ *
+ * Unlike a quiz answer this one *stores* something, so the boundary is doing real work here rather
+ * than only tidying: what it bounds is which quests a client can open a row for. It is deliberately
+ * not a position check — the room keeps no interaction state to check one against — and nothing
+ * beyond a counter exists to win, since payout stays off until R04.
+ */
+export interface AcceptQuestRequest {
+  questId: string;
+}
+
 export interface ClientMessagePayload {
   [ClientMessage.Move]: MoveRequest;
   [ClientMessage.Chat]: ChatRequest;
@@ -155,6 +175,7 @@ export interface ClientMessagePayload {
   [ClientMessage.UnequipItem]: UnequipItemRequest;
   [ClientMessage.ChangeSkin]: ChangeSkinRequest;
   [ClientMessage.WarpToLandmark]: WarpToLandmarkRequest;
+  [ClientMessage.AcceptQuest]: AcceptQuestRequest;
 }
 
 export const ServerMessage = {
@@ -171,6 +192,8 @@ export const ServerMessage = {
   EquipmentChanged: "equipment:changed",
   /** design-phase-w-level-system.md §6 — one kill's EXP, and a level-up if this pushes past one. */
   ExpGranted: "progress:exp-granted",
+  /** roadmap R03 — one quest's state after it changed, and once per accepted quest at join. */
+  QuestUpdated: "quest:updated",
 } as const;
 
 export type ServerMessage = (typeof ServerMessage)[keyof typeof ServerMessage];
@@ -309,11 +332,66 @@ export interface QuizInteraction extends InteractionBase {
   choices: readonly string[];
 }
 
+/**
+ * Where one account stands on one quest. Three states and no fourth: a quest is offered until it is
+ * accepted, active until its objective is met, and completed for good after that. There is no
+ * "turned in" — handing a quest back is a payout, and payout is R04's.
+ */
+export const QuestStatus = {
+  /** Never accepted by this account. Only an NPC panel ever carries this one. */
+  Offered: "offered",
+  Accepted: "accepted",
+  Completed: "completed",
+} as const;
+export type QuestStatus = (typeof QuestStatus)[keyof typeof QuestStatus];
+
+/**
+ * One quest as the client is told about it — the whole row, text included, so the client holds no
+ * quest table of its own. {@link ItemGranted.name}'s reasoning, applied to a bigger payload: a
+ * browser running a bundle older than the server still renders exactly what it was handed, and
+ * retuning a requirement or rewriting an NPC's line stays a server deploy.
+ *
+ * Travels two ways: inside {@link NpcInteraction.quests} when the giver's panel opens, and on its
+ * own as {@link ServerMessage.QuestUpdated} whenever the stored state changes. One shape for both,
+ * because "what the panel shows" and "what just changed" are the same fact — a second shape would
+ * be two renderers that have to agree.
+ */
+export interface QuestState {
+  questId: string;
+  title: string;
+  /** The giver's offer text. Newlines are significant, {@link NoticeInteraction.body}'s own terms. */
+  summary: string;
+  /** The objective in words, e.g. "사냥터에서 다람쥐 3마리 처치". */
+  objectiveText: string;
+  /** Shown once `status` is `Completed`; sent in every state so the client needs no second fetch. */
+  completionText: string;
+  status: QuestStatus;
+  /**
+   * Kills credited, and the requirement they are counted against. Both travel even while
+   * `objectiveText` already spells the requirement out: that string is prose for a person, these
+   * two are the progress bar, and deriving one from the other in either direction is how a UI
+   * starts parsing copy.
+   *
+   * `killCount` is 0 while `status` is `Offered`, and never exceeds `requiredCount`.
+   */
+  killCount: number;
+  requiredCount: number;
+}
+
 /** Same shape as {@link NoticeInteraction} — the panel is identical; only the marker differs. */
 export interface NpcInteraction extends InteractionBase {
   kind: typeof InteractableKind.Npc;
   /** Newlines are significant, exactly like {@link NoticeInteraction.body}. */
   body: string;
+  /**
+   * What this NPC offers, with the reader's own state already resolved into each row — absent
+   * entirely (not an empty array) for an NPC that gives no quests, which is every row but the
+   * plaza guide today.
+   *
+   * An array because the authored table does not forbid one giver offering several, and a field
+   * that silently showed only the first would make the table's meaning depend on its order.
+   */
+  quests?: readonly QuestState[];
 }
 
 /**
@@ -485,4 +563,5 @@ export interface ServerMessagePayload {
   [ServerMessage.ItemGranted]: ItemGranted;
   [ServerMessage.EquipmentChanged]: EquipmentChanged;
   [ServerMessage.ExpGranted]: ExpGranted;
+  [ServerMessage.QuestUpdated]: QuestState;
 }

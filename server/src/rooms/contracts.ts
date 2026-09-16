@@ -2,6 +2,7 @@ import type { Client } from "colyseus";
 import type { BossStateStore } from "../db/bossStateStore";
 import type { InventoryStore } from "../db/inventoryStore";
 import type { ProgressStore } from "../db/progressStore";
+import type { QuestRow, QuestStore } from "../db/questStore";
 // `InteractableKind` is imported as a value, not just as a type: the authored table's
 // discriminant and the wire union's have to be the same string, so both read it from one place.
 import {
@@ -62,6 +63,15 @@ export interface RoomCreateOptions {
    * `awardExp` both no-op past the null check).
    */
   progressStore?: ProgressStore;
+  /**
+   * Where an account's quest state is filed (roadmap R03), injected the same way and for the same
+   * reason as {@link inventoryStore}/{@link progressStore}. Optional for the same reason too — the
+   * tests, the load-test harness and `npm run dev` all build rooms without one. A room with no
+   * store offers its quests as permanently `Offered`: accepting answers nothing and kills advance
+   * nothing, since there is nowhere for either to be remembered. That is the honest degradation,
+   * and the same one a room with no `inventoryStore` already makes for drops.
+   */
+  questStore?: QuestStore;
   /**
    * The death EXP penalty (design §11.0) exempts these accounts entirely — an env-configured
    * allowlist (`ADMIN_OWNER_KEYS`), never a key literal in this codebase. Undefined means nobody is
@@ -515,6 +525,31 @@ export interface PlayerSession {
    * another.
    */
   equipRequestPendingSlots: Set<EquipmentSlot>;
+  /**
+   * This account's quest rows by quest id, as far as this session has been told.
+   *
+   * Only ever written from a store answer, never from what this session believed a moment ago —
+   * `EquipmentChanged.applied`'s rule: a sibling tab's kill is something this cache has no way to
+   * have heard about, and the counter that matters is the one in the database.
+   *
+   * Partial until {@link questRowsHydrated}: an accept or a kill can write a row into it before
+   * the join-time read has answered, so an absent entry means "not accepted" only once that flag
+   * is set. Read it against the flag, never on its own emptiness.
+   */
+  questRows: Map<string, QuestRow>;
+  /**
+   * Whether `hydrateQuestCache`'s read has landed — i.e. whether {@link questRows} is the whole
+   * account, not just whatever this session has done since it joined.
+   *
+   * Its own flag rather than "the map exists" or "the map is non-empty", and that distinction is
+   * the bug it exists to prevent: an accept landing inside the hydration window makes the map
+   * non-empty while still saying nothing about every *other* quest, so a kill for one of those,
+   * read off a map treated as complete, would be skipped — dropped permanently, since the store is
+   * the only thing that ever credits it. While this is false a kill of a targeted kind consults
+   * the store directly; `QuestStore.recordKill` is a no-op for a quest that is not accepted, which
+   * is what makes that pessimistic path safe as well as correct.
+   */
+  questRowsHydrated: boolean;
 }
 
 /**

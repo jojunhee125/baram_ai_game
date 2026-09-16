@@ -6,6 +6,7 @@ import {
   Direction,
   InteractableKind,
   MAX_MOVES_PER_SECOND,
+  QuestStatus,
   ServerMessage,
   type InteractableEntered,
   type QuizResult,
@@ -24,6 +25,7 @@ import type {
 import { ROOM_DEFINITIONS } from "./definitions";
 import { INTERACTABLE_DEFINITIONS } from "./interactableDefinitions";
 import { PORTAL_DEFINITIONS } from "./portalDefinitions";
+import { QUESTS_BY_GIVER } from "./questDefinitions";
 
 /**
  * Its own port, for the reason `metaverseRoom.integration.test.ts` records: node:test runs test
@@ -47,6 +49,12 @@ const LINK = definitionFor("plaza-link-board", InteractableKind.Link) as LinkInt
 const NOTICE = definitionFor("plaza-notice-board", InteractableKind.Notice) as NoticeInteractable;
 const QUIZ = definitionFor("plaza-quiz-stand", InteractableKind.Quiz) as QuizInteractable;
 const NPC = definitionFor("plaza-hunting-ground-npc", InteractableKind.Npc) as NpcInteractable;
+/** Read from the quest table rather than repeated here — the panel quotes it verbatim. */
+const FIRST_QUEST = (() => {
+  const [quest] = QUESTS_BY_GIVER.get(NPC.id) ?? [];
+  assert.ok(quest, `the quest table no longer has a row given by "${NPC.id}"`);
+  return quest;
+})();
 
 /** Fails loudly if the placeholder table is swapped for one that renames or re-kinds a row. */
 function definitionFor(id: string, kind: InteractableKind) {
@@ -392,6 +400,21 @@ describe("MetaverseRoom — entering an object", () => {
         title: NPC.title,
         body: NPC.body,
         blocksMovement: false,
+        // This guide also gives R03's first quest, and the panel carries the reader's own state on
+        // it (`questSystem.test.ts` covers that state; here it is the payload's shape that matters).
+        // `Offered` with no progress, since this server is built without a quest store.
+        quests: [
+          {
+            questId: FIRST_QUEST.id,
+            title: FIRST_QUEST.title,
+            summary: FIRST_QUEST.summary,
+            objectiveText: FIRST_QUEST.objectiveText,
+            completionText: FIRST_QUEST.completionText,
+            status: QuestStatus.Offered,
+            killCount: 0,
+            requiredCount: FIRST_QUEST.objective.count,
+          },
+        ],
       },
     ]);
     assert.deepEqual(bystanderInbox.objects, [], "an object is not broadcast to the room");

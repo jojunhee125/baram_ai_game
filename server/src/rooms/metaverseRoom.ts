@@ -27,12 +27,14 @@ import {
   PLAYER_MAX_HP,
   Player,
   PortalMarker,
+  QuestStatus,
   RoomState,
   ServerMessage,
   VIEW_RADIUS_TILES,
   cumulativeExpForLevel,
   levelForExp,
   remainingExpToNextLevel,
+  type AcceptQuestRequest,
   type ChangeSkinRequest,
   type ChatBroadcast,
   type ChatRequest,
@@ -48,6 +50,7 @@ import {
   type PlayerHit,
   type PortalDenied,
   type PortalEntered,
+  type QuestState,
   type QuizAnswerRequest,
   type QuizResult,
   type Teleported,
@@ -58,6 +61,7 @@ import {
 import type { BossStateStore } from "../db/bossStateStore";
 import type { InventoryStore } from "../db/inventoryStore";
 import type { ProgressStore } from "../db/progressStore";
+import type { QuestRow, QuestStore } from "../db/questStore";
 import { TableInteractableIndex } from "../game/interactables";
 import { TableLandmarkIndex } from "../game/landmarks";
 import { rollLoot, type LootGrant } from "../game/loot";
@@ -98,6 +102,12 @@ import {
   type MonsterType,
 } from "./monsterDefinitions";
 import { PORTAL_DEFINITIONS } from "./portalDefinitions";
+import {
+  QUESTS_BY_GIVER,
+  QUESTS_BY_MONSTER_KIND,
+  QUESTS_BY_ID,
+  type QuestDefinition,
+} from "./questDefinitions";
 import { deriveSsoNickname, deriveSsoUserId } from "./ssoIdentity";
 
 type RoomClient = MetaverseRoomOptions["client"];
@@ -254,6 +264,14 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   /** Where a killer's cumulative EXP is filed. Null in every room built without one — see {@link RoomCreateOptions.progressStore}. */
   private progressStore: ProgressStore | null = null;
   private readonly progressSubscriptions = new Map<string, { version: number; unsubscribe?: () => void }>();
+  /** Where an account's quest state is filed. Null in every room built without one — see {@link RoomCreateOptions.questStore}. */
+  private questStore: QuestStore | null = null;
+  /**
+   * The quests this room can offer: those whose giver NPC stands here. Resolved once at `onCreate`
+   * against this room's own object index — the `PortalIndex`/`InteractableIndex` narrowing, for
+   * their reason, and it is the boundary `handleAcceptQuest` checks a client's id against.
+   */
+  private roomQuests!: ReadonlyMap<string, QuestDefinition>;
   /** Death EXP penalty exemptions (design-phase-w-level-system.md §11.0). Empty unless configured. */
   private adminOwnerKeys: ReadonlySet<string> = new Set();
   /** The enforced join cap — {@link RoomCreateOptions.realCapacity}, falling back to `maxClients`. */
@@ -287,6 +305,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.inventoryStore = options.inventoryStore ?? null;
     this.bossStateStore = options.bossStateStore ?? null;
     this.progressStore = options.progressStore ?? null;
+    this.questStore = options.questStore ?? null;
     this.adminOwnerKeys = options.adminOwnerKeys ?? new Set();
     this.setPatchRate(PATCH_RATE_MS);
     this.maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
@@ -296,6 +315,12 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.portalIndex = this.createPortalIndex(this.collisionMap);
     this.gatedItemKeys = this.portalIndex.requiredItemKeys();
     this.interactableIndex = this.createInteractableIndex(this.collisionMap);
+    // Narrowed through the object index rather than by comparing room names: the index is already
+    // this room's own view of the object table, so a giver it cannot resolve is a giver that is
+    // not here — one rule, and it stays right if the object table is ever narrowed differently.
+    this.roomQuests = new Map(
+      [...QUESTS_BY_ID].filter(([, quest]) => this.interactableIndex.byId(quest.giverObjectId) !== null),
+    );
     // Static for the room's lifetime — populated once here, never touched again. This is the
     // only reason the client learns a portal's position at all (never its id or destination).
     for (const tile of this.portalIndex.triggerTiles()) {
@@ -335,6 +360,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     });
     this.onMessage(ClientMessage.WarpToLandmark, (client: RoomClient, message: WarpToLandmarkRequest) => {
       this.handleWarpToLandmark(client, message);
+    });
+    this.onMessage(ClientMessage.AcceptQuest, (client: RoomClient, message: AcceptQuestRequest) => {
+      this.handleAcceptQuest(client, message);
     });
 
     // Last, and only where there is something to simulate. A room with no monster *rows* stays
@@ -546,6 +574,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       equippedItemKeys: {},
       equipCacheVersions: initialEquipCacheVersions(),
       equipRequestPendingSlots: new Set(),
+      questRows: new Map(),
+      // The map above is empty *and* says nothing yet; only the flag distinguishes the two.
+      questRowsHydrated: false,
     };
     client.view = new StateView();
     this.viewedBySession.set(client.sessionId, new Set());
@@ -600,6 +631,16 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       });
       void this.hydrateProgressCache(client.sessionId, ownerKey).catch((cause) => {
         console.warn(`[zep-test] could not hydrate progress for ${ownerKey}`, cause);
+      });
+    }
+    // Gated on this room having something to do with a quest at all — a giver standing here, or
+    // monsters that could advance one. Everywhere else the cache would only ever be written and
+    // never read, which on the 500 CCU join path (PoC #2) is a round trip bought for nothing. It is
+    // deliberately *not* gated the way progress is (every room, always): unlike `Player.level`,
+    // quest state is shown by a panel that only exists where the giver is.
+    if (this.questStore !== null && (this.hasMonsters || this.roomQuests.size > 0)) {
+      void this.hydrateQuestCache(client.sessionId, ownerKey).catch((cause) => {
+        console.warn(`[zep-test] could not hydrate quests for ${ownerKey}`, cause);
       });
     }
   }
@@ -735,6 +776,53 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       return;
     }
     this.updateProgress(sessionId, exp, false);
+  }
+
+  /**
+   * Fills a freshly joined session's {@link PlayerSession.questRows} from the store and tells the
+   * client what it found, one {@link ServerMessage.QuestUpdated} per accepted quest — the quest
+   * twin of {@link hydrateProgressCache}. This is what "재접속 후 진행 유지" is on the wire: the
+   * counter survives in the database on its own, and this is how a client learns it again.
+   *
+   * Messages are sent even for a quest whose giver is in another room: the account's progress is
+   * the account's wherever it is standing, and a client tracker that only knew about the quests of
+   * whatever room it happened to join would blink its own list on every door.
+   *
+   * Never awaited by its caller, `hydratePossessionCache`'s rule, and it merges through
+   * {@link rememberQuestRow} rather than overwriting: an accept or a kill can commit inside the
+   * hydration window, which would make this list — issued earlier, answered later — the *older*
+   * truth of the two. Overwriting with it would walk the counter backwards and lose a credit the
+   * database already holds.
+   */
+  private async hydrateQuestCache(sessionId: string, ownerKey: string): Promise<void> {
+    const store = this.questStore;
+    if (store === null) {
+      return;
+    }
+    const rows = await store.list(ownerKey);
+    // Re-resolved after the await, exactly as every other hydration here does: the session may
+    // have left the room, or walked into another one, while the store was answering.
+    const client = this.clientsBySession.get(sessionId);
+    const session = client?.userData;
+    if (!client || !session) {
+      return;
+    }
+    for (const row of rows) {
+      this.rememberQuestRow(session, row);
+    }
+    // Set after the merge, never before: until this line the map is only "what this session has
+    // done", and the kill path must keep asking the store. Set even when the account has accepted
+    // nothing — an empty map plus this flag is the answer "none", which is what lets the kill path
+    // stop consulting the store at all.
+    session.questRowsHydrated = true;
+    for (const row of rows) {
+      const quest = QUESTS_BY_ID.get(row.questId);
+      // A stored row whose quest has since been removed from the table: nothing to render, and
+      // nothing to be done about it here — the row stays for an author who puts the quest back.
+      if (quest !== undefined) {
+        client.send(ServerMessage.QuestUpdated, questState(quest, row));
+      }
+    }
   }
 
   private updateProgress(sessionId: string, total: number, healOnLevelUp: boolean): void {
@@ -874,7 +962,10 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // portal trigger, so at most one of the two can ever fire on the same step.
     const object = this.interactableIndex.at(destination.tileX, destination.tileY);
     if (object !== null) {
-      client.send(ServerMessage.InteractableEntered, toInteraction(object));
+      client.send(
+        ServerMessage.InteractableEntered,
+        toInteraction(object, this.questsOffered(session, object.id)),
+      );
     }
   }
 
@@ -1041,6 +1132,162 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   }
 
   /**
+   * Accepts a quest offered by an NPC standing in this room (roadmap R03).
+   *
+   * Room-narrowed the way {@link handleQuizAnswer} is, and here that boundary is load-bearing
+   * rather than tidy: this message writes a row. What it bounds is which quests a client can open a
+   * row for — never how many rows, since `QuestStore.accept` is an upsert, so a client spamming
+   * this buys repeated round trips (capped by `maxMessagesPerSecond`) and exactly one row.
+   *
+   * No position check, for {@link QuizAnswerRequest}'s stated reason — the room keeps no interaction
+   * state to check against. The exposure that buys is bounded by what a quest *is* today: a counter
+   * that grants nothing until R04's settlement design exists. That reasoning expires the day a
+   * completion pays out, and this is the handler that has to change with it.
+   *
+   * Ignored in silence with no store configured: there would be nothing to remember the acceptance
+   * with, and a client told "accepted" by a room that forgets it the moment it answers has been
+   * told something false.
+   */
+  private handleAcceptQuest(client: RoomClient, message: AcceptQuestRequest): void {
+    const store = this.questStore;
+    if (!client.userData || !this.state.players.has(client.sessionId) || store === null) {
+      return;
+    }
+    const questId = message?.questId;
+    if (typeof questId !== "string") {
+      return;
+    }
+    const quest = this.roomQuests.get(questId);
+    if (quest === undefined) {
+      return;
+    }
+    void this.acceptQuest(client.sessionId, quest, store);
+  }
+
+  /**
+   * The store half of {@link handleAcceptQuest}. Async and never awaited, `awardLoot`'s rule: a
+   * database round trip on a message handler would hold the whole room.
+   */
+  private async acceptQuest(
+    sessionId: string,
+    quest: QuestDefinition,
+    store: QuestStore,
+  ): Promise<void> {
+    const ownerKey = this.clientsBySession.get(sessionId)?.userData?.ownerKey ?? sessionId;
+    let row: QuestRow;
+    try {
+      row = await store.accept(ownerKey, quest.id);
+    } catch (cause) {
+      console.warn(`[zep-test] could not accept ${quest.id} for ${ownerKey}`, cause);
+      return;
+    }
+    // Re-resolved after the await, every other store continuation's rule: the acceptance belongs to
+    // the account and stands whether or not this session is still here to be told about it.
+    const client = this.clientsBySession.get(sessionId);
+    if (!client?.userData) {
+      return;
+    }
+    this.rememberQuestRow(client.userData, row);
+    client.send(ServerMessage.QuestUpdated, questState(quest, row));
+  }
+
+  /**
+   * Credits one kill against every quest that targets this monster kind. Last-hit, `awardExp`'s own
+   * rule and the same `lastHit` it is handed.
+   *
+   * The cache is consulted first only to *skip* work: a hydrated session that has not accepted a
+   * quest, or has already finished it, has nothing the store could add. When the cache says
+   * anything else — including "not hydrated yet" and "this session has already left the room" — the
+   * store is asked, because `recordKill` is a no-op for a row that is not there and a wrong guess
+   * the other way silently drops a kill the player made.
+   */
+  private advanceQuests(lastHit: LastHit, kind: MonsterKind): void {
+    const store = this.questStore;
+    if (store === null) {
+      return;
+    }
+    const quests = QUESTS_BY_MONSTER_KIND.get(kind);
+    if (quests === undefined) {
+      // The common case for three of the four kinds today: no quest wants this, so no kill of it
+      // ever reaches the store.
+      return;
+    }
+    const session = this.clientsBySession.get(lastHit.sessionId)?.userData;
+    for (const quest of quests) {
+      // Only a hydrated cache may answer "no" — see `PlayerSession.questRowsHydrated`. A session
+      // that has already left the room cannot answer at all, and its account still earned the kill.
+      if (session?.questRowsHydrated === true) {
+        const row = session.questRows.get(quest.id);
+        if (row === undefined || row.completed) {
+          continue;
+        }
+      }
+      void this.recordQuestKill(lastHit, quest, store);
+    }
+  }
+
+  /** The store half of {@link advanceQuests}. Async and never awaited, for `awardExp`'s reason. */
+  private async recordQuestKill(
+    lastHit: LastHit,
+    quest: QuestDefinition,
+    store: QuestStore,
+  ): Promise<void> {
+    const ownerKey = lastHit.ownerKey ?? lastHit.sessionId;
+    let row: QuestRow | null;
+    try {
+      row = await store.recordKill(ownerKey, quest.id, quest.objective.count);
+    } catch (cause) {
+      console.warn(`[zep-test] could not credit a ${quest.id} kill to ${ownerKey}`, cause);
+      return;
+    }
+    if (row === null) {
+      // Not accepted, or already completed — the store's answer, and the only place that question
+      // is ever really settled. Nothing to say: the client's panel already reads the same way.
+      return;
+    }
+    const client = this.clientsBySession.get(lastHit.sessionId);
+    if (!client?.userData) {
+      return;
+    }
+    this.rememberQuestRow(client.userData, row);
+    client.send(ServerMessage.QuestUpdated, questState(quest, row));
+  }
+
+  /**
+   * Writes a store answer into the session cache, keeping it monotonic: a counter only rises and a
+   * completion is never undone, so an answer that arrives out of order — a join-time `list` issued
+   * before an accept that committed first, two kills whose promises settle in the opposite order —
+   * is discarded rather than allowed to walk the cache backwards.
+   *
+   * Only the cache. The database is already right in every one of those orderings: each write is a
+   * single statement against the live row.
+   */
+  private rememberQuestRow(session: PlayerSession, row: QuestRow): void {
+    const known = session.questRows.get(row.questId);
+    if (known === undefined || row.killCount > known.killCount || (row.completed && !known.completed)) {
+      session.questRows.set(row.questId, row);
+    }
+  }
+
+  /**
+   * What this NPC has to offer the reader, or undefined for an object that gives no quests — which
+   * is every row but the plaza guide today.
+   *
+   * Reads the session cache and never the store: this runs on the move path, immediately behind the
+   * object lookup, and a round trip there would hold the room on a step. The cost of that is a
+   * panel opened inside the join-hydration window showing an already-accepted quest as `Offered`;
+   * accepting it again is idempotent and its answer corrects the panel, so the worst case is one
+   * redundant round trip, not a reset counter.
+   */
+  private questsOffered(
+    session: PlayerSession,
+    objectId: string,
+  ): readonly QuestState[] | undefined {
+    const quests = QUESTS_BY_GIVER.get(objectId);
+    return quests?.map((quest) => questState(quest, session.questRows.get(quest.id) ?? null));
+  }
+
+  /**
    * `PLAYER_ATTACK_DAMAGE` plus this session's level bonus plus every equipped item's
    * `stats.attackDamage`, summed across whichever slots happen to carry that axis (design
    * -phase-w-level-system.md §4.2; equipment axis is design-phase-v-equipment-system.md §5.1,
@@ -1163,6 +1410,10 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     void this.awardLoot(lastHit, grants);
     // Same fire-and-forget principle, same last-hit rule (design-phase-w-level-system.md §11-5).
     void this.awardExp(lastHit, monsterId, runtime.type.expReward, now);
+    // And again for quest objectives (roadmap R03). Synchronous itself — it only decides which
+    // quests this kill could possibly touch — and each store call it starts is its own
+    // fire-and-forget, for the two calls above's reason.
+    this.advanceQuests(lastHit, runtime.type.kind);
   }
 
   /**
@@ -2280,8 +2531,15 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
  * would carry `answerIndex` onto the wire, and a quiz whose answer is in the network tab has given
  * away the only thing it had; it would also ship the authoring coordinates, which the client
  * already has from the markers.
+ *
+ * `quests` is resolved by the caller rather than looked up here: it depends on who is reading (each
+ * row carries that account's own progress), and this function is otherwise a pure projection of one
+ * table row. Ignored for every kind but `Npc`, which is the only giver a quest can name.
  */
-function toInteraction(object: InteractableDefinition): InteractableEntered {
+function toInteraction(
+  object: InteractableDefinition,
+  quests?: readonly QuestState[],
+): InteractableEntered {
   switch (object.kind) {
     case InteractableKind.Link:
       return {
@@ -2315,8 +2573,35 @@ function toInteraction(object: InteractableDefinition): InteractableEntered {
         title: object.title,
         body: object.body,
         blocksMovement: object.blocksMovement ?? true,
+        quests,
       };
   }
+}
+
+/**
+ * One quest's wire form for one reader. `row` is null for a quest this account has never accepted
+ * — the `Offered` state, which only an NPC panel ever shows.
+ *
+ * `killCount` is clamped here as well as in the store: a row written while the objective asked for
+ * five kills outlives a redeploy that lowers it to three, and a progress bar reading "5 / 3" would
+ * be the client's problem for a requirement change that is entirely the server's.
+ */
+function questState(quest: QuestDefinition, row: QuestRow | null): QuestState {
+  return {
+    questId: quest.id,
+    title: quest.title,
+    summary: quest.summary,
+    objectiveText: quest.objectiveText,
+    completionText: quest.completionText,
+    status:
+      row === null
+        ? QuestStatus.Offered
+        : row.completed
+          ? QuestStatus.Completed
+          : QuestStatus.Accepted,
+    killCount: Math.min(row?.killCount ?? 0, quest.objective.count),
+    requiredCount: quest.objective.count,
+  };
 }
 
 function normalizeNickname(nickname: unknown): string | null {

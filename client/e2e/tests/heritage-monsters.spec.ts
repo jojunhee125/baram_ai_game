@@ -551,6 +551,21 @@ test("9 concurrency: a turn or replacement during movement cannot revive a remov
   expect(result.tweensLeft).toBe(0);
 });
 
+/**
+ * The classic (heritage) attack is skin 0's *fallback* art since `e438f35` replaced that skin's
+ * primary manifest with the native master (`docs/master-adventurer.md`), whose attack is
+ * deliberately unproduced and resolves to idle. So this block forces the fallback by 404-ing the
+ * master image — the same seam `avatar-manifest.spec.ts`'s "missing master image" block uses — and
+ * goes on asserting exactly what it always did.
+ *
+ * Kept rather than retargeted at the master: the classic frames below are still shipped and still
+ * what a player sees whenever that one image fails to load, and nothing else covers them. The
+ * master's own idle-fallback attack is covered by `avatar-manifest.spec.ts` ("an unproduced native
+ * attack resolves idle and preserves the generic attack effect path").
+ */
+test.describe("classic attack art, reached through skin zero's fallback", () => {
+  test.use({ missingTextures: ["master-adventurer"] });
+
 test("classic normal attack plays directional frames and cancels safely", async ({ harness }) => {
   const result = await harness.evaluate(async h => {
     const { PlayerSprites } = await import("/src/world/playerSprites.ts");
@@ -596,6 +611,8 @@ test("classic normal attack plays directional frames and cancels safely", async 
     expect(result.states[i + 1]).toEqual({ texture: "avatar:/sprites/avatar.png", width: 32, angle: 0 });
   }
   expect(result).toMatchObject({ removed: true, tracked: false });
+});
+
 });
 
 test("attack pose restores rotation without changing movement or skin scale", async ({ harness }) => {

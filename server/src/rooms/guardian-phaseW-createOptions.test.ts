@@ -55,7 +55,14 @@ async function flush(): Promise<void> {
 }
 
 before(async () => {
-  const gameServer = createGameServer(undefined, undefined, undefined, realProgressStore, realAdminOwnerKeys);
+  const gameServer = createGameServer(
+    undefined,
+    undefined,
+    undefined,
+    realProgressStore,
+    undefined,
+    realAdminOwnerKeys,
+  );
   await gameServer.listen(PORT);
   testServer = new ColyseusTestServer(gameServer);
 });

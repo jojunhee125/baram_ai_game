@@ -5,6 +5,7 @@ import type { BossStateStore } from "./db/bossStateStore";
 import type { InventoryStore } from "./db/inventoryStore";
 import type { ProfileStore } from "./db/profileStore";
 import type { ProgressStore } from "./db/progressStore";
+import type { QuestStore } from "./db/questStore";
 import { validateInteractableDefinitions } from "./game/interactables";
 import { validateItemDefinitions } from "./game/items";
 import { validateLandmarkDefinitions } from "./game/landmarks";
@@ -25,11 +26,12 @@ import {
   validateMonsterSpawnDefinitions,
 } from "./rooms/monsterDefinitions";
 import { PORTAL_DEFINITIONS } from "./rooms/portalDefinitions";
+import { QUEST_DEFINITIONS, validateQuestDefinitions } from "./rooms/questDefinitions";
 
 export const DEFAULT_PORT = 2567;
 
 /**
- * All four stores are resolved at boot by `index.ts` — Postgres when `DATABASE_URL` is set and
+ * All five stores are resolved at boot by `index.ts` — Postgres when `DATABASE_URL` is set and
  * process memory when it is not. Omitting them takes the same in-memory path, which is what a
  * test or a local `npm run dev` runs on. `adminOwnerKeys` defaults to nobody exempt, the same
  * "opt in, never a hardcoded key" default `ADMIN_OWNER_KEYS` is meant to have
@@ -40,6 +42,7 @@ export function createGameServer(
   inventoryStore?: InventoryStore,
   bossStateStore?: BossStateStore,
   progressStore?: ProgressStore,
+  questStore?: QuestStore,
   adminOwnerKeys: ReadonlySet<string> = new Set(),
 ): Server {
   // Has to be set explicitly: the 8 KB default is nowhere near one patch of a 500-view room.
@@ -106,6 +109,7 @@ export function createGameServer(
       inventoryStore,
       bossStateStore,
       progressStore,
+      questStore,
       adminOwnerKeys,
     });
   }
@@ -195,6 +199,22 @@ async function validateRoomMaps(): Promise<void> {
   }
   if (objects.errors.length > 0) {
     refuseBoot(`invalid interactable definitions: ${objects.errors.join("; ")}`);
+  }
+
+  // Takes the object and spawn tables for the same reason the interactable check takes the portal
+  // table: its faults are about this table *and* one of those — a giver that is not there, a giver
+  // that is not an NPC, an objective naming a kind nothing spawns. Each of those is a quest that
+  // can be offered or accepted and then never finished, which is only visible from both sides.
+  const quests = validateQuestDefinitions(
+    QUEST_DEFINITIONS,
+    INTERACTABLE_DEFINITIONS,
+    MONSTER_SPAWN_DEFINITIONS,
+  );
+  for (const warning of quests.warnings) {
+    console.warn(`[zep-test] ${warning}`);
+  }
+  if (quests.errors.length > 0) {
+    refuseBoot(`invalid quest definitions: ${quests.errors.join("; ")}`);
   }
 
   // No map argument: an item is not placed anywhere. It is checked here anyway because this is
