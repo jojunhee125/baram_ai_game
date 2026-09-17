@@ -327,6 +327,14 @@ export class WorldScene extends Phaser.Scene {
         // has to be answered where it was pressed, not only in the corner readout.
         this.objectPanel?.applyQuestUpdate(state);
       },
+      onCurrencyChanged: (event) => {
+        this.inventoryPanel?.applyCurrencyChange(event);
+        // The join-time sync is not a reward — it announces nothing, `itemToasts.ts`'s own
+        // `showCurrency` doc comment.
+        if (event.reason === "quest") {
+          this.toasts?.showCurrency(event);
+        }
+      },
       onLeave: () => {
         // Not the leave we asked for; that one never reaches here (RoomConnection.leaving).
         // This is a drop mid-hop, which leave() then early-returns on — the hop still lands, so

@@ -326,6 +326,12 @@
           <div class="bag" id="inventory" hidden>
             <div class="bag__header">
               <h2 class="bag__title" id="inventory-title">가방</h2>
+              <!--
+                Balance (roadmap R04-b). No fetch of its own — inventoryPanel.ts patches it from
+                `currency:changed`, the same message the join-time sync and a settled quest reward
+                both arrive as, so it reads correctly whether or not the bag has ever been opened.
+              -->
+              <span class="bag__currency" id="inventory-currency">0전</span>
               <button type="button" class="bag__close" id="inventory-close" title="닫기 (Esc)">
                 <svg class="bag__close-icon" viewBox="0 0 16 16" aria-hidden="true">
                   <path

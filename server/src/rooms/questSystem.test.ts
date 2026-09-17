@@ -7,20 +7,23 @@ import {
   PLAYER_ATTACK_DAMAGE,
   QuestStatus,
   ServerMessage,
+  type CurrencyChanged,
   type InteractableEntered,
   type JoinOptions,
   type NpcInteraction,
   type QuestState,
   type TilePosition,
 } from "@zep-test/shared";
+import { InMemoryCurrencyStore } from "../db/currencyStore";
 import { InMemoryQuestStore, type QuestRow, type QuestStore } from "../db/questStore";
+import { InMemorySettlementStore, type SettlementStore } from "../db/settlementStore";
 import { TableInteractableIndex } from "../game/interactables";
 import { TiledMapLoader } from "../game/tiledMap";
 import type { CollisionMap, InteractableIndex, RoomCreateOptions } from "./contracts";
 import { INTERACTABLE_DEFINITIONS } from "./interactableDefinitions";
 import { MetaverseRoom } from "./metaverseRoom";
 import { MonsterKind, type MonsterSpawnDefinition, type MonsterType } from "./monsterDefinitions";
-import { QUEST_DEFINITIONS, validateQuestDefinitions } from "./questDefinitions";
+import { QUEST_DEFINITIONS, validateQuestDefinitions, type QuestDefinition } from "./questDefinitions";
 
 /**
  * Roadmap R03 step 3 (`docs/roadmap.md` §7, `docs/decisions.md` 2026-09-16): quest state is stored,
@@ -217,6 +220,10 @@ async function flush(): Promise<void> {
 
 function questUpdates(client: FakeClient): QuestState[] {
   return sentOfType<QuestState>(client, ServerMessage.QuestUpdated);
+}
+
+function currencyChanges(client: FakeClient): CurrencyChanged[] {
+  return sentOfType<CurrencyChanged>(client, ServerMessage.CurrencyChanged);
 }
 
 function dispose(room: MetaverseRoom): void {
@@ -651,6 +658,184 @@ describe("rejoining", () => {
       0,
       "a hydrated session with no accepted quest must not touch the store on a kill",
     );
+    dispose(room);
+  });
+});
+
+describe("quest completion rewards (roadmap R04-b)", () => {
+  const REWARD = QUEST.reward;
+  assert.ok(REWARD, "the fixture needs the authored table's own reward");
+
+  it("settles the reward exactly once, the moment the kill completes it", async () => {
+    const questStore = new InMemoryQuestStore();
+    const currencyStore = new InMemoryCurrencyStore();
+    const settlementStore = new InMemorySettlementStore(currencyStore);
+    const required = QUEST.objective.count;
+    const room = await createRoom(
+      { questStore, currencyStore, settlementStore },
+      squirrelsBeside(ROOM_OPTIONS.spawn, required),
+    );
+    const client = join(room, "hunter");
+    await flush();
+    accept(room, client);
+    await flush();
+    place(room, "hunter", ROOM_OPTIONS.spawn);
+    room.state.players.get("hunter")!.facing = Direction.Right;
+
+    for (let kill = 0; kill < required; kill++) {
+      attack(room, client);
+      await flush();
+    }
+
+    assert.equal(await currencyStore.getBalance(OWNER), REWARD.currencyDelta);
+    assert.deepEqual(
+      currencyChanges(client).filter((change) => change.reason === "quest"),
+      [{ balance: REWARD.currencyDelta, delta: REWARD.currencyDelta, reason: "quest" }],
+      "exactly one reward notice, for exactly the kill that completed it",
+    );
+    dispose(room);
+  });
+
+  it("never double-credits a rejoin retry of an already-settled quest", async () => {
+    const questStore = new InMemoryQuestStore();
+    const currencyStore = new InMemoryCurrencyStore();
+    const settlementStore = new InMemorySettlementStore(currencyStore);
+    const required = QUEST.objective.count;
+    const room = await createRoom(
+      { questStore, currencyStore, settlementStore },
+      squirrelsBeside(ROOM_OPTIONS.spawn, required),
+    );
+    const first = join(room, "hunter");
+    await flush();
+    accept(room, first);
+    await flush();
+    place(room, "hunter", ROOM_OPTIONS.spawn);
+    room.state.players.get("hunter")!.facing = Direction.Right;
+    for (let kill = 0; kill < required; kill++) {
+      attack(room, first);
+      await flush();
+    }
+    assert.equal(await currencyStore.getBalance(OWNER), REWARD.currencyDelta);
+    room.onLeave(asRoomClient(first));
+
+    // Rejoining re-hydrates the already-completed row and retries the settlement (design §4 D6) —
+    // this is what asserts the ledger's own idempotency actually holds here: the balance must not
+    // move a second time, and the retry must not re-announce a reward the first session already got.
+    const second = join(room, "hunter-again", OWNER);
+    await flush();
+
+    assert.equal(
+      await currencyStore.getBalance(OWNER),
+      REWARD.currencyDelta,
+      "a retry is a no-op replay, never a second credit",
+    );
+    assert.deepEqual(
+      currencyChanges(second).filter((change) => change.reason === "quest"),
+      [],
+      "the retry is silent — hydrateCurrencyCache's own join-time sync already carries the right number",
+    );
+    dispose(room);
+  });
+
+  it("announces the balance a join-time retry paid out, on that same join", async () => {
+    const questStore = new InMemoryQuestStore();
+    const currencyStore = new InMemoryCurrencyStore();
+    const settlementStore = new InMemorySettlementStore(currencyStore);
+    // Exactly the state design §4 D6's retry exists for: the row is complete in the store, but the
+    // completion never got as far as settling it. Built against the store directly, which is what
+    // a process restart between `recordKill` committing and `settleQuestReward`'s own await
+    // landing leaves behind.
+    await questStore.accept(OWNER, QUEST.id);
+    for (let kill = 0; kill < QUEST.objective.count; kill++) {
+      await questStore.recordKill(OWNER, QUEST.id, QUEST.objective.count);
+    }
+    assert.equal(await currencyStore.getBalance(OWNER), 0, "precondition: nothing was settled");
+
+    const room = await createRoom(
+      { questStore, currencyStore, settlementStore },
+      squirrelsBeside(ROOM_OPTIONS.spawn, 1),
+    );
+    const client = join(room, "hunter");
+    await flush();
+
+    assert.equal(
+      await currencyStore.getBalance(OWNER),
+      REWARD.currencyDelta,
+      "precondition: the join-time retry did pay out",
+    );
+    // The regression this case exists for: the join-time balance read is one hop and the retry is
+    // at least two, so fired in parallel the sync reliably announced the pre-settlement balance and
+    // stayed wrong until the next join — the retry itself is deliberately silent.
+    assert.deepEqual(
+      currencyChanges(client).map((change) => ({ balance: change.balance, reason: change.reason })),
+      [{ balance: REWARD.currencyDelta, reason: "sync" }],
+      "the join's only balance notice carries what the retry settled, not the balance before it",
+    );
+    dispose(room);
+  });
+
+  it("makes no settlement call at all for a quest with no reward, even once it completes", async () => {
+    const questStore = new InMemoryQuestStore();
+    let settleCalls = 0;
+    const countingSettlementStore: SettlementStore = {
+      settle: () => {
+        settleCalls += 1;
+        return Promise.resolve({ ok: true, balance: 0, items: [] });
+      },
+    };
+    const room = await createRoom({ questStore, settlementStore: countingSettlementStore });
+    const noRewardQuest: QuestDefinition = { ...QUEST, id: "no-reward-quest", reward: undefined };
+
+    await questStore.accept(OWNER, noRewardQuest.id);
+    // Walked to one kill short of completion directly against the store, so the single call under
+    // test below is the one that actually flips `completed` — the exact condition
+    // `MetaverseRoom.recordQuestKill` gates its settlement call on.
+    for (let kill = 0; kill < noRewardQuest.objective.count - 1; kill++) {
+      await questStore.recordKill(OWNER, noRewardQuest.id, noRewardQuest.objective.count);
+    }
+
+    await room["recordQuestKill"]({ sessionId: "hunter", ownerKey: OWNER }, noRewardQuest, questStore);
+    await flush();
+
+    const rows = await questStore.list(OWNER);
+    assert.equal(
+      rows.find((row) => row.questId === noRewardQuest.id)?.completed,
+      true,
+      "precondition: the quest is actually complete now",
+    );
+    assert.equal(settleCalls, 0, "a rewardless quest must never call settle at all");
+    dispose(room);
+  });
+
+  it("skips settlement outright for an account with no SSO identity, without throwing", async () => {
+    const questStore = new InMemoryQuestStore();
+    const currencyStore = new InMemoryCurrencyStore();
+    const settlementStore = new InMemorySettlementStore(currencyStore);
+    const required = QUEST.objective.count;
+    const room = await createRoom(
+      { questStore, currencyStore, settlementStore },
+      squirrelsBeside(ROOM_OPTIONS.spawn, required),
+    );
+    const client = join(room, "hunter", null);
+    await flush();
+    accept(room, client);
+    await flush();
+    place(room, "hunter", ROOM_OPTIONS.spawn);
+    room.state.players.get("hunter")!.facing = Direction.Right;
+
+    for (let kill = 0; kill < required; kill++) {
+      attack(room, client);
+      await flush();
+    }
+
+    assert.deepEqual(
+      currencyChanges(client).filter((change) => change.reason === "quest"),
+      [],
+      "no real account, no settlement, no reward notice",
+    );
+    // `settlementStore.settle` would have thrown on a non-uuid ownerKey (`assertUuidOwnerKey`) had
+    // this codebase fallen back to the session id the way loot/EXP/quest-progress do; reaching
+    // here at all is the assertion that it did not.
     dispose(room);
   });
 });

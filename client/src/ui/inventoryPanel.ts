@@ -1,4 +1,10 @@
-import { EQUIPMENT_SLOTS, EquipmentSlot, type EquipmentChanged, type ItemGranted } from "@zep-test/shared";
+import {
+  EQUIPMENT_SLOTS,
+  EquipmentSlot,
+  type CurrencyChanged,
+  type EquipmentChanged,
+  type ItemGranted,
+} from "@zep-test/shared";
 import { loadInventory, type InventoryItem } from "../net/inventory";
 import { isTextEntry } from "../input/textEntry";
 
@@ -92,6 +98,7 @@ export class InventoryPanel {
   private readonly button = document.querySelector<HTMLButtonElement>("#inventory-button")!;
   private readonly closeButton = document.querySelector<HTMLButtonElement>("#inventory-close")!;
   private readonly retryButton = document.querySelector<HTMLButtonElement>("#inventory-retry")!;
+  private readonly currencyBalance = document.querySelector<HTMLElement>("#inventory-currency")!;
   private readonly list = document.querySelector<HTMLElement>("#inventory-list")!;
   private readonly status = document.querySelector<HTMLElement>("#inventory-status")!;
   private readonly statusIcon = document.querySelector<HTMLElement>("#inventory-status-icon")!;
@@ -199,6 +206,18 @@ export class InventoryPanel {
       equip.textContent = equipped ? "해제" : "장착";
     }
     this.applySlot(event.slot, this.resolveEquippedItem(event.itemKey));
+  }
+
+  /**
+   * Patches the balance shown in the bag header (roadmap R04-b) — every `CurrencyChanged`, the
+   * join-time sync and a settled quest reward alike, and whether or not the bag is currently open:
+   * unlike {@link applyGrant} this is a persistent label, not a row in a list that only exists
+   * while the panel shows its "items" view, and it needs no reopen to read correctly. Carried as-is
+   * across a room hop rather than reset — the balance is the account's, not the room's, so the
+   * number from the room just left is still the right number until this fires again.
+   */
+  applyCurrencyChange(event: CurrencyChanged): void {
+    this.currencyBalance.textContent = `${event.balance.toLocaleString("ko-KR")}전`;
   }
 
   /**

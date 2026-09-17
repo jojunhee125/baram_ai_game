@@ -56,8 +56,10 @@ export type SettlementOutcome = SettlementSuccess | SettlementInsufficientBalanc
  * for not generating one here: a random key would differ on every retry and defeat the whole
  * point of asking for one.
  *
- * D4/D5/D6/D7 (shop, consumables, quest wiring, client notice) are later milestones — nothing in
- * this codebase calls `settle` yet.
+ * D4/D5 (shop, consumables) are later milestones, still uncalled. D6/D7 (quest wiring, client
+ * notice) are wired: `MetaverseRoom.recordQuestKill`/`hydrateQuestCache` are the two callers
+ * (roadmap R04-b) — the first on the completion transition itself, the second retrying it on join
+ * for an account whose completion never got to call this at all.
  */
 export interface SettlementStore {
   /**

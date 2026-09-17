@@ -933,6 +933,16 @@ body {
   letter-spacing: 0.06em;
 }
 
+/* Balance (roadmap R04-b). Tabular figures for `vitals__count`'s own reason: this number changes
+   on every settled reward and must not reflow the header as it does. */
+.bag__currency {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: rgba(236, 234, 244, 0.72);
+}
+
 .bag__close {
   display: inline-flex;
   align-items: center;

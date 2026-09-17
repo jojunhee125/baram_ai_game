@@ -7,6 +7,7 @@ import {
   type ChangeSkinRequest,
   type ChatBroadcast,
   type ChatRequest,
+  type CurrencyChanged,
   type Direction,
   type EquipItemRequest,
   type EquipmentChanged,
@@ -129,6 +130,12 @@ export interface RoomEvents {
    * tracker built for this room learns what the account is already carrying (roadmap R03).
    */
   onQuestUpdated?(state: QuestState): void;
+  /**
+   * The account's currency balance changed — a settled quest reward, or the plain sync sent once
+   * at join (`reason: "sync"`). Also fires before `attach()` for the sync's own reason
+   * {@link onQuestUpdated}'s doc comment gives: the room hydrates it the moment it has it.
+   */
+  onCurrencyChanged?(event: CurrencyChanged): void;
   /** The server warped the local player. Apply as an absolute position, never as a step. */
   onTeleported?(event: Teleported): void;
   /** Connection closed after a successful join — includes kick, server restart, network drop. */
@@ -165,6 +172,13 @@ export class RoomConnection {
    * show an empty quest tracker until the next kill.
    */
   private readonly pendingQuestUpdates: QuestState[] = [];
+  /**
+   * Currency changes that arrived before `attach()` had a bag panel to draw them on — the same
+   * queue as {@link pendingQuestUpdates}, and for the same reason: the room sends the join-time
+   * `"sync"` message the moment it has read the balance, which lands during the map-loading window
+   * this class is alive for and `attach()` is not.
+   */
+  private readonly pendingCurrencyChanges: CurrencyChanged[] = [];
 
   private constructor(
     private readonly room: Room<unknown, RoomState>,
@@ -191,6 +205,7 @@ export class RoomConnection {
   ) {
     this.bindLifecycle();
     this.bindQuestUpdates();
+    this.bindCurrencyChanges();
   }
 
   /**
@@ -224,6 +239,7 @@ export class RoomConnection {
     this.bindMessages();
     this.replayPendingLifecycle();
     this.replayPendingQuestUpdates();
+    this.replayPendingCurrencyChanges();
   }
 
   get sessionId(): string {
@@ -447,6 +463,21 @@ export class RoomConnection {
   }
 
   /**
+   * Registered here rather than in {@link bindMessages}, {@link bindQuestUpdates}'s own reason: the
+   * join-time `"sync"` message is the server's own initiative, not a reply to anything this client
+   * asked for, so a handler that only exists from `attach()` onwards would miss it.
+   */
+  private bindCurrencyChanges(): void {
+    this.room.onMessage(ServerMessage.CurrencyChanged, (event: CurrencyChanged) => {
+      if (!this.attached) {
+        this.pendingCurrencyChanges.push(event);
+        return;
+      }
+      this.events.onCurrencyChanged?.(event);
+    });
+  }
+
+  /**
    * A drop between `connect()` and `attach()` (the whole map-loading window) would otherwise
    * vanish into the empty `this.events`, leaving a world that renders and predicts movement
    * against a socket the server never sees. One slot is enough: a room terminates once.
@@ -487,6 +518,19 @@ export class RoomConnection {
     queueMicrotask(() => {
       for (const state of pending) {
         this.events.onQuestUpdated?.(state);
+      }
+    });
+  }
+
+  /** {@link replayPendingQuestUpdates}'s own shape and reason, against {@link pendingCurrencyChanges}. */
+  private replayPendingCurrencyChanges(): void {
+    if (this.pendingCurrencyChanges.length === 0) {
+      return;
+    }
+    const pending = this.pendingCurrencyChanges.splice(0);
+    queueMicrotask(() => {
+      for (const event of pending) {
+        this.events.onCurrencyChanged?.(event);
       }
     });
   }

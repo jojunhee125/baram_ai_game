@@ -159,8 +159,8 @@ R07은 첫 테마·첫 보스부터 완성한다. R10은 앞 단계 플레이가
 |---|---|---|---|
 | **1 · 구현됨** | Avatar manifest와 legacy adapter·runtime 연결 | shared/offline 계약과 현재 PC의 player·NPC·picker 공통 표시 | 24개 ID·native60 계약·offline 검사, browser 14개·legacy 96개 pixel 비교 통과. [구현 기록](avatar-manifest.md) |
 | **2 · 구현됨 / 시각 승인 대기** | Master 1종 대기/걷기 | 현재 PC: skin 0 native 48px, 4방향 idle/walk atlas 적용 | shared 26개·browser 16개·build·atlas 재현성 통과. 1x/4x와 맵 화면 사용자 시각 승인 대기. [구현 기록](master-adventurer.md) |
-| **3 · 구현됨** | 첫 퀘스트 상태·처치 목표 | 서버: `first-hunt`(다람쥐 3마리) 수락·진행·완료 저장, 처치 이벤트 연결. 현재 PC: NPC 패널 수락·트래커 표시. 지급 경로 없음 | 서버 973개 통과(재접속 유지·해당 종만 갱신 포함), e2e 93/93 통과. 브라우저 처치 진행 확인은 SSO 환경 필요. [R03 문서](r03-quest-and-village.md) |
+| **3 · 구현됨** | 첫 퀘스트 상태·처치 목표 | 서버: `first-hunt`(다람쥐 3마리) 수락·진행·완료 저장, 처치 이벤트 연결. 현재 PC: NPC 패널 수락·트래커 표시. 완료 시 50전 지급(R04-b) | 서버 973개 통과(재접속 유지·해당 종만 갱신 포함), e2e 93/93 통과. 브라우저 처치 진행 확인은 SSO 환경 필요. [R03 문서](r03-quest-and-village.md) |
 
-1·2·3의 코드 구현은 서버·화면 모두 완료했고, R03 잔여였던 상점 NPC·귀환 동선·Postgres 동시성 검증도 `f06d20d`로 끝났다(브라우저 처치 진행 확인만 SSO 환경 대기). 현재 남은 판단은 master의 사용자 시각 승인이다. R04는 설계 확정 후 **R04-a(정산 저장소 계층)까지 2026-09-17에 구현 완료**했고, R04-b(퀘스트 보상 연결)·R04-c(상점·소모품)는 단계별 승인을 받는다. [R04 문서](r04-settlement.md) 보상 지급은 R04 정산 설계까지 계속 비활성이며, 3에는 지급 경로 자체가 없다.
+1·2·3의 코드 구현은 서버·화면 모두 완료했고, R03 잔여였던 상점 NPC·귀환 동선·Postgres 동시성 검증도 `f06d20d`로 끝났다(브라우저 처치 진행 확인만 SSO 환경 대기). 현재 남은 판단은 master의 사용자 시각 승인이다. R04는 설계 확정 후 **R04-a(정산 저장소 계층)·R04-b(퀘스트 보상 연결)까지 2026-09-17에 구현 완료**했고, R04-c(상점·소모품)는 별도 승인을 받는다. [R04 문서](r04-settlement.md) 상점 구매·소모품 사용 보상은 R04-c 착수 전까지 계속 비활성이다.
 새 atlas는 [avatarArt.ts](../client/src/world/avatarArt.ts)의 `AVATAR_REPLACEMENTS`에 등록되어 있다. 4방향·발 위치·fallback·실제 맵 표시 검증은 통과했고, 시대 reference 픽셀 대조와 사용자 시각 승인은 남아 있다. [master 제작·적용 기록](master-adventurer.md)
 완료 기록에는 ID·실제 변경·좁은 확인 근거·commit·push 상태를 남긴다. 계획 전체를 한 번에 완료 표시하지 않는다.

@@ -1,8 +1,10 @@
 import type { Client } from "colyseus";
 import type { BossStateStore } from "../db/bossStateStore";
+import type { CurrencyStore } from "../db/currencyStore";
 import type { InventoryStore } from "../db/inventoryStore";
 import type { ProgressStore } from "../db/progressStore";
 import type { QuestRow, QuestStore } from "../db/questStore";
+import type { SettlementStore } from "../db/settlementStore";
 // `InteractableKind` is imported as a value, not just as a type: the authored table's
 // discriminant and the wire union's have to be the same string, so both read it from one place.
 import {
@@ -72,6 +74,22 @@ export interface RoomCreateOptions {
    * and the same one a room with no `inventoryStore` already makes for drops.
    */
   questStore?: QuestStore;
+  /**
+   * Where an account's spendable balance is filed (roadmap R04-b), injected the same way and for
+   * the same reason as {@link inventoryStore}/{@link progressStore}. Optional for the same reason
+   * too — the tests, the load-test harness and `npm run dev` all build rooms without one, and a
+   * room with no store shows a balance of 0 and settles no quest reward, the same honest
+   * degradation {@link questStore}'s own doc comment describes for its counter.
+   */
+  currencyStore?: CurrencyStore;
+  /**
+   * Where a quest reward is settled exactly once (roadmap R04-b, `docs/r04-settlement.md` §4
+   * D2/D3/D6), injected the same way and for the same reason as {@link currencyStore}. Optional
+   * for the same reason too. A room with no store still completes quests — {@link questStore}'s
+   * own counter does not depend on this — it simply pays out nothing for it, the same degradation
+   * a room with no `inventoryStore` already makes for drops.
+   */
+  settlementStore?: SettlementStore;
   /**
    * The death EXP penalty (design §11.0) exempts these accounts entirely — an env-configured
    * allowlist (`ADMIN_OWNER_KEYS`), never a key literal in this codebase. Undefined means nobody is
@@ -550,6 +568,16 @@ export interface PlayerSession {
    * is what makes that pessimistic path safe as well as correct.
    */
   questRowsHydrated: boolean;
+  /**
+   * Cached spendable balance, the currency twin of {@link totalExp} (roadmap R04-b): never in
+   * `RoomState` (nobody but the owner needs to see it, `hp`'s own reasoning) and 0 until
+   * `MetaverseRoom.hydrateCurrencyCache` catches it up or this session's own quest completion
+   * settles some. Unlike `totalExp` this carries no subscription — a settlement grant is rare
+   * enough (one quest, once) that a second tab briefly showing a stale balance is a cosmetic gap
+   * the next grant or rejoin corrects, not the levelled-up-twice class of bug `CachedProgressStore`
+   * exists to close.
+   */
+  currencyBalance: number;
 }
 
 /**

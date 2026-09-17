@@ -17,7 +17,10 @@ export interface QuestRow {
 /**
  * Where an account's quest state is filed (roadmap R03, `server/migrations/0007_quest_progress.sql`).
  * Keyed by the SSO `sub`, `ProgressStore`'s own convention, and holding no reward of any kind:
- * completing a quest here changes a counter and nothing else until R04's settlement design exists.
+ * completing a quest here changes a counter and nothing else. The payout that counter can trigger
+ * (roadmap R04-b) is a separate call this store never makes and never needs to know happened —
+ * `MetaverseRoom.recordQuestKill` settles it through `SettlementStore` once this store's own
+ * `recordKill` answers a row with `completed: true`.
  */
 export interface QuestStore {
   /** Every quest this account has accepted, in no guaranteed order. Never-accepted quests are absent, not zero rows. */

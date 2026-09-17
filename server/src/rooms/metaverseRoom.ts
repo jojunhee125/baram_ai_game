@@ -38,6 +38,7 @@ import {
   type ChangeSkinRequest,
   type ChatBroadcast,
   type ChatRequest,
+  type CurrencyChanged,
   type EquipItemRequest,
   type EquipmentChanged,
   type ExpGranted,
@@ -59,9 +60,11 @@ import {
   type WarpToLandmarkRequest,
 } from "@zep-test/shared";
 import type { BossStateStore } from "../db/bossStateStore";
+import type { CurrencyStore } from "../db/currencyStore";
 import type { InventoryStore } from "../db/inventoryStore";
 import type { ProgressStore } from "../db/progressStore";
 import type { QuestRow, QuestStore } from "../db/questStore";
+import type { SettlementOutcome, SettlementStore } from "../db/settlementStore";
 import { TableInteractableIndex } from "../game/interactables";
 import { TableLandmarkIndex } from "../game/landmarks";
 import { rollLoot, type LootGrant } from "../game/loot";
@@ -266,6 +269,10 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   private readonly progressSubscriptions = new Map<string, { version: number; unsubscribe?: () => void }>();
   /** Where an account's quest state is filed. Null in every room built without one — see {@link RoomCreateOptions.questStore}. */
   private questStore: QuestStore | null = null;
+  /** Where an account's spendable balance is filed. Null in every room built without one — see {@link RoomCreateOptions.currencyStore}. */
+  private currencyStore: CurrencyStore | null = null;
+  /** Where a quest reward is settled exactly once. Null in every room built without one — see {@link RoomCreateOptions.settlementStore}. */
+  private settlementStore: SettlementStore | null = null;
   /**
    * The quests this room can offer: those whose giver NPC stands here. Resolved once at `onCreate`
    * against this room's own object index — the `PortalIndex`/`InteractableIndex` narrowing, for
@@ -306,6 +313,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.bossStateStore = options.bossStateStore ?? null;
     this.progressStore = options.progressStore ?? null;
     this.questStore = options.questStore ?? null;
+    this.currencyStore = options.currencyStore ?? null;
+    this.settlementStore = options.settlementStore ?? null;
     this.adminOwnerKeys = options.adminOwnerKeys ?? new Set();
     this.setPatchRate(PATCH_RATE_MS);
     this.maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
@@ -577,6 +586,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       questRows: new Map(),
       // The map above is empty *and* says nothing yet; only the flag distinguishes the two.
       questRowsHydrated: false,
+      // hydrateCurrencyCache supplies the real value on join; a settled quest reward updates it live.
+      currencyBalance: 0,
     };
     client.view = new StateView();
     this.viewedBySession.set(client.sessionId, new Set());
@@ -638,10 +649,32 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // never read, which on the 500 CCU join path (PoC #2) is a round trip bought for nothing. It is
     // deliberately *not* gated the way progress is (every room, always): unlike `Player.level`,
     // quest state is shown by a panel that only exists where the giver is.
-    if (this.questStore !== null && (this.hasMonsters || this.roomQuests.size > 0)) {
-      void this.hydrateQuestCache(client.sessionId, ownerKey).catch((cause) => {
-        console.warn(`[zep-test] could not hydrate quests for ${ownerKey}`, cause);
-      });
+    const questHydration =
+      this.questStore !== null && (this.hasMonsters || this.roomQuests.size > 0)
+        ? this.hydrateQuestCache(client.sessionId, ownerKey).catch((cause) => {
+            console.warn(`[zep-test] could not hydrate quests for ${ownerKey}`, cause);
+          })
+        : null;
+    // Not gated on `hasMonsters`/`roomQuests`, `hydrateProgressCache`'s own reasoning: the bag
+    // window that shows this balance is open to every room, not only the ones with a quest giver
+    // or a fight in them.
+    //
+    // Chained *after* the quest hydration rather than fired beside it, because that hydration can
+    // pay out D6's retry for an account whose completion never settled — and this is the only
+    // message that announces the result of one (`settleQuestReward`'s `notify: false` deliberately
+    // stays silent there). Run in parallel the two are not merely racy but reliably wrong in that
+    // case: this read is one hop, the retry is at least two (`list`, then `settle`'s whole
+    // transaction), so the balance announced would be the pre-settlement one every time, and would
+    // stay wrong until the next join. The retry's own `SettlementOutcome.balance` is deliberately
+    // not used instead — for an already-settled account `settle` replays the balance recorded at
+    // settlement time, which stops being the current one the moment D4/D5 give currency a second
+    // way to move. This reads the account's actual balance, after everything that could change it.
+    if (this.currencyStore !== null) {
+      void (questHydration ?? Promise.resolve())
+        .then(() => this.hydrateCurrencyCache(client.sessionId, ownerKey))
+        .catch((cause) => {
+          console.warn(`[zep-test] could not hydrate currency for ${ownerKey}`, cause);
+        });
     }
   }
 
@@ -779,6 +812,41 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   }
 
   /**
+   * Fills a freshly joined session's {@link PlayerSession.currencyBalance} from the store and
+   * pushes it to the client as a {@link ServerMessage.CurrencyChanged} with `reason: "sync"`
+   * (roadmap R04-b) — currency's own initial-sync path, needed because unlike `Player.level` a
+   * balance is never in `RoomState` (nobody but the owner needs to see it) and unlike the bag it is
+   * not read back over HTTP either, so without this a joining client has nothing to show until its
+   * first grant.
+   *
+   * Gated only on `currencyStore !== null`, `hydrateProgressCache`'s own reasoning: every room
+   * shows the bag, so every room's join path touches `player_currency`.
+   *
+   * Never awaited by its caller, `hydratePossessionCache`'s rule. No subscription unlike EXP —
+   * see {@link PlayerSession.currencyBalance}'s own doc comment for why that gap is tolerated here.
+   */
+  private async hydrateCurrencyCache(sessionId: string, ownerKey: string): Promise<void> {
+    const store = this.currencyStore;
+    if (store === null) {
+      return;
+    }
+    const balance = await store.getBalance(ownerKey);
+    // Re-resolved after the await, exactly as every other hydration here does: the session may
+    // have left the room, or walked into another one, while the store was answering.
+    const client = this.clientsBySession.get(sessionId);
+    const session = client?.userData;
+    if (!client || !session) {
+      return;
+    }
+    session.currencyBalance = balance;
+    client.send(ServerMessage.CurrencyChanged, {
+      balance,
+      delta: 0,
+      reason: "sync",
+    } satisfies CurrencyChanged);
+  }
+
+  /**
    * Fills a freshly joined session's {@link PlayerSession.questRows} from the store and tells the
    * client what it found, one {@link ServerMessage.QuestUpdated} per accepted quest — the quest
    * twin of {@link hydrateProgressCache}. This is what "재접속 후 진행 유지" is on the wire: the
@@ -815,14 +883,34 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // nothing — an empty map plus this flag is the answer "none", which is what lets the kill path
     // stop consulting the store at all.
     session.questRowsHydrated = true;
+    // Awaited before this method resolves (below) rather than left to run loose: `onJoin` chains
+    // the join-time currency sync onto this promise, and that sync is what announces whatever the
+    // retries below pay out.
+    const retries: Promise<void>[] = [];
     for (const row of rows) {
       const quest = QUESTS_BY_ID.get(row.questId);
       // A stored row whose quest has since been removed from the table: nothing to render, and
       // nothing to be done about it here — the row stays for an author who puts the quest back.
-      if (quest !== undefined) {
-        client.send(ServerMessage.QuestUpdated, questState(quest, row));
+      if (quest === undefined) {
+        continue;
+      }
+      client.send(ServerMessage.QuestUpdated, questState(quest, row));
+      if (row.completed && quest.reward !== undefined) {
+        // D6's own retry: the completion that produced this row may have called `settleQuestReward`
+        // and lost the race (the process died, or the session left, between `store.recordKill`
+        // committing and that call's own `await` landing) — retried here, on every join, because
+        // `settle()`'s ledger (design §4 D2) makes an already-settled retry a free no-op rather than
+        // a second credit. `session.ownerKey` rather than the `ownerKey` parameter: the latter falls
+        // back to the session id for local development, which `settleQuestReward` must never be
+        // handed (see its own doc comment).
+        retries.push(
+          this.settleQuestReward(sessionId, session.ownerKey, quest.id, quest.reward.currencyDelta, false),
+        );
       }
     }
+    // `settleQuestReward` never rejects (it logs and returns), so this cannot turn a paid-out
+    // retry into a failed hydration — it only holds the currency sync until the ledger is settled.
+    await Promise.all(retries);
   }
 
   private updateProgress(sessionId: string, total: number, healOnLevelUp: boolean): void {
@@ -1140,9 +1228,12 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
    * this buys repeated round trips (capped by `maxMessagesPerSecond`) and exactly one row.
    *
    * No position check, for {@link QuizAnswerRequest}'s stated reason — the room keeps no interaction
-   * state to check against. The exposure that buys is bounded by what a quest *is* today: a counter
-   * that grants nothing until R04's settlement design exists. That reasoning expires the day a
-   * completion pays out, and this is the handler that has to change with it.
+   * state to check against. The exposure that buys is bounded by what this message itself can do: it
+   * only ever writes an upserted counter row, never a payout — a completion now does pay out
+   * (roadmap R04-b), but that happens on the kill that flips `completed`
+   * ({@link recordQuestKill}/{@link settleQuestReward}), through a ledger keyed to one account and
+   * one quest, so spamming an accept this handler already bounds to one row per quest buys nothing
+   * against it either.
    *
    * Ignored in silence with no store configured: there would be nothing to remember the acceptance
    * with, and a client told "accepted" by a room that forgets it the moment it answers has been
@@ -1245,12 +1336,88 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       // is ever really settled. Nothing to say: the client's panel already reads the same way.
       return;
     }
+    if (row.completed && quest.reward !== undefined) {
+      // The completion transition itself: `recordKill` only ever answers non-null *and*
+      // `completed` together on the one call that actually flips it — a later kill of an
+      // already-completed quest answers `null` above instead (its own contract,
+      // `questStore.ts`'s doc comment) — so this is exactly the moment design §4 D6 settles the
+      // reward. Fired whether or not the killer is still here, `awardLoot`'s own rule: a grant
+      // belongs to the account, and `hydrateQuestCache`'s retry is what covers the case where this
+      // very call is lost before it gets here.
+      void this.settleQuestReward(lastHit.sessionId, lastHit.ownerKey, quest.id, quest.reward.currencyDelta, true);
+    }
     const client = this.clientsBySession.get(lastHit.sessionId);
     if (!client?.userData) {
       return;
     }
     this.rememberQuestRow(client.userData, row);
     client.send(ServerMessage.QuestUpdated, questState(quest, row));
+  }
+
+  /**
+   * Settles one quest's {@link QuestDefinition.reward} for the account that just completed it
+   * (design §4 D6/D7) — called once from the kill that flips `QuestRow.completed`
+   * ({@link recordQuestKill}, `notify: true`) and, in case that call never got this far, again from
+   * every later join that still sees the row as completed ({@link hydrateQuestCache},
+   * `notify: false`). Both call sites can overlap or repeat freely: `settle()`'s own ledger
+   * (`grantKey = "quest:<questId>:<owner>"`, design §4 D2) makes a second attempt for the same
+   * account and quest a no-op replay, never a second credit.
+   *
+   * `ownerKey === null` — no SSO, so no real account — is skipped outright rather than falling
+   * back to the session id the way loot/EXP/quest-progress do: `SettlementStore.settle`'s own
+   * `assertUuidOwnerKey` (`settlementStore.ts`) rejects anything that is not a uuid, and a session
+   * id never is one. Local development therefore completes quests exactly as it did before this
+   * Phase — the counter advances, nothing pays out.
+   *
+   * `notify` is false for the join-time retry on purpose: that call exists to make sure the ledger
+   * has a row at all, not to announce one. Sending a `CurrencyChanged` there would either
+   * re-announce a grant the original kill already celebrated, or announce one to a killer who had
+   * already left when it was earned — `hydrateCurrencyCache`'s own join-time `"sync"` message is
+   * what shows the corrected balance instead. That message is chained after this retry rather than
+   * sent beside it (`onJoin`'s own reasoning), so "instead" means on this same join, not the next
+   * one: fired in parallel, the one-hop balance read always won and announced the pre-settlement
+   * balance.
+   */
+  private async settleQuestReward(
+    sessionId: string,
+    ownerKey: string | null,
+    questId: string,
+    currencyDelta: number,
+    notify: boolean,
+  ): Promise<void> {
+    const store = this.settlementStore;
+    if (store === null || ownerKey === null) {
+      return;
+    }
+    let outcome: SettlementOutcome;
+    try {
+      outcome = await store.settle(`quest:${questId}:${ownerKey}`, ownerKey, { currencyDelta });
+    } catch (cause) {
+      console.warn(`[zep-test] could not settle ${questId}'s reward for ${ownerKey}`, cause);
+      return;
+    }
+    if (!notify || !outcome.ok || outcome.balance === undefined) {
+      // `ok: false` only ever means insufficient balance for a currency-only credit like this one
+      // (never a full bag, since no reward here ever names an item) — and a positive
+      // `currencyDelta` credited onto a balance that can only ever be non-negative can never be
+      // declined for that, so this is unreachable with today's authored rewards. `balance ===
+      // undefined` is equally unreachable, since this call always sends a non-zero
+      // `currencyDelta`. Neither has anything to announce either way.
+      return;
+    }
+    // Re-resolved after the await, exactly as every other store continuation here does: the killer
+    // may have left the room, or walked through a door into another one, while the store answered.
+    const client = this.clientsBySession.get(sessionId);
+    const session = client?.userData;
+    if (!client || !session) {
+      return;
+    }
+    session.currencyBalance = outcome.balance;
+    client.send(ServerMessage.CurrencyChanged, {
+      balance: outcome.balance,
+      delta: currencyDelta,
+      reason: "quest",
+    } satisfies CurrencyChanged);
   }
 
   /**

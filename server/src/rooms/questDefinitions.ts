@@ -16,9 +16,10 @@ import { MonsterKind, type MonsterSpawnDefinition } from "./monsterDefinitions";
  * a second objective kind exists is the day this becomes a union, and nothing stored depends on
  * the shape (`quest_progress` holds one counter, keyed by quest).
  *
- * Nothing here grants anything. Reward payout stays off until R04's settlement design exists
- * (`docs/roadmap.md` §5 "R04"), so a quest completing is a state change and a message, never a
- * credit — there is deliberately no item/currency field on this table to fill in by accident.
+ * Completing a quest pays out {@link reward} at most once per account, settled through R04-b's
+ * ledger (`MetaverseRoom.recordQuestKill`/`hydrateQuestCache`, `docs/r04-settlement.md` §4 D2/D6)
+ * rather than written here directly — this table only ever says *what* to pay, never *whether* an
+ * account has already been paid for it.
  */
 export interface QuestDefinition {
   /**
@@ -48,8 +49,17 @@ export interface QuestDefinition {
    */
   objectiveText: string;
   objective: QuestObjective;
-  /** Shown once the objective is met. Still no reward — see this interface's own doc comment. */
+  /** Shown once the objective is met. */
   completionText: string;
+  /**
+   * What completing this quest pays out, or absent for a quest that pays nothing — see
+   * {@link QuestReward}. Absent rather than `{ currencyDelta: 0 }`: the latter would still be a
+   * settlement worth calling `settle()` and writing a ledger row for (`SettlementEffects
+   * .currencyDelta`'s own "0 means touch no balance" reading is about a *mixed* batch, not an
+   * excuse to open one for nothing), where a quest with no reward at all must make no settlement
+   * call whatsoever.
+   */
+  reward?: QuestReward;
 }
 
 /** The only objective kind R03 defines: kill `count` monsters of `kind`. */
@@ -57,6 +67,17 @@ export interface QuestObjective {
   kind: MonsterKind;
   /** Positive integer. Boot validation refuses anything else, `LootEntry.quantity`'s own treatment. */
   count: number;
+}
+
+/**
+ * What a completed quest pays out (roadmap R04-b, `docs/decisions.md` 2026-09-17). Currency only:
+ * R04-c's shop does not exist yet, so an item reward would sit in a bag with nothing to spend it
+ * on — that decision's own reasoning, and the reason {@link SettlementEffects.items} stays unused
+ * by every call this file's quest wiring makes.
+ */
+export interface QuestReward {
+  /** 전(錢), credited once via `SettlementStore.settle`. Boot validation refuses anything but a positive integer. */
+  currencyDelta: number;
 }
 
 /**
@@ -79,6 +100,8 @@ export const QUEST_DEFINITIONS: readonly QuestDefinition[] = [
     objectiveText: "사냥터에서 다람쥐 3마리 처치",
     objective: { kind: MonsterKind.Squirrel, count: 3 },
     completionText: "벌써 세 마리를 잡았군요. 이제 사냥터를 혼자 돌아다녀도 되겠습니다.",
+    // 화폐만, 소액(`docs/decisions.md` 2026-09-17) — R04-c 상점이 아직 없어 아이템은 쓸 데가 없다.
+    reward: { currencyDelta: 50 },
   },
 ];
 
@@ -166,6 +189,12 @@ export function validateQuestDefinitions(
     }
     if (quest.title.length === 0 || quest.summary.length === 0 || quest.completionText.length === 0) {
       errors.push(`${label} has an empty title, summary or completionText`);
+    }
+    if (quest.reward !== undefined) {
+      const { currencyDelta } = quest.reward;
+      if (!Number.isInteger(currencyDelta) || currencyDelta < 1) {
+        errors.push(`${label} rewards ${currencyDelta} currency, which is not a positive integer`);
+      }
     }
   }
   return { errors, warnings };

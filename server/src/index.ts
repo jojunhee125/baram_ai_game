@@ -4,6 +4,11 @@ import {
   type BossStateStore,
 } from "./db/bossStateStore";
 import {
+  InMemoryCurrencyStore,
+  PostgresCurrencyStore,
+  type CurrencyStore,
+} from "./db/currencyStore";
+import {
   InMemoryInventoryStore,
   PostgresInventoryStore,
   type InventoryStore,
@@ -18,6 +23,11 @@ import {
   type ProgressStore,
 } from "./db/progressStore";
 import { InMemoryQuestStore, PostgresQuestStore, type QuestStore } from "./db/questStore";
+import {
+  InMemorySettlementStore,
+  PostgresSettlementStore,
+  type SettlementStore,
+} from "./db/settlementStore";
 import { markDatabaseOk } from "./db/status";
 import { createGameServer, resolveAdminOwnerKeys, resolvePort } from "./server";
 
@@ -27,12 +37,15 @@ let inventoryStore: InventoryStore;
 let bossStateStore: BossStateStore;
 let progressStore: ProgressStore;
 let questStore: QuestStore;
+let currencyStore: CurrencyStore;
+let settlementStore: SettlementStore;
 
 if (databaseUrl === null) {
   // A supported mode, not a misconfiguration: KAD always injects the URL, and everything
   // else (tests, the loadtest harness, `npm run dev`) is expected to run without one.
   profileStore = new InMemoryProfileStore();
-  inventoryStore = new InMemoryInventoryStore();
+  const memoryInventoryStore = new InMemoryInventoryStore();
+  inventoryStore = memoryInventoryStore;
   bossStateStore = new InMemoryBossStateStore();
   // Wrapped the same as the Postgres-backed path below, and not merely for symmetry: the wrapper's
   // per-account queue (design-phase-w2-level-client.md §1.2) is what makes a same-tick kill and
@@ -45,8 +58,14 @@ if (databaseUrl === null) {
   // one caller only (a kill), and its store already settles every ordering question inside one
   // statement, so a queue here would add a hop and answer nothing.
   questStore = new InMemoryQuestStore();
+  const memoryCurrencyStore = new InMemoryCurrencyStore();
+  currencyStore = memoryCurrencyStore;
+  // Shares this process's actual currency/inventory stores rather than a private pair of its own —
+  // `InMemorySettlementStore`'s own reason: a settled quest reward has to show up in the same
+  // balance/bag this room's other paths (a bag open, a hunting-ground drop) already read and write.
+  settlementStore = new InMemorySettlementStore(memoryCurrencyStore, memoryInventoryStore);
   console.log(
-    "[zep-test] DATABASE_URL is not set; profiles, bags, boss timers, EXP and quests live in this process only",
+    "[zep-test] DATABASE_URL is not set; profiles, bags, boss timers, EXP, quests and currency live in this process only",
   );
 } else {
   // Anything that throws here refuses the boot, before `listen`. A configured database that
@@ -63,6 +82,8 @@ if (databaseUrl === null) {
   // of one per join (design-phase-w2-level-client.md §1).
   progressStore = new CachedProgressStore(new PostgresProgressStore(pool));
   questStore = new PostgresQuestStore(pool);
+  currencyStore = new PostgresCurrencyStore(pool);
+  settlementStore = new PostgresSettlementStore(pool);
   console.log(
     applied.length === 0
       ? "[zep-test] database connected; schema already up to date"
@@ -79,6 +100,8 @@ await createGameServer(
   progressStore,
   questStore,
   adminOwnerKeys,
+  currencyStore,
+  settlementStore,
 ).listen(port);
 console.log(
   `[zep-test] listening on port ${port} — client at /, matchmaking at /matchmake, health at /api/health`,

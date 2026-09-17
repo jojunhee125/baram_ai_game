@@ -147,8 +147,10 @@ export interface WarpToLandmarkRequest {
  *
  * Unlike a quiz answer this one *stores* something, so the boundary is doing real work here rather
  * than only tidying: what it bounds is which quests a client can open a row for. It is deliberately
- * not a position check — the room keeps no interaction state to check one against — and nothing
- * beyond a counter exists to win, since payout stays off until R04.
+ * not a position check — the room keeps no interaction state to check one against. A completed
+ * quest can now pay out (roadmap R04-b), but that payout is settled once, server-side, off the
+ * account's own stored progress — accepting one more time than intended still only ever produces
+ * the same idempotent replay, never a second reward.
  */
 export interface AcceptQuestRequest {
   questId: string;
@@ -194,6 +196,8 @@ export const ServerMessage = {
   ExpGranted: "progress:exp-granted",
   /** roadmap R03 — one quest's state after it changed, and once per accepted quest at join. */
   QuestUpdated: "quest:updated",
+  /** roadmap R04-b — the account's currency balance changed, and once as a plain sync at join. */
+  CurrencyChanged: "currency:changed",
 } as const;
 
 export type ServerMessage = (typeof ServerMessage)[keyof typeof ServerMessage];
@@ -550,6 +554,23 @@ export interface ExpGranted {
   hpRemaining: number;
 }
 
+/**
+ * The account's currency balance changed (design `docs/r04-settlement.md` §4 D7). Two causes
+ * today: `"quest"` for a completed quest's reward (`docs/decisions.md` 2026-09-17 — 화폐만, 소액),
+ * and `"sync"` for the one-time push at join that gives a client with no schema field for
+ * currency (nobody but the owner needs to see it, {@link PlayerHit.hpRemaining}'s own reasoning)
+ * something to show before its first grant — `delta` is 0 for that one. Shop purchases and
+ * consumable spend (D4/D5) will add causes here when R04-c wires them; nothing in this codebase
+ * sends those yet.
+ */
+export interface CurrencyChanged {
+  /** Balance after this change — the server's own truth, never a client-side running total. */
+  balance: number;
+  /** How much `balance` moved by this message; 0 for the join-time sync. */
+  delta: number;
+  reason: "quest" | "sync";
+}
+
 export interface ServerMessagePayload {
   [ServerMessage.Chat]: ChatBroadcast;
   [ServerMessage.MoveRejected]: MoveRejected;
@@ -564,4 +585,5 @@ export interface ServerMessagePayload {
   [ServerMessage.EquipmentChanged]: EquipmentChanged;
   [ServerMessage.ExpGranted]: ExpGranted;
   [ServerMessage.QuestUpdated]: QuestState;
+  [ServerMessage.CurrencyChanged]: CurrencyChanged;
 }
