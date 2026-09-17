@@ -46,8 +46,8 @@ describe("VERIFY the shared level/EXP curve", () => {
   });
 
   it("matches the design's formula exactly at L=1 and at the L=29 -> 30 boundary", () => {
-    assert.equal(expToNextLevel(1), Math.round(10 * 1 ** 1.7));
-    assert.equal(expToNextLevel(29), Math.round(10 * 29 ** 1.7));
+    assert.equal(expToNextLevel(1), Math.round(20 * 1 ** 1.7));
+    assert.equal(expToNextLevel(29), Math.round(20 * 29 ** 1.7));
     const thresholdFor30 = cumulativeExpForLevel(30);
     assert.equal(levelForExp(thresholdFor30 - 1), 29, "one short of the threshold is still 29");
     assert.equal(levelForExp(thresholdFor30), 30, "exactly on the threshold is 30");
@@ -67,9 +67,11 @@ describe("VERIFY the shared level/EXP curve", () => {
     assert.equal(remainingExpToNextLevel(threshold2), cumulativeExpForLevel(3) - threshold2);
   });
 
-  it("sums to roughly 34,000 cumulative EXP by the cap (design §11)", () => {
+  // Was ~34,000 until the 2026-09-17 retune doubled the curve's coefficient (decisions.md
+  // "왕초보 사냥터 EXP·레벨 곡선 8배 하향"); the other 4x of that change lives in the monster table.
+  it("sums to roughly 69,000 cumulative EXP by the cap", () => {
     const total = cumulativeExpForLevel(LEVEL_CAP);
-    assert.ok(total > 30_000 && total < 38_000, `expected ~34,000, got ${total}`);
+    assert.ok(total > 62_000 && total < 76_000, `expected ~69,000, got ${total}`);
   });
 });
 

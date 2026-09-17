@@ -14,7 +14,7 @@ import { joinRoom } from "../helpers/flows";
  * 브라우저 쪽(`page.evaluate`의 동적 `import("/src/...")`)은 실제 모듈을 그대로 문다.
  */
 function expToNextLevel(level: number): number {
-  return Math.round(10 * level ** 1.7); // shared/src/leveling.ts
+  return Math.round(20 * level ** 1.7); // shared/src/leveling.ts
 }
 function cumulativeExpForLevel(level: number): number {
   let total = 0;
@@ -79,8 +79,9 @@ test.describe("Phase W-2b 실사용자 흐름", () => {
     // 여기서는 그 자리에서 가만히 서서 "몬스터가 나를 때린다"를 확인하는 대신 Space를 누른 채
     // "내가 몬스터를 때린다"를 확인한다 — 사거리 밖에서의 스윙은 서버가 조용히 버리므로(design §6.1)
     // 몬스터가 다가오기까지 홀드해도 비용은 시간뿐이다. 다람쥐/토끼 중 어느 쪽이 어그로를 물든 각자의
-    // 보상(4 / 7)이 레벨1의 10 EXP 문턱보다 작아, 이 한 번의 처치만으로는 의도치 않은 레벨업이 생길
-    // 수 없다.
+    // 보상(1 / 2, 2026-09-17 하향)이 레벨1의 20 EXP 문턱보다 작아, 이 한 번의 처치만으로는 의도치
+    // 않은 레벨업이 생길 수 없다. 아래 폴이 보는 aria-valuenow는 Math.round(ratio*100)이므로
+    // 다람쥐 한 마리도 1/20 = "5"로 올라간다 — 하향 후에도 "0"이 아님은 유지된다.
     await holdKey(client.page, "ArrowUp", 3_200);
     await holdKey(client.page, "ArrowLeft", 1_200);
 

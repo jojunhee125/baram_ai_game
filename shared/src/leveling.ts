@@ -19,12 +19,23 @@ export const HP_PER_LEVEL = 10;
 export const ATTACK_PER_LEVEL = 1;
 
 /**
- * EXP needed to go from `level` to `level + 1`, for `level` in `[1, LEVEL_CAP)`. Sums to roughly
- * 34,000 by `LEVEL_CAP` (design §11) — about 5,000 average-EXP kills, which is what the monster
- * `expReward` table (`monsterDefinitions.ts`) was reverse-tuned against.
+ * EXP needed to go from `level` to `level + 1`, for `level` in `[1, LEVEL_CAP)`. Sums to 68,881 by
+ * `LEVEL_CAP`.
+ *
+ * The coefficient was 10 (total 34,438) until 2026-09-17 (decisions.md "왕초보 사냥터 EXP·레벨 곡선
+ * 8배 하향"). Live play reported levelling as far too fast, and the diagnosis was that the starter
+ * field's `expReward` values sat too high against this curve — 4 EXP a squirrel against a 10 EXP
+ * first level meant three kills to reach level 2. The retune is deliberately split across both
+ * numbers: `monsterDefinitions.ts` dropped squirrel/rabbit/deer to 1/2/3, which is as low as a
+ * positive-integer reward can go, and the remaining factor of two had to come from here. The two
+ * together are 8x, and only that part which lives here also slows down every future field.
+ *
+ * `LEVEL_CAP` is therefore no longer reachable in the starter field in any sensible time (68,881
+ * squirrels) — intended, and the reason R07's themed zones have to carry rewards of their own
+ * rather than only tougher monsters.
  */
 export function expToNextLevel(level: number): number {
-  return Math.round(10 * level ** 1.7);
+  return Math.round(20 * level ** 1.7);
 }
 
 /**

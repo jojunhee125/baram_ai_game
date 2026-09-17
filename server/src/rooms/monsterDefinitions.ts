@@ -124,8 +124,15 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       aggroRadiusTiles: 2,
       leashRadiusTiles: 8,
       respawnDelayMs: 8000,
-      /** Phase W-1, decisions.md 2026-09-11: reverse-tuned so ~5,000 average kills clear LEVEL_CAP. */
-      expReward: 4,
+      /**
+       * 1 is the floor — `validateMonsterSpawnDefinitions` requires a positive integer, so the
+       * lowest monster in the game cannot be made cheaper than this. Was 4 until 2026-09-17
+       * (decisions.md "왕초보 사냥터 EXP·레벨 곡선 8배 하향"): 4 against the old 10 EXP first level
+       * meant three squirrels to reach level 2, and the starter field is the one place that must
+       * not pay well. The other half of the 8x lives in `expToNextLevel` (shared/src/leveling.ts),
+       * because this number had nowhere lower to go.
+       */
+      expReward: 1,
       loot: [
         { itemKey: "acorn", chance: 0.6, quantity: 1 },
         { itemKey: "copper-coin", chance: 0.25, quantity: 1 },
@@ -152,8 +159,8 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       aggroRadiusTiles: 2,
       leashRadiusTiles: 10,
       respawnDelayMs: 12000,
-      /** Phase W-1: squirrel(4) < rabbit(7) < deer(11) « boss(600), the hits-to-kill ordering §4.1 asks for. */
-      expReward: 7,
+      /** squirrel(1) < rabbit(2) < deer(3) « boss(600), the hits-to-kill ordering §4.1 asks for. Was 7 (2026-09-17 retune). */
+      expReward: 2,
       loot: [
         { itemKey: "carrot", chance: 0.55, quantity: 1 },
         { itemKey: "copper-coin", chance: 0.35, quantity: 1 },
@@ -188,8 +195,8 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       leashRadiusTiles: 10,
       /** Continues the den's respawn arithmetic (8000, 12000, +4000). */
       respawnDelayMs: 16000,
-      /** Phase W-1: squirrel(4) < rabbit(7) < deer(11) « boss(600). */
-      expReward: 11,
+      /** squirrel(1) < rabbit(2) < deer(3) « boss(600). Was 11 (2026-09-17 retune). */
+      expReward: 3,
       loot: [
         { itemKey: "herb", chance: 0.5, quantity: 1 },
         { itemKey: "copper-coin", chance: 0.3, quantity: 1 },
@@ -223,7 +230,14 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       /** Rabbit/deer's own value, reused rather than inventing a new one. */
       leashRadiusTiles: 10,
       respawnDelayMs: BOSS_RESPAWN_MS,
-      /** Phase W-1: far above deer(11), matching the same "the delay is a bigger number" move maxHp/respawnDelayMs already made. */
+      /**
+       * Far above deer, matching the same "the delay is a bigger number" move maxHp/respawnDelayMs
+       * already made. **Deliberately left at 600 by the 2026-09-17 retune** (user's explicit call)
+       * while the three field kinds dropped 4x: a 6-hour respawn means this cannot be farmed, so
+       * the one number in the table that is rate-limited by the clock rather than by the player is
+       * also the one that does not need to be cut. The gap is now 600 squirrels rather than 150 —
+       * the boss is the starter field's fastest levelling route by a wide margin, on purpose.
+       */
       expReward: 600,
       loot: [{ itemKey: "golden-helmet", chance: 0.25, quantity: 1 }],
     },
