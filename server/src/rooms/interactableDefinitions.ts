@@ -77,4 +77,42 @@ export const INTERACTABLE_DEFINITIONS: readonly InteractableDefinition[] = [
     // step carry straight through. docs/design-npc-movement-block-fix.md.
     blocksMovement: false,
   },
+  {
+    id: "plaza-shop-npc",
+    kind: InteractableKind.Npc,
+    // South-east corner of the interior (x=47 is the last interior column, y=25 the last interior
+    // row) — bounded by the border band on both S and E, the same "corner against two walls" dead
+    // end plaza-quiz-stand already uses, just the opposite corner. Clear of the south door
+    // (trigger (31,25)/(32,25), 16 tiles west) and of every avoided band in this file's header
+    // comment (spawn row 20, column 16, the column-31 route to the south door).
+    at: { room: "plaza", tiles: [{ tileX: 47, tileY: 25 }] },
+    title: "상점 (자리표시)",
+    body:
+      "회복 소모품과 기본 장비를 준비 중입니다.\n\n" +
+      "구매는 아직 열리지 않았습니다 — 정산 기능이 갖춰지면 이곳에서 살 수 있습니다.",
+    avatarSkin: 16, // 갈색 머리 / 빨강 상의 (assets/README.md 스킨표) — 안내 NPC(21)와 겹치지 않는 인상
+  },
+  {
+    id: "hunting-ground-return-npc",
+    kind: InteractableKind.Npc,
+    // Npc, not Notice, to match plaza-hunting-ground-npc's "a guide should be seen" choice rather
+    // than the static-board convention (link/notice/quiz) — a standing figure reads as a welcome
+    // right where a player's own south-door arrival (35,30) lands them, which a board blends into
+    // the scenery against. One tile east of the door/trail column (x35-36) so it never sits on the
+    // BFS'd path pass-f-qol.spec.ts and pass-g-tester-verification.spec.ts walk straight up/down
+    // that column; also clear of the room's own join-spawn spread (x33-37, y25-29,
+    // server/src/rooms/definitions.ts) and every monster's spawn-plus-wander box
+    // (monsterDefinitions.ts: nearest is hg-squirrel-04 at (41,24) wander 2, y22-26 only).
+    // Non-blocking, unlike every plaza object and despite sitting off the trail: this is the first
+    // object placed in a room that has monsters in it, and freezing movement there means a player
+    // a squirrel is already chasing gets held still while it hits them. Same rule the bag and the
+    // drop table follow in this room (`WorldScene.update`, docs/design-hunting-inventory.md §3.4)
+    // — a fight in progress must not stop because a panel is up. Read-and-close only, so nothing
+    // is lost by letting a step carry straight through (docs/design-npc-movement-block-fix.md).
+    blocksMovement: false,
+    at: { room: "hunting-ground", tiles: [{ tileX: 39, tileY: 29 }] },
+    title: "마을로 돌아가는 길",
+    body: "남쪽 문을 나가면 마을 광장입니다.\n\n다치셨다면 광장으로 돌아가 회복하세요.",
+    avatarSkin: 22, // 어두운 피부 / 갈색 머리 / 파랑 셔츠 (assets/README.md 스킨표) — 안내 NPC(21)·상점 NPC(16)와 겹치지 않는 인상
+  },
 ];

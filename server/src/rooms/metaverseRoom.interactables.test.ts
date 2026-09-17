@@ -45,10 +45,18 @@ if (plazaDefinition === undefined) {
 }
 const plaza = plazaDefinition;
 
+const huntingGroundDefinition = ROOM_DEFINITIONS.find((definition) => definition.name === "hunting-ground");
+if (huntingGroundDefinition === undefined) {
+  throw new Error("ROOM_DEFINITIONS has no hunting-ground row");
+}
+const huntingGround = huntingGroundDefinition;
+
 const LINK = definitionFor("plaza-link-board", InteractableKind.Link) as LinkInteractable;
 const NOTICE = definitionFor("plaza-notice-board", InteractableKind.Notice) as NoticeInteractable;
 const QUIZ = definitionFor("plaza-quiz-stand", InteractableKind.Quiz) as QuizInteractable;
 const NPC = definitionFor("plaza-hunting-ground-npc", InteractableKind.Npc) as NpcInteractable;
+const SHOP_NPC = definitionFor("plaza-shop-npc", InteractableKind.Npc) as NpcInteractable;
+const RETURN_NPC = definitionFor("hunting-ground-return-npc", InteractableKind.Npc) as NpcInteractable;
 /** Read from the quest table rather than repeated here — the panel quotes it verbatim. */
 const FIRST_QUEST = (() => {
   const [quest] = QUESTS_BY_GIVER.get(NPC.id) ?? [];
@@ -87,6 +95,7 @@ type Room = Awaited<ReturnType<ColyseusTestServer["createRoom"]>> & { state: Roo
 
 let testServer: ColyseusTestServer;
 let plazaMap: CollisionMap;
+let huntingGroundMap: CollisionMap;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -138,10 +147,10 @@ const STEPS: readonly { dir: Direction; dx: number; dy: number }[] = [
  * Tiles the walker must not cross on its way anywhere: another object would open a panel the
  * test never asked for, and a portal trigger would move it to a different room mid-walk.
  */
-function detours(exceptTile: TilePosition): Set<string> {
+function detours(exceptTile: TilePosition, roomName: string = plaza.name): Set<string> {
   const blocked = new Set<string>();
   for (const object of INTERACTABLE_DEFINITIONS) {
-    if (object.at.room !== plaza.name) {
+    if (object.at.room !== roomName) {
       continue;
     }
     for (const tile of object.at.tiles) {
@@ -149,7 +158,7 @@ function detours(exceptTile: TilePosition): Set<string> {
     }
   }
   for (const portal of PORTAL_DEFINITIONS) {
-    if (portal.from.room !== plaza.name) {
+    if (portal.from.room !== roomName) {
       continue;
     }
     for (const tile of portal.from.tiles) {
@@ -161,7 +170,12 @@ function detours(exceptTile: TilePosition): Set<string> {
 }
 
 /** Shortest tile path, so the walk tracks the real map rather than hard-coded coordinates. */
-function pathTo(from: TilePosition, to: TilePosition, blocked: Set<string>): Direction[] {
+function pathTo(
+  from: TilePosition,
+  to: TilePosition,
+  blocked: Set<string>,
+  map: CollisionMap,
+): Direction[] {
   const key = (x: number, y: number): string => `${x},${y}`;
   const goal = key(to.tileX, to.tileY);
   if (key(from.tileX, from.tileY) === goal) {
@@ -177,7 +191,7 @@ function pathTo(from: TilePosition, to: TilePosition, blocked: Set<string>): Dir
         const x = node.x + step.dx;
         const y = node.y + step.dy;
         const at = key(x, y);
-        if (cameFrom.has(at) || !plazaMap.isWalkable(x, y)) {
+        if (cameFrom.has(at) || !map.isWalkable(x, y)) {
           continue;
         }
         if (at !== goal && blocked.has(at)) {
@@ -196,10 +210,21 @@ function pathTo(from: TilePosition, to: TilePosition, blocked: Set<string>): Dir
   throw new Error(`no path from (${from.tileX},${from.tileY}) to (${to.tileX},${to.tileY})`);
 }
 
-async function walkTo(room: Room, client: ClientRoom, target: TilePosition): Promise<void> {
+async function walkTo(
+  room: Room,
+  client: ClientRoom,
+  target: TilePosition,
+  map: CollisionMap = plazaMap,
+  roomName: string = plaza.name,
+): Promise<void> {
   const player = room.state.players.get(client.sessionId);
   assert.ok(player);
-  for (const dir of pathTo({ tileX: player.tileX, tileY: player.tileY }, target, detours(target))) {
+  for (const dir of pathTo(
+    { tileX: player.tileX, tileY: player.tileY },
+    target,
+    detours(target, roomName),
+    map,
+  )) {
     client.send(ClientMessage.Move, { dir });
     await sleep(MOVE_COOLDOWN_MS);
   }
@@ -214,6 +239,7 @@ before(async () => {
   await gameServer.listen(INTERACTABLE_PORT);
   testServer = new ColyseusTestServer(gameServer);
   plazaMap = await new TiledMapLoader().load(plaza.mapKey);
+  huntingGroundMap = await new TiledMapLoader().load(huntingGround.mapKey);
 });
 
 after(async () => {
@@ -286,6 +312,20 @@ describe("MetaverseRoom — object markers in RoomState", () => {
     assert.ok(grand);
     const { room } = await joinRoom(grand.name);
     assert.deepEqual([...room.state.interactableMarkers], []);
+  });
+
+  it("publishes hunting-ground's own object tile, including the R03 return npc", async () => {
+    const { room } = await joinRoom(huntingGround.name);
+
+    const published = [...room.state.interactableMarkers]
+      .map((marker) => `${marker.tileX},${marker.tileY},${marker.kind}`)
+      .sort();
+    const expected = INTERACTABLE_DEFINITIONS.filter((object) => object.at.room === huntingGround.name)
+      .flatMap((object) => object.at.tiles.map((tile) => `${tile.tileX},${tile.tileY},${object.kind}`))
+      .sort();
+
+    assert.deepEqual(published, expected);
+    assert.deepEqual(expected, [`${RETURN_NPC.at.tiles[0]?.tileX},${RETURN_NPC.at.tiles[0]?.tileY},npc`]);
   });
 });
 
@@ -418,6 +458,47 @@ describe("MetaverseRoom — entering an object", () => {
       },
     ]);
     assert.deepEqual(bystanderInbox.objects, [], "an object is not broadcast to the room");
+  });
+
+  it("delivers the shop npc's placeholder content and no quest (R03 content, no purchase path)", async () => {
+    const { room, client, inbox } = await joinRoom(plaza.name);
+
+    await walkTo(room, client, tileOf(SHOP_NPC));
+    await waitUntil(() => inbox.objects.length > 0, "the shop npc payload");
+
+    assert.deepEqual(inbox.objects, [
+      {
+        kind: InteractableKind.Npc,
+        objectId: SHOP_NPC.id,
+        title: SHOP_NPC.title,
+        body: SHOP_NPC.body,
+        blocksMovement: true,
+        quests: undefined,
+      },
+    ]);
+    assert.equal(QUESTS_BY_GIVER.get(SHOP_NPC.id), undefined, "the shop npc gives no quest");
+    // The one rule this row must never break: no currency/price field anywhere on the wire.
+    assert.equal(JSON.stringify(inbox.objects).match(/price|cost|currency/i), null);
+  });
+
+  it("delivers the hunting-ground return npc's content from its own room", async () => {
+    const { room, client, inbox } = await joinRoom(huntingGround.name);
+
+    await walkTo(room, client, tileOf(RETURN_NPC), huntingGroundMap, huntingGround.name);
+    await waitUntil(() => inbox.objects.length > 0, "the return npc payload");
+
+    assert.deepEqual(inbox.objects, [
+      {
+        kind: InteractableKind.Npc,
+        objectId: RETURN_NPC.id,
+        title: RETURN_NPC.title,
+        body: RETURN_NPC.body,
+        // False, unlike every plaza object: this room has monsters, and a panel that froze the
+        // player would hold them still while one is hitting them (see the row's own comment).
+        blocksMovement: false,
+        quests: undefined,
+      },
+    ]);
   });
 
   it("stays quiet on every tile that is not an object", async () => {

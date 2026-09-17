@@ -3,6 +3,7 @@ import {
   ClientMessage,
   RoomState,
   ServerMessage,
+  type AcceptQuestRequest,
   type ChangeSkinRequest,
   type ChatBroadcast,
   type ChatRequest,
@@ -24,6 +25,7 @@ import {
   type PortalDenied,
   type PortalEntered,
   type PortalMarker,
+  type QuestState,
   type QuizAnswerRequest,
   type QuizResult,
   type Teleported,
@@ -121,6 +123,12 @@ export interface RoomEvents {
   onInteractableEntered?(event: InteractableEntered): void;
   /** Verdict on one {@link RoomConnection.sendQuizAnswer}, possibly after its panel has closed. */
   onQuizResult?(result: QuizResult): void;
+  /**
+   * One quest's stored state after it changed — an accept, a kill that counted, or the kill that
+   * finished it. Also fires once per already-accepted quest right after join, which is how a
+   * tracker built for this room learns what the account is already carrying (roadmap R03).
+   */
+  onQuestUpdated?(state: QuestState): void;
   /** The server warped the local player. Apply as an absolute position, never as a step. */
   onTeleported?(event: Teleported): void;
   /** Connection closed after a successful join — includes kick, server restart, network drop. */
@@ -148,6 +156,15 @@ export class RoomConnection {
   private leaving = false;
   private left = false;
   private pendingLifecycle: PendingLifecycle | null = null;
+  /**
+   * Quest updates that arrived before `attach()` had a tracker to draw them on. Unlike every other
+   * message here, these are caused by the *join* rather than by something the player did: the room
+   * hydrates an account's accepted quests the moment it has them and sends one per quest, which
+   * lands during the whole map-loading window this class is alive for and `attach()` is not. An
+   * unhandled Colyseus message is dropped, so without this queue a hop into a second room would
+   * show an empty quest tracker until the next kill.
+   */
+  private readonly pendingQuestUpdates: QuestState[] = [];
 
   private constructor(
     private readonly room: Room<unknown, RoomState>,
@@ -173,6 +190,7 @@ export class RoomConnection {
     readonly interactableMarkers: readonly InteractableMarkerPosition[],
   ) {
     this.bindLifecycle();
+    this.bindQuestUpdates();
   }
 
   /**
@@ -205,6 +223,7 @@ export class RoomConnection {
     this.bindMonsters();
     this.bindMessages();
     this.replayPendingLifecycle();
+    this.replayPendingQuestUpdates();
   }
 
   get sessionId(): string {
@@ -257,6 +276,15 @@ export class RoomConnection {
    */
   sendQuizAnswer(objectId: string, choiceIndex: number): void {
     this.room.send(ClientMessage.QuizAnswer, { objectId, choiceIndex } satisfies QuizAnswerRequest);
+  }
+
+  /**
+   * Accepts one quest by the id the NPC panel carried. Named rather than inferred from where we
+   * are standing, for {@link sendQuizAnswer}'s reason: the server keeps no interaction state and
+   * resolves the id against its own room-narrowed table, ignoring in silence one it does not hold.
+   */
+  sendAcceptQuest(questId: string): void {
+    this.room.send(ClientMessage.AcceptQuest, { questId } satisfies AcceptQuestRequest);
   }
 
   /**
@@ -404,6 +432,21 @@ export class RoomConnection {
   }
 
   /**
+   * Registered here rather than in {@link bindMessages}, and exactly once: this is the one message
+   * the server sends on its own initiative right after a join (see {@link pendingQuestUpdates}), so
+   * a handler that only exists from `attach()` onwards would miss the account's own quest state.
+   */
+  private bindQuestUpdates(): void {
+    this.room.onMessage(ServerMessage.QuestUpdated, (state: QuestState) => {
+      if (!this.attached) {
+        this.pendingQuestUpdates.push(state);
+        return;
+      }
+      this.events.onQuestUpdated?.(state);
+    });
+  }
+
+  /**
    * A drop between `connect()` and `attach()` (the whole map-loading window) would otherwise
    * vanish into the empty `this.events`, leaving a world that renders and predicts movement
    * against a socket the server never sees. One slot is enough: a room terminates once.
@@ -427,6 +470,24 @@ export class RoomConnection {
         return;
       }
       this.events.onError?.(code, message);
+    });
+  }
+
+  /**
+   * Deferred for {@link replayPendingLifecycle}'s reason, a different consumer of the same window:
+   * `WorldScene.create()` builds the panels these updates draw on *after* `attach()` returns, so a
+   * synchronous replay would deliver an account's quests to renderers that do not exist yet.
+   * Drained rather than kept, since every later update arrives through the live handler.
+   */
+  private replayPendingQuestUpdates(): void {
+    if (this.pendingQuestUpdates.length === 0) {
+      return;
+    }
+    const pending = this.pendingQuestUpdates.splice(0);
+    queueMicrotask(() => {
+      for (const state of pending) {
+        this.events.onQuestUpdated?.(state);
+      }
     });
   }
 

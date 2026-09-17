@@ -296,6 +296,24 @@
               <span class="visually-hidden">랜드마크</span>
             </button>
           </div>
+          <!--
+            Quest tracker (roadmap R03). In this column rather than pinned to a corner of its own:
+            it is the one place both skins already agree on — over the canvas here, the classic
+            sidebar under heritage.css — so the tracker follows the interface instead of needing a
+            placement rule per skin. Above the two foldable panels so it never moves when they open.
+
+            Rows are built by questTracker.ts from `quest:updated`, which the server sends once per
+            accepted quest at join and again on every change — so this bundle holds no quest text of
+            its own and an empty list means "nothing accepted", never "not loaded yet".
+
+            Polite live region: three kills is the whole of the first quest, so announcing each one
+            is a sentence a screen reader can keep up with rather than a stream.
+          -->
+          <section class="quests" id="quest-tracker" aria-label="퀘스트" hidden>
+            <p class="quests__head">퀘스트</p>
+            <ul class="quests__list" id="quest-tracker-list" aria-live="polite"></ul>
+          </section>
+
           <div class="minimap" id="minimap" hidden>
             <canvas class="minimap__canvas" id="minimap-canvas" role="img" aria-label="미니맵"></canvas>
           </div>

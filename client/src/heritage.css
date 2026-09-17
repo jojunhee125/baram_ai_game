@@ -82,7 +82,7 @@ body { background: #18130f; }
    "이동하지 못했습니다"가 가려진다. */
 .boss-vitals { left: calc((100% - var(--sidebar-width)) / 2); }
 .toasts { right: calc(var(--sidebar-width) + 8px); bottom: calc(var(--footer-height) + 8px); }
-.chat__log, .chat__input, .vitals, .boss-vitals, .minimap,
+.chat__log, .chat__input, .vitals, .boss-vitals, .minimap, .quests,
 .bag, .loot-table, .character-menu, .landmark-panel {
   background: #292117;
   color: #f4e9cd;
@@ -125,6 +125,16 @@ body { background: #18130f; }
 .vitals[data-attack="cooling"] .vitals__attack-status { color: #c7b797; }
 .vitals__cooldown { height: 6px; border: 1px solid #756044; border-radius: 0; }
 .vitals__cooldown-fill { background: #e3c782; }
+/* 퀘스트 트래커(R03)는 사이드바 안에 들어가므로 같은 목재 패널 계열로 맞춘다. 진행바는
+   .vitals__cooldown과 같은 처리 — 각진 테두리에 황색 채움. */
+.quests__head, .quests__objective { color: #c7b797; }
+.quests__title { color: #f4e9cd; }
+.quests__count { color: #e3c782; }
+.quests__track { height: 6px; border: 1px solid #756044; border-radius: 0; background: #17120d; }
+.quests__fill { border-radius: 0; background: #e3c782; }
+/* 완료는 색만이 아니라 "3 / 3"과 완료 문구가 함께 말한다 — 색은 확인용이다. */
+.quests__row[data-status="completed"] .quests__fill { background: #9fbf6a; }
+.quests__row[data-status="completed"] .quests__count { color: #9fbf6a; }
 .region-guide {
   position: absolute; left: 8px; top: 8px; z-index: 4;
   width: min(270px, 32%); padding: 10px 12px;

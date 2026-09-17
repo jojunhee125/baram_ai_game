@@ -29,6 +29,7 @@ import { Minimap, type MinimapView } from "../ui/minimap";
 import { buildMinimapTerrain } from "../ui/minimapTerrain";
 import { ObjectPanel } from "../ui/objectPanel";
 import { PlayerVitals } from "../ui/playerVitals";
+import { QuestTracker } from "../ui/questTracker";
 import { PortalDenialBanner } from "../ui/portalDenialBanner";
 import { ChatBubbles } from "../world/chatBubbles";
 import { createAvatarArt, type AvatarArt } from "../world/avatarArt";
@@ -132,6 +133,7 @@ export class WorldScene extends Phaser.Scene {
   private landmarkPanel: LandmarkPanel | null = null;
   private vitals: PlayerVitals | null = null;
   private bossVitals: BossVitals | null = null;
+  private questTracker: QuestTracker | null = null;
   private toasts: ItemToasts | null = null;
   private portalDenialBanner: PortalDenialBanner | null = null;
   private localPlayer: LocalPlayer | null = null;
@@ -173,6 +175,7 @@ export class WorldScene extends Phaser.Scene {
     this.landmarkPanel = null;
     this.vitals = null;
     this.bossVitals = null;
+    this.questTracker = null;
     this.toasts = null;
     this.portalDenialBanner = null;
     this.localPlayer = null;
@@ -266,6 +269,10 @@ export class WorldScene extends Phaser.Scene {
     // Not revealed here, unlike the panel above: a boss bar is hit-to-reveal, so a room with a
     // boss standing in it shows nothing until somebody trades a blow with it.
     this.bossVitals = new BossVitals();
+    // Before attach(), like the vitals above and unlike the panels below it: the room sends this
+    // account's accepted quests on its own right after the join, and RoomConnection holds those
+    // only until attach() (RoomConnection.pendingQuestUpdates). Reveals itself on the first row.
+    this.questTracker = new QuestTracker();
 
     this.connection.attach({
       onPlayerAdd: (sessionId, snapshot) => this.addPlayer(sessionId, snapshot),
@@ -314,6 +321,12 @@ export class WorldScene extends Phaser.Scene {
       onPortalDenied: (event) => this.portalDenialBanner?.show(event.message),
       onInteractableEntered: (event) => this.objectPanel?.open(event),
       onQuizResult: (result) => this.objectPanel?.showQuizResult(result),
+      onQuestUpdated: (state) => {
+        this.questTracker?.apply(state);
+        // Also to the panel, which only redraws if the giver's panel is the one open — an accept
+        // has to be answered where it was pressed, not only in the corner readout.
+        this.objectPanel?.applyQuestUpdate(state);
+      },
       onLeave: () => {
         // Not the leave we asked for; that one never reaches here (RoomConnection.leaving).
         // This is a drop mid-hop, which leave() then early-returns on — the hop still lands, so
@@ -335,8 +348,9 @@ export class WorldScene extends Phaser.Scene {
     const connection = this.connection;
     this.chat = new ChatPanel((text) => connection.sendChat(text));
     this.homeButton = new HomeButton(() => this.returnHome());
-    this.objectPanel = new ObjectPanel((objectId, choiceIndex) =>
-      connection.sendQuizAnswer(objectId, choiceIndex),
+    this.objectPanel = new ObjectPanel(
+      (objectId, choiceIndex) => connection.sendQuizAnswer(objectId, choiceIndex),
+      (questId) => connection.sendAcceptQuest(questId),
     );
     this.inventoryPanel = new InventoryPanel(
       (itemKey, slot) => connection.sendEquipItem(itemKey, slot),
@@ -677,6 +691,7 @@ export class WorldScene extends Phaser.Scene {
     this.landmarkPanel?.destroy();
     this.vitals?.destroy();
     this.bossVitals?.destroy();
+    this.questTracker?.destroy();
     this.toasts?.destroy();
     this.portalDenialBanner?.destroy();
     this.scene.start(WorldScene.KEY, { connection: next } satisfies WorldSceneData);

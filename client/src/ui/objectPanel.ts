@@ -1,7 +1,10 @@
 import {
   InteractableKind,
+  QuestStatus,
   type InteractableEntered,
   type LinkInteraction,
+  type NpcInteraction,
+  type QuestState,
   type QuizInteraction,
   type QuizResult,
 } from "@zep-test/shared";
@@ -24,6 +27,19 @@ interface OpenQuiz {
 }
 
 /**
+ * The nodes of one quest block on screen, kept so `quest:updated` patches the block in place
+ * instead of the panel reopening. The giver's own line never changes and is not held here.
+ */
+interface OpenQuest {
+  root: HTMLElement;
+  /** The objective while it is unmet, the giver's closing line once it is. */
+  objective: HTMLElement;
+  /** 수락 대기 · 진행 중 n / m · 완료 — the reading the accept button turns into. */
+  status: HTMLElement;
+  accept: HTMLButtonElement;
+}
+
+/**
  * The panel for every fixed object — link, notice and quiz. One panel rather than three: they
  * differ only in the body and the footer, they never open at once (the object that opens this is
  * the tile you are standing on), and three would mean three sets of markup, CSS and teardown.
@@ -40,9 +56,14 @@ export class ObjectPanel {
   private readonly link = document.querySelector<HTMLAnchorElement>("#object-panel-link")!;
   private readonly closeButton = document.querySelector<HTMLButtonElement>("#object-panel-close")!;
   private quiz: OpenQuiz | null = null;
+  /** The quest blocks currently drawn, by quest id. Empty for every kind but an NPC with offers. */
+  private readonly quests = new Map<string, OpenQuest>();
   private currentBlocksMovement = true;
 
-  constructor(private readonly sendAnswer: (objectId: string, choiceIndex: number) => void) {
+  constructor(
+    private readonly sendAnswer: (objectId: string, choiceIndex: number) => void,
+    private readonly sendAcceptQuest: (questId: string) => void,
+  ) {
     this.closeButton.addEventListener("click", this.handleClose);
     window.addEventListener("keydown", this.handleKey);
     // The DOM outlives the scene, so a successor built by a room hop inherits whatever the
@@ -68,6 +89,7 @@ export class ObjectPanel {
   open(payload: InteractableEntered): void {
     this.currentBlocksMovement = payload.blocksMovement;
     this.quiz = null;
+    this.quests.clear();
     this.body.replaceChildren();
     this.link.hidden = true;
     this.link.removeAttribute("href");
@@ -85,7 +107,7 @@ export class ObjectPanel {
         this.renderQuiz(payload);
         break;
       case InteractableKind.Npc:
-        this.renderNotice(payload);
+        this.renderNpc(payload);
         break;
       default:
         // A kind this bundle has no case for: the server serves the bundle but a browser can be
@@ -135,6 +157,19 @@ export class ObjectPanel {
     // No "다시 풀기": stepping off the tile and back on opens a fresh panel, which is the retry.
   }
 
+  /**
+   * Redraws one quest block if this panel is showing that quest, and ignores every other update.
+   * Updates arrive whether or not a panel is open — a kill in the hunting ground sends one with no
+   * NPC in sight — and the tracker, not this, is what always shows them.
+   */
+  applyQuestUpdate(state: QuestState): void {
+    const quest = this.quests.get(state.questId);
+    if (!quest) {
+      return;
+    }
+    this.drawQuestState(quest, state);
+  }
+
   close(): void {
     this.releaseFocus();
     this.root.hidden = true;
@@ -144,6 +179,7 @@ export class ObjectPanel {
     this.kind.textContent = "";
     this.heading.textContent = "";
     this.quiz = null;
+    this.quests.clear();
     this.currentBlocksMovement = true; // back to the safe default for whatever opens next
   }
 
@@ -179,6 +215,97 @@ export class ObjectPanel {
     // a markup-rendering path is not worth having at all when line breaks are all a notice needs.
     text.textContent = payload.body;
     this.body.append(text);
+  }
+
+  /**
+   * The guide's line, and under it whatever that guide is offering (roadmap R03). `quests` is
+   * absent for every NPC but the plaza guide today, and an NPC that offers nothing renders exactly
+   * what it did before this panel learned about quests.
+   */
+  private renderNpc(payload: NpcInteraction): void {
+    this.renderNotice(payload);
+    for (const quest of payload.quests ?? []) {
+      this.renderQuest(quest);
+    }
+  }
+
+  private renderQuest(state: QuestState): void {
+    const section = document.createElement("section");
+    section.className = "object__quest";
+
+    const title = document.createElement("h3");
+    title.className = "object__quest-title";
+    title.textContent = state.title;
+
+    // The giver's offer, drawn once: unlike the two lines below it, nothing the server later sends
+    // rewrites it. Same textContent + pre-wrap treatment renderNotice gives a notice body.
+    const summary = document.createElement("p");
+    summary.className = "object__text";
+    summary.textContent = state.summary;
+
+    const objective = document.createElement("p");
+    objective.className = "object__quest-objective";
+
+    // A live region, because accepting redraws this line rather than moving focus, and the button
+    // that did it is about to disappear — without this the panel would change with nothing said.
+    const status = document.createElement("p");
+    status.className = "object__quest-status";
+    status.setAttribute("role", "status");
+
+    const accept = document.createElement("button");
+    accept.type = "button";
+    accept.className = "object__quest-accept";
+    accept.textContent = "수락";
+    accept.addEventListener("click", () => this.acceptQuest(state.questId));
+
+    section.append(title, summary, objective, status, accept);
+    this.body.append(section);
+
+    const quest: OpenQuest = { root: section, objective, status, accept };
+    this.quests.set(state.questId, quest);
+    this.drawQuestState(quest, state);
+  }
+
+  /**
+   * The three readings one quest block ever has. Called for the state the panel opened on and again
+   * for every `quest:updated` that names it, so an accept, a kill and the kill that finishes it all
+   * land here rather than in three separate paths that have to agree.
+   */
+  private drawQuestState(quest: OpenQuest, state: QuestState): void {
+    quest.root.dataset.status = state.status;
+    const offered = state.status === QuestStatus.Offered;
+    quest.accept.hidden = !offered;
+    quest.accept.disabled = false;
+
+    if (state.status === QuestStatus.Completed) {
+      quest.objective.textContent = state.completionText;
+      quest.status.textContent = "완료";
+      return;
+    }
+    quest.objective.textContent = state.objectiveText;
+    quest.status.textContent = offered
+      ? "아직 수락하지 않았습니다."
+      : `진행 중 · ${state.killCount} / ${state.requiredCount}`;
+  }
+
+  /**
+   * Sends the accept and waits for the server's own `quest:updated` to redraw the block — the
+   * button never draws the accepted state itself. An accept the server ignores (an id this room
+   * does not offer) therefore leaves the block visibly un-accepted instead of lying about it.
+   *
+   * The button is disabled rather than removed while that round trip is out: the accept is
+   * idempotent server-side, but a second press before the reply is a wasted write, and leaving it
+   * pressable would say nothing was sent. A reply that never arrives is not a dead end — stepping
+   * off the tile and back on builds the block again, which is the same retry the quiz relies on.
+   */
+  private acceptQuest(questId: string): void {
+    const quest = this.quests.get(questId);
+    if (!quest || quest.accept.disabled) {
+      return;
+    }
+    quest.accept.disabled = true;
+    quest.status.textContent = "수락하는 중…";
+    this.sendAcceptQuest(questId);
   }
 
   private renderQuiz(payload: QuizInteraction): void {

@@ -324,6 +324,10 @@ body {
 /*
  * Vitals, top-left. Over the canvas, so the same fixed dark treatment .chat and .hud use rather
  * than the page's scheme. Click-through: it is a readout, and nothing in it is pressable.
+ *
+ * Stays `absolute` with its own top/left: heritage.css re-pins this panel to the sidebar footer
+ * (`top: auto; right: 0; bottom: 0`), which only works while those offsets are this element's own.
+ * Wrapping it in a positioned column silently un-pins it in the classic skin.
  */
 .vitals {
   position: absolute;
@@ -510,6 +514,103 @@ body {
   transform: scaleX(1);
   transition-property: transform;
   transition-timing-function: linear;
+}
+
+/*
+ * Quest tracker. A child of the .hud column rather than a panel pinned to a corner of its own:
+ * that column is the one place both skins agree on — top-right over the canvas in this sheet, the
+ * classic sidebar in heritage.css — so the tracker follows the interface instead of needing a
+ * second placement rule per skin. Click-through like the other readouts; accepting happens in the
+ * NPC panel, which is where the giver is.
+ */
+.quests {
+  align-self: stretch;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(20, 19, 26, 0.72);
+  color: #eceaf4;
+  pointer-events: none;
+}
+
+.quests__head {
+  margin: 0 0 var(--space-1);
+  color: rgba(236, 234, 244, 0.62);
+  font-size: 11px;
+  font-weight: 600;
+  /* Positive tracking, the treatment .vitals__label gets for the same kind of small label. */
+  letter-spacing: 0.06em;
+}
+
+.quests__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.quests__row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-1);
+}
+
+.quests__title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Tabular figures: this pair changes on every counted kill and must not reflow the row as it does. */
+.quests__count {
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.quests__track {
+  overflow: hidden;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(236, 234, 244, 0.14);
+}
+
+/* scaleX like every other bar here, and the interface accent rather than a state colour: progress
+   toward a goal is not a warning. */
+.quests__fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transform-origin: left center;
+  transform: scaleX(0);
+  transition: transform 200ms ease;
+}
+
+/* The objective in the server's words, or the giver's closing line once it is met. */
+.quests__objective {
+  margin: var(--space-1) 0 0;
+  color: rgba(236, 234, 244, 0.72);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  text-wrap: pretty;
+}
+
+/*
+ * Done. The count reading "3 / 3" is the same fact, so the colour is confirmation rather than the
+ * only signal — the row above also swaps to the completion line.
+ */
+.quests__row[data-status="completed"] .quests__fill {
+  background: #8ec97f;
+}
+
+.quests__row[data-status="completed"] .quests__count {
+  color: #8ec97f;
 }
 
 /*
@@ -1587,6 +1688,75 @@ body {
   color: rgba(236, 234, 244, 0.62);
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+/*
+ * One quest inside an NPC's panel, ruled off from the guide's own line above it: the panel is one
+ * conversation, and the offer is a second thing said in it rather than a second window.
+ */
+.object__quest {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid rgba(236, 234, 244, 0.16);
+}
+
+.object__quest-title {
+  margin: 0 0 var(--space-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.object__quest-objective {
+  margin: var(--space-2) 0 0;
+  color: rgba(236, 234, 244, 0.72);
+  font-size: 12px;
+  white-space: pre-wrap;
+  text-wrap: pretty;
+}
+
+/* 수락 대기 · 진행 중 n / m · 완료 — the state, in words, beside the bar the tracker draws. */
+.object__quest-status {
+  margin: var(--space-1) 0 0;
+  color: rgba(236, 234, 244, 0.62);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.object__quest[data-status="completed"] .object__quest-status {
+  color: #8ec97f;
+}
+
+/* The panel's one affirmative action, so it takes the accent .object__open uses for its own. */
+.object__quest-accept {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-height);
+  margin-top: var(--space-2);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: rgba(236, 234, 244, 0.06);
+  color: #eceaf4;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.object__quest-accept:hover:not(:disabled) {
+  background: rgba(236, 234, 244, 0.12);
+}
+
+.object__quest-accept:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Disabled only while an accept is in flight, so this reads as "sent" rather than "unavailable". */
+.object__quest-accept:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .object__choices {
