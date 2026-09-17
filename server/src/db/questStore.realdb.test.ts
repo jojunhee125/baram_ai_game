@@ -9,7 +9,7 @@ import { PostgresQuestStore } from "./questStore";
 /**
  * The half of `PostgresQuestStore` no stub can reach: whether two connections racing the same
  * `UPDATE` really do serialize on Postgres's own row lock the way
- * `docs/implementation-2026-09-16-quest-state.md` §동시성 claims, rather than on the stub's
+ * `docs/r03-quest-and-village.md` §동시성 claims, rather than on the stub's
  * single-threaded JS event loop, which cannot fake a genuine interleave. That doc marked this
  * `[needs verification]` — this file is what closes it.
  *

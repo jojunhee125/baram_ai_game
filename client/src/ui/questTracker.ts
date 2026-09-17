@@ -52,7 +52,7 @@ export class QuestTracker {
     row.count.textContent = `${state.killCount} / ${state.requiredCount}`;
     // Clamped, never trusted to be in range: the bar is drawn from two numbers the server owns, and
     // a requirement lowered by a deploy leaves stored rows whose count is above the new one
-    // (implementation-2026-09-16-quest-state.md, "남은 한계").
+    // (r03-quest-and-village.md, "남은 한계").
     const ratio =
       state.requiredCount > 0
         ? Math.max(0, Math.min(1, state.killCount / state.requiredCount))

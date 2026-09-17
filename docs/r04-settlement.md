@@ -72,7 +72,7 @@ fresh context tester가 구현자 자기검증과 다른 각도로 공격해 확
 
 ## 6. 검증 증거
 
-실제 PostgreSQL 16.15(WSL Ubuntu 컨테이너, `ZEP_TEST_DATABASE_URL` opt-in). 컨테이너 기동 절차는 [postgres 검증 기록](verification-2026-09-17-postgres-quest.md) §기동 절차와 동일하다.
+실제 PostgreSQL 16.15(WSL Ubuntu 컨테이너, `ZEP_TEST_DATABASE_URL` opt-in). 컨테이너 기동 절차는 [R03 문서](r03-quest-and-village.md) §4와 동일하다.
 
 ```
 npm test --workspace @zep-test/server   → 1117 tests / 1116 pass / 1 fail

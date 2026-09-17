@@ -5,7 +5,7 @@ import { holdKey } from "../helpers/input";
 import { joinRoom } from "../helpers/flows";
 
 /**
- * Coverage for the client half of roadmap R03 (docs/implementation-2026-09-17-quest-ui.md): the
+ * Coverage for the client half of roadmap R03 (docs/r03-quest-and-village.md): the
  * guide NPC's panel offers 첫 사냥 and can accept it, and the tracker under the vitals shows what
  * the account is carrying.
  *
