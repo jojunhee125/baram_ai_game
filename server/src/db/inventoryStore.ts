@@ -207,10 +207,36 @@ export class InMemoryInventoryStore implements InventoryStore {
     const slots = this.equippedByOwner.get(ownerKey);
     return Promise.resolve(slots?.delete(slot) ?? false);
   }
+
+  /**
+   * A synchronous peek at the live bag — `InMemoryCurrencyStore.peekBalance`'s own reason:
+   * `InMemorySettlementStore` (`settlementStore.ts`) composing `add` here would put an `await`
+   * between its idempotency check and the write that follows it, reopening the race that class's
+   * own doc comment rules out. Answers the store's own `Map` directly, not a copy — the one caller
+   * is trusted to read it and hand `pokeBag` a new one rather than mutate this one in place.
+   */
+  peekBag(ownerKey: string): ReadonlyMap<string, number> {
+    return this.bagsByOwner.get(ownerKey) ?? EMPTY_BAG;
+  }
+
+  /** The write half of {@link peekBag} — same caller, same reason. */
+  pokeBag(ownerKey: string, bag: ReadonlyMap<string, number>): void {
+    this.bagsByOwner.set(ownerKey, new Map(bag));
+  }
 }
 
+const EMPTY_BAG: ReadonlyMap<string, number> = new Map();
+
 export class PostgresInventoryStore implements InventoryStore {
-  constructor(private readonly pool: Pool) {}
+  /**
+   * `Pick<Pool, "query">` rather than `Pool` itself — `CurrencyStore`'s own reason
+   * (`currencyStore.ts`): `SettlementStore.settle` (`settlementStore.ts`, design
+   * §4 D3) constructs this over a checked-out `PoolClient` instead of the pool, so `add`,
+   * `grantOnce`, `equip` and `unequip` run inside its transaction. `PoolClient.query` has the
+   * same shape as `Pool.query`, so narrowing to just that method is what lets both be passed
+   * here without this store caring which one it got.
+   */
+  constructor(private readonly executor: Pick<Pool, "query">) {}
 
   async list(ownerKey: string): Promise<readonly InventoryRow[]> {
     assertUuidOwnerKey(ownerKey);
@@ -301,7 +327,7 @@ export class PostgresInventoryStore implements InventoryStore {
     // degraded" line) for a race that is normal, expected concurrent usage, not a fault. Two
     // sessions equipping into *different* slots never contend on this index at all (design §4).
     try {
-      const result = await this.pool.query<{ item_key: string }>(
+      const result = await this.executor.query<{ item_key: string }>(
         `WITH target AS (
            SELECT 1 FROM inventory_item WHERE owner_key = $1 AND item_key = $2
          ),
@@ -361,7 +387,7 @@ export class PostgresInventoryStore implements InventoryStore {
     values: readonly unknown[],
   ): Promise<{ rows: T[] }> {
     try {
-      const result = await this.pool.query<T>(sql, [...values]);
+      const result = await this.executor.query<T>(sql, [...values]);
       markDatabaseOk();
       return result;
     } catch (cause) {
