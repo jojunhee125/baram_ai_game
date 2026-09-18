@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  ATTACK_COOLDOWN_MS,
   ATTACK_PER_LEVEL,
   CLASS_DEFINITIONS,
   COMBAT_EXIT_MS,
@@ -13,7 +14,9 @@ import {
   PLAYER_ATTACK_DAMAGE,
   PLAYER_MAX_HP,
   PlayerClassKey,
+  SKILL_DEFINITIONS,
   ServerMessage,
+  SkillKey,
   classCodeFor,
   cumulativeExpForLevel,
   expToNextLevel,
@@ -23,7 +26,11 @@ import {
   type ClassDenied,
   type ExpGranted,
   type JoinOptions,
+  type MonsterHit,
+  type PlayerHealed,
   type PlayerHit,
+  type SkillDenied,
+  type SkillUsed,
   type TilePosition,
 } from "@zep-test/shared";
 import { InMemoryClassStore, type ClassStore } from "../db/classStore";
@@ -975,6 +982,466 @@ describe("VERIFY R05-a class multipliers and MP (docs/r05-classes-and-skills.md 
       assert.equal(denials.length, 1);
       assert.equal(denials[0]?.reason, "unknown-class");
       assert.equal(await store.getClass("owner-typo"), null);
+    } finally {
+      dispose(room);
+    }
+  });
+});
+
+// -- R05-b: skill execution contract ---------------------------------------------------------------
+
+function useSkill(
+  room: MetaverseRoom,
+  client: FakeClient,
+  skillKey: string,
+  targetSessionId?: string,
+  nonce = "n",
+): void {
+  room["handleUseSkill"](asRoomClient(client), { skillKey, targetSessionId, nonce });
+}
+
+async function classRoom(
+  classKey: PlayerClassKey,
+  spawns: readonly MonsterSpawnDefinition[] = [],
+): Promise<VerifyRoom> {
+  const store = new InMemoryClassStore();
+  await store.chooseOnce(`owner-${classKey}`, classKey);
+  return createRoom(spawns, { classStore: store });
+}
+
+describe("VERIFY R05-b skill execution contract (docs/r05-classes-and-skills.md D5/D6/D7/D8)", () => {
+  it("resolves guard-stance (warrior, self-target) end to end: charges MP and stamps its own cooldown", async () => {
+    const room = await classRoom(PlayerClassKey.Warrior);
+    try {
+      const client = join(room, "warrior", undefined, `owner-${PlayerClassKey.Warrior}`);
+      await flush();
+      const session = asRoomClient(client).userData!;
+      const definition = SKILL_DEFINITIONS[SkillKey.GuardStance];
+      if (definition.effect.kind !== "self-damage-reduction") {
+        throw new Error("fixture assumption: guard-stance is a self-damage-reduction skill");
+      }
+      const mpBefore = session.mp;
+
+      const before = Date.now();
+      useSkill(room, client, SkillKey.GuardStance);
+      const after = Date.now();
+
+      assert.equal(session.mp, mpBefore - definition.mpCost);
+      const cooldown = session.skillCooldowns.get(SkillKey.GuardStance);
+      assert.ok(cooldown !== undefined);
+      assert.ok(cooldown! >= before + definition.cooldownMs && cooldown! <= after + definition.cooldownMs);
+      assert.ok(session.stanceDamageReductionUntil >= before + definition.effect.durationMs);
+      assert.equal(session.stanceDamageReduction, definition.effect.damageReduction);
+      assert.equal(sentOfType<SkillDenied>(client, ServerMessage.SkillDenied).length, 0);
+      const used = sentOfType<SkillUsed>(client, ServerMessage.SkillUsed);
+      assert.equal(used.length, 1);
+      assert.equal(used[0]?.skillKey, SkillKey.GuardStance);
+      assert.equal(used[0]?.mpRemaining, session.mp, "the caster's own copy carries MP");
+      assert.equal(used[0]?.mpMax, CLASS_DEFINITIONS[PlayerClassKey.Warrior].maxMpBase);
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("the warrior's stance reduction composes multiplicatively with equipped armor, and stops applying once its deadline passes", async () => {
+    const room = await classRoom(PlayerClassKey.Warrior);
+    try {
+      const client = join(room, "tank", undefined, `owner-${PlayerClassKey.Warrior}`);
+      await flush();
+      const session = asRoomClient(client).userData!;
+      session.equippedItemKeys.armor = "leather-armor"; // 0.2 damageReduction
+      session.hp = 1000; // headroom so neither hit crosses into the death branch, which would clear the stance
+      session.stanceDamageReductionUntil = 5_000;
+      session.stanceDamageReduction = 0.5;
+
+      room["damagePlayer"]("tank", "any-monster", 100, 1_000); // stance active (1000 < 5000)
+      // stance clears immediately at its own deadline; a monster tick that lands one ms into
+      // the deadline must already read it as expired, not one tick later.
+      room["damagePlayer"]("tank", "any-monster", 100, 5_000);
+
+      const hits = sentOfType<PlayerHit>(client, ServerMessage.PlayerHit);
+      assert.equal(hits.length, 2);
+      // Combined: 1 - (1-0.2)(1-0.5) = 0.6 -> floor(100*0.4) = 40
+      assert.equal(hits[0]?.damage, 40, "armor and stance combine multiplicatively while the stance is active");
+      // Stance expired: only the 0.2 armor term remains -> floor(100*0.8) = 80
+      assert.equal(hits[1]?.damage, 80, "the stance term drops out once now reaches its own deadline");
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("resolves ambush (rogue, monster-target) end to end: damage equals totalAttack x attackMultiplier", async () => {
+    const faced = { tileX: OPEN_CENTRE.tileX + 1, tileY: OPEN_CENTRE.tileY };
+    const room = await classRoom(PlayerClassKey.Rogue, [squirrelAt("m", faced)]);
+    try {
+      const client = join(room, "rogue", undefined, `owner-${PlayerClassKey.Rogue}`);
+      await flush();
+      place(room, "rogue", OPEN_CENTRE);
+      const session = asRoomClient(client).userData!;
+      const definition = SKILL_DEFINITIONS[SkillKey.Ambush];
+      if (definition.effect.kind !== "monster-damage") {
+        throw new Error("fixture assumption: ambush is a monster-damage skill");
+      }
+      const expectedDamage = Math.max(
+        1,
+        Math.round(room["totalAttack"](session) * definition.effect.attackMultiplier),
+      );
+
+      useSkill(room, client, SkillKey.Ambush);
+
+      const hits = sentOfType<MonsterHit>(client, ServerMessage.MonsterHit);
+      assert.equal(hits.length, 1);
+      assert.equal(hits[0]?.damage, expectedDamage);
+      assert.equal(sentOfType<SkillDenied>(client, ServerMessage.SkillDenied).length, 0);
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("resolves fireball (shaman, monster-target) end to end at its own 4-tile range", async () => {
+    const faced = { tileX: OPEN_CENTRE.tileX + 4, tileY: OPEN_CENTRE.tileY };
+    const room = await classRoom(PlayerClassKey.Shaman, [squirrelAt("m", faced)]);
+    try {
+      const client = join(room, "shaman", undefined, `owner-${PlayerClassKey.Shaman}`);
+      await flush();
+      place(room, "shaman", OPEN_CENTRE);
+      const session = asRoomClient(client).userData!;
+      const definition = SKILL_DEFINITIONS[SkillKey.Fireball];
+      if (definition.effect.kind !== "monster-damage") {
+        throw new Error("fixture assumption: fireball is a monster-damage skill");
+      }
+      const expectedDamage = Math.max(
+        1,
+        Math.round(room["totalAttack"](session) * definition.effect.attackMultiplier),
+      );
+
+      useSkill(room, client, SkillKey.Fireball);
+
+      const hits = sentOfType<MonsterHit>(client, ServerMessage.MonsterHit);
+      assert.equal(hits.length, 1, "a target 4 tiles away is still in fireball's own range");
+      assert.equal(hits[0]?.damage, expectedDamage);
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("resolves heal (cleric, ally-target) end to end, reaching a different client than the caster", async () => {
+    const room = await classRoom(PlayerClassKey.Cleric);
+    try {
+      const caster = join(room, "cleric", undefined, `owner-${PlayerClassKey.Cleric}`);
+      const ally = join(room, "hurt-ally", undefined, "owner-ally");
+      await flush();
+      place(room, "cleric", OPEN_CENTRE);
+      place(room, "hurt-ally", { tileX: OPEN_CENTRE.tileX + 2, tileY: OPEN_CENTRE.tileY });
+      const allySession = asRoomClient(ally).userData!;
+      allySession.hp = 50; // 50/100, well clear of the max-HP clamp
+      const definition = SKILL_DEFINITIONS[SkillKey.Heal];
+      if (definition.effect.kind !== "ally-heal") {
+        throw new Error("fixture assumption: heal is an ally-heal skill");
+      }
+      const expectedHeal = Math.round(PLAYER_MAX_HP * definition.effect.healFractionOfTargetMaxHp);
+
+      useSkill(room, caster, SkillKey.Heal, "hurt-ally");
+
+      assert.equal(allySession.hp, 50 + expectedHeal);
+      const casterHeals = sentOfType<PlayerHealed>(caster, ServerMessage.PlayerHealed);
+      const allyHeals = sentOfType<PlayerHealed>(ally, ServerMessage.PlayerHealed);
+      assert.equal(casterHeals.length, 1);
+      assert.equal(allyHeals.length, 1);
+      assert.deepEqual(casterHeals[0], allyHeals[0]);
+      assert.equal(casterHeals[0]?.targetSessionId, "hurt-ally");
+      assert.equal(casterHeals[0]?.healAmount, expectedHeal);
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("clamps heal at the target's max HP — never an overheal", async () => {
+    const room = await classRoom(PlayerClassKey.Cleric);
+    try {
+      const caster = join(room, "cleric2", undefined, `owner-${PlayerClassKey.Cleric}`);
+      const ally = join(room, "almost-full", undefined, "owner-almost-full");
+      await flush();
+      place(room, "cleric2", OPEN_CENTRE);
+      place(room, "almost-full", { tileX: OPEN_CENTRE.tileX + 1, tileY: OPEN_CENTRE.tileY });
+      const allySession = asRoomClient(ally).userData!;
+      allySession.hp = PLAYER_MAX_HP - 10; // only 10 HP of headroom, less than the 30 the skill would grant
+
+      useSkill(room, caster, SkillKey.Heal, "almost-full");
+
+      assert.equal(allySession.hp, PLAYER_MAX_HP, "clamped to the cap, not over it");
+      const heals = sentOfType<PlayerHealed>(ally, ServerMessage.PlayerHealed);
+      assert.equal(heals[0]?.healAmount, 10, "only the actual headroom was healed");
+    } finally {
+      dispose(room);
+    }
+  });
+
+  // -- denial reasons -------------------------------------------------------------------------------
+
+  it("denies no-class before ever looking at the skill key, and stamps no cooldown", async () => {
+    const room = await createRoom([], { classStore: new InMemoryClassStore() });
+    try {
+      const client = join(room, "unchosen", undefined, "owner-unchosen");
+      await flush();
+      const session = asRoomClient(client).userData!;
+
+      useSkill(room, client, SkillKey.GuardStance);
+
+      const denials = sentOfType<SkillDenied>(client, ServerMessage.SkillDenied);
+      assert.equal(denials.length, 1);
+      assert.equal(denials[0]?.reason, "no-class");
+      assert.equal(session.skillCooldowns.size, 0, "a denial before the stamp costs nothing");
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("denies unknown-skill for a key with no definition, and for a key this class does not own", async () => {
+    const room = await classRoom(PlayerClassKey.Warrior);
+    try {
+      const client = join(room, "warrior2", undefined, `owner-${PlayerClassKey.Warrior}`);
+      await flush();
+
+      useSkill(room, client, "not-a-real-skill");
+      useSkill(room, client, SkillKey.Heal); // real skill, but the cleric's, not the warrior's
+
+      const denials = sentOfType<SkillDenied>(client, ServerMessage.SkillDenied);
+      assert.equal(denials.length, 2);
+      assert.equal(denials[0]?.reason, "unknown-skill");
+      assert.equal(denials[1]?.reason, "unknown-skill");
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("denies on-cooldown for a second cast inside the skill's own window, without spending MP twice", async () => {
+    const room = await classRoom(PlayerClassKey.Warrior);
+    try {
+      const client = join(room, "warrior3", undefined, `owner-${PlayerClassKey.Warrior}`);
+      await flush();
+      const session = asRoomClient(client).userData!;
+
+      useSkill(room, client, SkillKey.GuardStance);
+      const mpAfterFirstCast = session.mp;
+      useSkill(room, client, SkillKey.GuardStance);
+
+      assert.equal(session.mp, mpAfterFirstCast, "a denied recast must not spend MP a second time");
+      const denials = sentOfType<SkillDenied>(client, ServerMessage.SkillDenied);
+      assert.equal(denials.length, 1);
+      assert.equal(denials[0]?.reason, "on-cooldown");
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("denies insufficient-mp without stamping the cooldown", async () => {
+    const room = await classRoom(PlayerClassKey.Warrior);
+    try {
+      const client = join(room, "warrior4", undefined, `owner-${PlayerClassKey.Warrior}`);
+      await flush();
+      const session = asRoomClient(client).userData!;
+      session.mp = 0;
+
+      useSkill(room, client, SkillKey.GuardStance);
+
+      const denials = sentOfType<SkillDenied>(client, ServerMessage.SkillDenied);
+      assert.equal(denials.length, 1);
+      assert.equal(denials[0]?.reason, "insufficient-mp");
+      assert.equal(session.skillCooldowns.size, 0, "a denial before the stamp costs nothing");
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("denies no-target for a monster skill in a room with no monsters, but still stamps the cooldown and spares the MP", async () => {
+    const room = await classRoom(PlayerClassKey.Rogue); // no spawns at all -> hasMonsters === false
+    try {
+      const client = join(room, "rogue2", undefined, `owner-${PlayerClassKey.Rogue}`);
+      await flush();
+      const session = asRoomClient(client).userData!;
+      const mpBefore = session.mp;
+
+      useSkill(room, client, SkillKey.Ambush);
+
+      const denials = sentOfType<SkillDenied>(client, ServerMessage.SkillDenied);
+      assert.equal(denials.length, 1);
+      assert.equal(denials[0]?.reason, "no-target");
+      assert.equal(session.mp, mpBefore, "an unresolved target must never be charged MP");
+      assert.equal(session.skillCooldowns.get(SkillKey.Ambush) !== undefined, true, "the cooldown is spent regardless");
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("denies no-target for an ally skill with no targetSessionId, and for one that resolves to nobody in this room", async () => {
+    const room = await classRoom(PlayerClassKey.Cleric);
+    try {
+      const client = join(room, "cleric3", undefined, `owner-${PlayerClassKey.Cleric}`);
+      await flush();
+
+      useSkill(room, client, SkillKey.Heal); // no targetSessionId at all
+
+      const denials = sentOfType<SkillDenied>(client, ServerMessage.SkillDenied);
+      assert.equal(denials.length, 1);
+      assert.equal(denials[0]?.reason, "no-target");
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("denies out-of-range for an ally beyond the skill's own reach", async () => {
+    const room = await classRoom(PlayerClassKey.Cleric);
+    try {
+      const caster = join(room, "cleric4", undefined, `owner-${PlayerClassKey.Cleric}`);
+      const ally = join(room, "far-ally", undefined, "owner-far-ally");
+      await flush();
+      place(room, "cleric4", OPEN_CENTRE);
+      place(room, "far-ally", { tileX: OPEN_CENTRE.tileX + 5, tileY: OPEN_CENTRE.tileY }); // heal's range is 3
+      const session = asRoomClient(caster).userData!;
+      const mpBefore = session.mp;
+
+      useSkill(room, caster, SkillKey.Heal, "far-ally");
+
+      const denials = sentOfType<SkillDenied>(caster, ServerMessage.SkillDenied);
+      assert.equal(denials.length, 1);
+      assert.equal(denials[0]?.reason, "out-of-range");
+      assert.equal(session.mp, mpBefore);
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("denies target-dead for an ally at 0 HP", async () => {
+    const room = await classRoom(PlayerClassKey.Cleric);
+    try {
+      const caster = join(room, "cleric5", undefined, `owner-${PlayerClassKey.Cleric}`);
+      const ally = join(room, "downed-ally", undefined, "owner-downed-ally");
+      await flush();
+      place(room, "cleric5", OPEN_CENTRE);
+      place(room, "downed-ally", OPEN_CENTRE);
+      asRoomClient(ally).userData!.hp = 0;
+      const session = asRoomClient(caster).userData!;
+      const mpBefore = session.mp;
+
+      useSkill(room, caster, SkillKey.Heal, "downed-ally");
+
+      const denials = sentOfType<SkillDenied>(caster, ServerMessage.SkillDenied);
+      assert.equal(denials.length, 1);
+      assert.equal(denials[0]?.reason, "target-dead");
+      assert.equal(session.mp, mpBefore);
+    } finally {
+      dispose(room);
+    }
+  });
+
+  // -- D5: independent cooldown budgets --------------------------------------------------------------
+
+  it("a skill never consumes or checks lastAttackAt, in either direction", async () => {
+    const room = await classRoom(PlayerClassKey.Warrior);
+    try {
+      const client = join(room, "warrior5", undefined, `owner-${PlayerClassKey.Warrior}`);
+      await flush();
+      const session = asRoomClient(client).userData!;
+      // Just attacked, well inside ATTACK_COOLDOWN_MS — if a skill wrongly checked this, it would
+      // be denied on-cooldown even though its own, separate budget is untouched.
+      session.lastAttackAt = Date.now();
+      const lastAttackBefore = session.lastAttackAt;
+
+      useSkill(room, client, SkillKey.GuardStance);
+
+      assert.equal(sentOfType<SkillDenied>(client, ServerMessage.SkillDenied).length, 0, "a fresh auto-attack must never gate a skill");
+      assert.equal(session.lastAttackAt, lastAttackBefore, "a skill must never write lastAttackAt");
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("an attack never consumes or checks any skill cooldown, in either direction", async () => {
+    const faced = { tileX: OPEN_CENTRE.tileX + 1, tileY: OPEN_CENTRE.tileY };
+    const room = await classRoom(PlayerClassKey.Warrior, [squirrelAt("m", faced)]);
+    try {
+      const client = join(room, "warrior6", undefined, `owner-${PlayerClassKey.Warrior}`);
+      await flush();
+      place(room, "warrior6", OPEN_CENTRE);
+      face(room, "warrior6", Direction.Right);
+      const session = asRoomClient(client).userData!;
+      // guard-stance deep on cooldown — if handleAttack wrongly consulted this, the swing below
+      // would be silently dropped even though ATTACK_COOLDOWN_MS itself was never touched.
+      const farFuture = Date.now() + 999_999;
+      session.skillCooldowns.set(SkillKey.GuardStance, farFuture);
+
+      attack(room, client, 0);
+
+      assert.equal(room.state.monsters.has("m"), false, "the swing must land — a skill cooldown must never gate it");
+      assert.equal(session.skillCooldowns.get(SkillKey.GuardStance), farFuture, "an attack must never touch a skill's cooldown");
+    } finally {
+      dispose(room);
+    }
+  });
+
+  // -- anchor invariant -------------------------------------------------------------------------------
+
+  it("leaves an unchosen account's attack exactly at PLAYER_ATTACK_DAMAGE after the R05-b changes", async () => {
+    const faced = { tileX: OPEN_CENTRE.tileX + 1, tileY: OPEN_CENTRE.tileY };
+    const room = await createRoom([rabbitAt("m", faced)]);
+    try {
+      const client = join(room, "plain-attacker");
+      place(room, "plain-attacker", OPEN_CENTRE);
+      face(room, "plain-attacker", Direction.Right);
+
+      attack(room, client, 0);
+
+      const runtime = room["monsterRuntimes"].get("m");
+      assert.ok(runtime);
+      assert.equal(runtime.hp, PLAYER_ATTACK_DAMAGE * 2 - PLAYER_ATTACK_DAMAGE, "unchanged by pickAttackTarget's new radius parameter");
+    } finally {
+      dispose(room);
+    }
+  });
+
+  // -- death refills MP and clears any active stance -------------------------------------------------
+
+  it("refills MP to its max on death, and clears an active stance deadline", async () => {
+    const room = await classRoom(PlayerClassKey.Warrior);
+    try {
+      const client = join(room, "warrior7", undefined, `owner-${PlayerClassKey.Warrior}`);
+      await flush();
+      const session = asRoomClient(client).userData!;
+      session.mp = 1;
+      session.hp = 5;
+      session.stanceDamageReductionUntil = Date.now() + 999_999;
+      session.stanceDamageReduction = 0.5;
+
+      kill(room, "warrior7", 999, 1_000); // far more than session.hp -> death branch
+
+      assert.equal(session.mp, room["totalMaxMp"](session), "MP is full on death, HP's own rule");
+      assert.equal(session.stanceDamageReductionUntil, 0, "death clears an active stance the way it resets HP");
+    } finally {
+      dispose(room);
+    }
+  });
+
+  // -- D3: MP never reaches an onlooker ----------------------------------------------------------------
+
+  it("omits mpRemaining/mpMax entirely from the onlooker's copy of SkillUsed", async () => {
+    const room = await classRoom(PlayerClassKey.Warrior);
+    try {
+      const caster = join(room, "warrior8", undefined, `owner-${PlayerClassKey.Warrior}`);
+      const onlooker = join(room, "onlooker", undefined, "owner-onlooker");
+      await flush();
+      place(room, "warrior8", OPEN_CENTRE);
+      place(room, "onlooker", OPEN_CENTRE);
+
+      useSkill(room, caster, SkillKey.GuardStance);
+
+      const casterCopy = sentOfType<SkillUsed>(caster, ServerMessage.SkillUsed);
+      const onlookerCopy = sentOfType<SkillUsed>(onlooker, ServerMessage.SkillUsed);
+      assert.equal(casterCopy.length, 1);
+      assert.equal(onlookerCopy.length, 1);
+      assert.equal(Object.hasOwn(casterCopy[0]!, "mpRemaining"), true, "the caster's own copy carries MP");
+      assert.equal(Object.hasOwn(onlookerCopy[0]!, "mpRemaining"), false, "an onlooker must never receive the number");
+      assert.equal(Object.hasOwn(onlookerCopy[0]!, "mpMax"), false, "an onlooker must never receive the number");
     } finally {
       dispose(room);
     }

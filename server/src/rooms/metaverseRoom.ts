@@ -33,10 +33,12 @@ import {
   QuestStatus,
   RoomState,
   ServerMessage,
+  SKILL_DEFINITIONS,
   VIEW_RADIUS_TILES,
   classCodeFor,
   cumulativeExpForLevel,
   isPlayerClassKey,
+  isSkillKey,
   levelForExp,
   remainingExpToNextLevel,
   type AcceptQuestRequest,
@@ -59,6 +61,7 @@ import {
   type MoveRejected,
   type MoveRequest,
   type PlayerClassKey,
+  type PlayerHealed,
   type PlayerHit,
   type PortalDenied,
   type PortalEntered,
@@ -68,10 +71,15 @@ import {
   type SellItemRequest,
   type ShopDenied,
   type ShopOffer,
+  type SkillDenialReason,
+  type SkillDenied,
+  type SkillKey,
+  type SkillUsed,
   type Teleported,
   type TilePosition,
   type UnequipItemRequest,
   type UseItemRequest,
+  type UseSkillRequest,
   type WarpToLandmarkRequest,
 } from "@zep-test/shared";
 import type { BossStateStore } from "../db/bossStateStore";
@@ -277,6 +285,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   private readonly attackTargetBuffer: string[] = [];
   /** "Players who can see this monster" — the `MonsterHit` fan-out's query and nothing else. */
   private readonly hitAudienceBuffer: string[] = [];
+  /** "Players who can see this caster" — the `SkillUsed` fan-out's query and nothing else. */
+  private readonly skillAudienceBuffer: string[] = [];
   private readonly monstersInRange = new Set<string>();
   /** Rebuilt per monster per tick; the array itself is reused, the entries are not worth pooling. */
   private readonly monsterTargets: MonsterTarget[] = [];
@@ -419,6 +429,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     });
     this.onMessage(ClientMessage.ChooseClass, (client: RoomClient, message: ChooseClassRequest) => {
       this.handleChooseClass(client, message);
+    });
+    this.onMessage(ClientMessage.UseSkill, (client: RoomClient, message: UseSkillRequest) => {
+      this.handleUseSkill(client, message);
     });
 
     // Last, and only where there is something to simulate. A room with no monster *rows* stays
@@ -632,6 +645,12 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       // agree without the call. `hydrateClassCache` raises this once a class is known.
       mp: 0,
       playerClass: null,
+      // No skill has ever been cast, `lastAttackAt: 0`'s own placeholder shape — an empty map reads
+      // as "every skill off cooldown", exactly like a fresh `lastAttackAt` reads as "off cooldown".
+      skillCooldowns: new Map(),
+      // 0 (the epoch) reads as "no stance active" against any real `now` — `equippedDamageReduction`.
+      stanceDamageReductionUntil: 0,
+      stanceDamageReduction: 0,
       lastDamagedAt: 0,
       // Hydration supplies the initial value; account subscriptions keep every active session current.
       totalExp: 0,
@@ -1058,6 +1077,174 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       this.applyChosenClass(session, player, stored);
     }
     this.sendClassChanged(client, session, player);
+  }
+
+  /**
+   * One `skill:use` attempt (roadmap R05-b, design `docs/r05-classes-and-skills.md` D5/D6/D7/D8).
+   * Validation is ordered cheapest-first (`docs/decisions.md` 2026-09-18 R05-b 미결 3) and the
+   * cooldown is stamped *before* the target is resolved — {@link handleAttack}'s own reasoning for
+   * stamping before the target search ("허공에 휘두르면 초당 maxMessagesPerSecond번의 근접 질의를
+   * 살 수 있다"), which bites harder here since a miss also costs a `SkillDenied` reply. MP is
+   * charged only once resolution has actually succeeded: a missing target is something the client
+   * could not have known in advance, so it costs the cooldown but never the resource.
+   */
+  private handleUseSkill(client: RoomClient, message: UseSkillRequest): void {
+    const session = client.userData;
+    const player = this.state.players.get(client.sessionId);
+    if (!session || !player) {
+      return;
+    }
+    const skillKeyRaw = message?.skillKey;
+    const nonce = typeof message?.nonce === "string" ? message.nonce : "";
+    const deny = (reason: SkillDenialReason): void => {
+      client.send(ServerMessage.SkillDenied, {
+        skillKey: typeof skillKeyRaw === "string" ? skillKeyRaw : "",
+        reason,
+        nonce,
+      } satisfies SkillDenied);
+    };
+
+    if (session.playerClass === null) {
+      deny("no-class");
+      return;
+    }
+    const classDefinition = CLASS_DEFINITIONS[session.playerClass];
+    if (!isSkillKey(skillKeyRaw) || !classDefinition.skillKeys.includes(skillKeyRaw)) {
+      deny("unknown-skill");
+      return;
+    }
+    const skillKey = skillKeyRaw;
+    const definition = SKILL_DEFINITIONS[skillKey];
+
+    const now = Date.now();
+    const cooldownDeadline = session.skillCooldowns.get(skillKey) ?? 0;
+    if (now < cooldownDeadline) {
+      deny("on-cooldown");
+      return;
+    }
+    if (session.mp < definition.mpCost) {
+      deny("insufficient-mp");
+      return;
+    }
+
+    // Stamped now, before any spatial query below — a denial past this point still costs the
+    // cooldown, exactly as a swing that reaches nothing costs `handleAttack`'s own cooldown.
+    const cooldownUntil = now + definition.cooldownMs;
+    session.skillCooldowns.set(skillKey, cooldownUntil);
+
+    switch (definition.effect.kind) {
+      case "self-damage-reduction": {
+        // `target: "self"` — no spatial query, D6's table: "지명 안 함, 검증 없음".
+        session.mp -= definition.mpCost;
+        session.stanceDamageReductionUntil = now + definition.effect.durationMs;
+        session.stanceDamageReduction = definition.effect.damageReduction;
+        this.broadcastSkillUsed(client, session, player, skillKey, cooldownUntil, undefined);
+        return;
+      }
+      case "monster-damage": {
+        // A room with no monster index at all is `no-target`, not a crash (`docs/decisions.md`
+        // 2026-09-18 R05-b 미결 4 — skills work in every room, monster-target ones just find nothing
+        // outside a hunting ground).
+        if (!this.hasMonsters) {
+          deny("no-target");
+          return;
+        }
+        const monsterId = this.pickAttackTarget(player, definition.rangeInTiles);
+        if (monsterId === null) {
+          deny("no-target");
+          return;
+        }
+        session.mp -= definition.mpCost;
+        // Derived from `totalAttack`, never a parallel damage formula (design §2 D4).
+        const damage = Math.max(1, Math.round(this.totalAttack(session) * definition.effect.attackMultiplier));
+        this.applyMonsterDamage(client, session, monsterId, damage, now);
+        this.broadcastSkillUsed(client, session, player, skillKey, cooldownUntil, undefined);
+        return;
+      }
+      case "ally-heal": {
+        const targetSessionId = message?.targetSessionId;
+        if (typeof targetSessionId !== "string") {
+          deny("no-target");
+          return;
+        }
+        const targetClient = this.clientsBySession.get(targetSessionId);
+        const targetSession = targetClient?.userData;
+        const targetPlayer = this.state.players.get(targetSessionId);
+        if (!targetClient || !targetSession || !targetPlayer) {
+          deny("no-target");
+          return;
+        }
+        if (chebyshevDistance(player, targetPlayer) > definition.rangeInTiles) {
+          deny("out-of-range");
+          return;
+        }
+        if (targetSession.hp <= 0) {
+          deny("target-dead");
+          return;
+        }
+        session.mp -= definition.mpCost;
+        const targetMaxHp = this.totalMaxHp(targetSession);
+        // Clamped to the target's max — `ItemDefinition.consumable.healAmount`'s own "never an
+        // overheal" rule, applied against a target that may not be the caster.
+        const healAmount = Math.max(
+          0,
+          Math.min(Math.round(targetMaxHp * definition.effect.healFractionOfTargetMaxHp), targetMaxHp - targetSession.hp),
+        );
+        targetSession.hp += healAmount;
+        const healed: PlayerHealed = {
+          targetSessionId,
+          healAmount,
+          hpRemaining: targetSession.hp,
+          hpMax: targetMaxHp,
+        };
+        // Two different clients (design §2 D8) — the target for their own vitals bar, the caster
+        // to know the cast actually landed and for how much.
+        client.send(ServerMessage.PlayerHealed, healed);
+        if (targetClient !== client) {
+          targetClient.send(ServerMessage.PlayerHealed, healed);
+        }
+        this.broadcastSkillUsed(client, session, player, skillKey, cooldownUntil, targetSessionId);
+        return;
+      }
+    }
+  }
+
+  /**
+   * The `SkillUsed` fan-out common to every effect — viewers within VIEW_RADIUS_TILES of the
+   * caster see the cast, {@link MonsterHit}'s own audience shape, but only the caster's own copy
+   * carries `mpRemaining`/`mpMax` (design §3 D3 — nobody else's MP is anybody else's business). The
+   * onlooker copy is built without those two keys at all, not merely set to `undefined`, so the
+   * number never actually crosses the wire to anyone but the caster.
+   */
+  private broadcastSkillUsed(
+    client: RoomClient,
+    session: PlayerSession,
+    caster: Player,
+    skillKey: SkillKey,
+    cooldownUntil: number,
+    targetSessionId: string | undefined,
+  ): void {
+    const base: SkillUsed = {
+      skillKey,
+      casterSessionId: client.sessionId,
+      targetSessionId,
+      cooldownUntil,
+    };
+    for (const sessionId of this.proximityIndex.within(caster, VIEW_RADIUS_TILES, this.skillAudienceBuffer)) {
+      const viewer = this.clientsBySession.get(sessionId);
+      if (viewer === undefined) {
+        continue;
+      }
+      if (sessionId === client.sessionId) {
+        viewer.send(ServerMessage.SkillUsed, {
+          ...base,
+          mpRemaining: session.mp,
+          mpMax: this.totalMaxMp(session),
+        } satisfies SkillUsed);
+      } else {
+        viewer.send(ServerMessage.SkillUsed, base);
+      }
+    }
   }
 
   /**
@@ -2149,17 +2336,35 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // swinging at thin air would buy `maxMessagesPerSecond` proximity queries a second.
     session.lastAttackAt = now;
 
-    const monsterId = this.pickAttackTarget(player);
+    const monsterId = this.pickAttackTarget(player, ATTACK_RANGE_TILES);
     if (monsterId === null) {
       return;
     }
+    this.applyMonsterDamage(client, session, monsterId, this.totalAttack(session), now);
+  }
+
+  /**
+   * The shared "a monster takes damage" tail of {@link handleAttack} and {@link handleUseSkill}'s
+   * monster-targeted skills (ambush/fireball, roadmap R05-b design §2 D8) — `MonsterHit` fan-out,
+   * last-hit bookkeeping and the kill branch (loot/EXP/quest advance) are the same whether the blow
+   * was a sword swing or a fireball, so this is the one place either lands. `monsterId` is assumed
+   * already resolved and alive by the caller ({@link pickAttackTarget}'s own guarantee — the index
+   * holds only the living); a runtime/monster miss here is defensive only, `handleAttack`'s own
+   * silent-return shape for a target that turned out to be gone.
+   */
+  private applyMonsterDamage(
+    client: RoomClient,
+    session: PlayerSession,
+    monsterId: string,
+    damage: number,
+    now: number,
+  ): void {
     const runtime = this.monsterRuntimes.get(monsterId);
     const monster = this.state.monsters.get(monsterId);
     if (!runtime || !monster) {
       return;
     }
 
-    const damage = this.totalAttack(session);
     runtime.hp -= damage;
     // Overwritten on every hit, not only the killing one: the last person to connect is who the
     // drops belong to, and holding the account as well as the session is what makes the grant
@@ -2202,14 +2407,17 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   }
 
   /**
-   * What a swing lands on: the living monster within ATTACK_RANGE_TILES that the attacker is
-   * facing, else the nearest one, ties broken by monster id. Null when the swing reaches nothing.
+   * What a swing (or a monster-target skill) lands on: the living monster within `rangeInTiles`
+   * that the attacker is facing, else the nearest one, ties broken by monster id. Null when nothing
+   * is reached. `rangeInTiles` is the caller's own reach — `ATTACK_RANGE_TILES` for a swing,
+   * `SkillDefinition.rangeInTiles` for a skill (roadmap R05-b design §2 D6) — this method has no
+   * opinion of its own on how far anything should reach.
    *
    * The tie-break is not cosmetic — two monsters sharing a tile is reachable (they do not block
    * each other any more than they block players), and an order that came out of a hash map would
    * make the same fight play out differently on two runs and untestably on either.
    */
-  private pickAttackTarget(player: Player): string | null {
+  private pickAttackTarget(player: Player, rangeInTiles: number): string | null {
     const step = STEP_BY_DIRECTION[player.facing as Direction];
     const facedX = player.tileX + step.dx;
     const facedY = player.tileY + step.dy;
@@ -2217,7 +2425,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     let bestId: string | null = null;
     let bestFaced = false;
     let bestDistance = 0;
-    for (const monsterId of this.monsterIndex.within(player, ATTACK_RANGE_TILES, this.attackTargetBuffer)) {
+    for (const monsterId of this.monsterIndex.within(player, rangeInTiles, this.attackTargetBuffer)) {
       // The index holds only the living — `killMonster` removes the entry — so this lookup is
       // really about reading the position; a miss would mean the two had drifted apart.
       const monster = this.state.monsters.get(monsterId);
@@ -3020,8 +3228,14 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
    * below exists to prevent for a *single* slot. Each `rᵢ < 1` keeps the combined result `< 1` too,
    * however many slots contribute, so armor/helmet/cloak can share this one pool safely once any
    * of them actually carries the axis (today, only `leather-armor`'s armor slot does).
+   *
+   * The warrior's `guard-stance` skill (roadmap R05-b, design §2 D7 — "새 감소 체계를 만들지 않고
+   * 시한부 항을 그 결합에 하나 더 넣는다") folds into this exact combination as one more `rᵢ` term
+   * rather than a damage-reduction axis of its own, live only while `now` has not yet passed
+   * {@link PlayerSession.stanceDamageReductionUntil} — nothing clears it eagerly when it lapses,
+   * this check simply stops including it.
    */
-  private equippedDamageReduction(session: PlayerSession): number {
+  private equippedDamageReduction(session: PlayerSession, now: number): number {
     let remainingFraction = 1;
     for (const slot of EQUIPMENT_SLOTS) {
       const itemKey = session.equippedItemKeys[slot];
@@ -3033,6 +3247,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       if (ratio !== undefined) {
         remainingFraction *= 1 - ratio;
       }
+    }
+    if (now < session.stanceDamageReductionUntil) {
+      remainingFraction *= 1 - session.stanceDamageReduction;
     }
     return 1 - remainingFraction;
   }
@@ -3058,7 +3275,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       this.addBossCombatant(runtime, sessionId);
     }
 
-    const reduction = this.equippedDamageReduction(session);
+    const reduction = this.equippedDamageReduction(session, now);
     // Floored rather than rounded, and never below 1: a hit that reduces to nothing would make an
     // equipped player literally unkillable, which is a different feature than "hits less hard".
     const appliedDamage = reduction > 0 ? Math.max(1, Math.floor(damage * (1 - reduction))) : damage;
@@ -3082,6 +3299,15 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     }
     this.leaveBossCombat(sessionId, now);
     session.hp = this.totalMaxHp(session);
+    // MP refills the same way HP does on death (roadmap R05-b, `docs/decisions.md` 2026-09-18
+    // R05-b 미결 2) — death is a same-room home warp, not a room change, so without this an
+    // MP-spending class would be the only one to come back from a death with an empty resource
+    // bar, an unannounced extra penalty on top of the existing EXP one. The stance deadline is
+    // cleared alongside it: a death that already resets HP to full and the account's position is
+    // the same "fresh start" moment a temporary combat buff should not survive either, and once
+    // the deadline is 0 the magnitude field below is inert regardless of its stale value.
+    session.mp = this.totalMaxMp(session);
+    session.stanceDamageReductionUntil = 0;
     // The existing message for "the server moved you without you walking", rather than a death
     // message of its own: the home warp already proved that path, and the client reads
     // `hpRemaining === 0` on the hit above as the death itself.

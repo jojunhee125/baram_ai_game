@@ -14,6 +14,7 @@ import {
   type Direction,
   type PlayerClassKey,
   type RoomState,
+  type SkillKey,
   type TilePosition,
 } from "@zep-test/shared";
 
@@ -627,6 +628,29 @@ export interface PlayerSession {
    * exists to close.
    */
   currencyBalance: number;
+  /**
+   * Per-skill deadline (roadmap R05-b, `docs/r05-classes-and-skills.md` D5), {@link lastAttackAt}'s
+   * own rule kept in a **separate** budget: a skill never consumes or checks the auto-attack
+   * cooldown and vice versa, because either direction would let one buy the other's headroom
+   * (`lastWarpAt`'s own reasoning above). Sized by skill key rather than a single number because a
+   * class could gain a second skill later (`ClassDefinition.skillKeys` already allows it); today
+   * every class has exactly one entry to ever hold. Absent for a skill never yet cast, which reads
+   * the same as "off cooldown" — there is no deadline to compare against.
+   */
+  skillCooldowns: Map<SkillKey, number>;
+  /**
+   * Deadline through which {@link stanceDamageReduction} applies — the warrior's `guard-stance`
+   * effect (design §2 D7), folded into `MetaverseRoom.equippedDamageReduction`'s existing
+   * multiplicative combination rather than a second damage-reduction axis of its own. `0` (the
+   * epoch) reads as "no stance active" against any real `now`, so nothing needs to eagerly clear it
+   * when it lapses — `equippedDamageReduction` simply stops including it once `now` passes this.
+   */
+  stanceDamageReductionUntil: number;
+  /**
+   * The reduction fraction active until {@link stanceDamageReductionUntil} — set alongside it by
+   * `handleUseSkill`, and only ever read while that deadline has not yet passed.
+   */
+  stanceDamageReduction: number;
 }
 
 /**

@@ -246,6 +246,105 @@ $ npm --prefix client run build       → ✓ 89 modules transformed, built in 4
 ### 남은 한계
 
 - **선택 패널의 육안 확인을 하지 않았다.** 스타일 근거는 `heritage.css` 대조로 확인했지만 두 스킨 중 어느 쪽도 실제로 띄워 보지 않았다. `zep_client_verification_harness`가 기록한 headless 오탐 6종을 고려하면 이 항목은 **사용자 화면 확인**으로만 닫힌다.
-- **사망 시 MP는 리셋되지 않는다.** HP는 사망 시 `totalMaxHp`로 즉시 회복되지만(기존 동작) MP는 그 지점을 건드리지 않았다 — 이번 범위에 MP를 소비하는 경로(스킬)가 전혀 없어 관찰 가능한 차이가 없다. R05-b가 스킬을 붙이기 전에 재검토할 것.
+- ~~**사망 시 MP는 리셋되지 않는다.**~~ → **R05-b에서 해소**(§7, `decisions.md` 2026-09-18 R05-b 미결 2): 사망 시 MP도 HP처럼 가득 찬다. R05-a 시점에는 MP를 소비하는 경로가 없어 관찰 가능한 차이가 없었고, 스킬이 붙는 R05-b에서 재검토하기로 남겨 둔 항목이었다.
 - **스킬(R05-b)은 이번 범위에 없다.** `skillCooldowns` 맵, `skill:use` 경로, 4개 핵심 스킬은 전혀 구현하지 않았다 — 설계 문서 §3의 "R05-a 종료 시점에 스킬을 쓰는 호출자가 없는 것이 정상" 그대로.
 - 수치(배율·MP·회복 비율)는 전부 §5 질문 2에 따라 구현자가 판단해 채운 provisional 값이다 — R06 성장 CLI 이전에는 근거 자료가 없다는 사실 자체가 설계 의도다.
+
+## 7. R05-b 구현 (2026-09-18)
+
+`decisions.md` 2026-09-18 착수 승인 범위(D5·D6·D7·D8, 미결 4건 확정) 그대로 구현했다. 서버·shared뿐이고 클라이언트 호출부는 없다 — R05-a가 "호출자 없는 상태가 정상"으로 끝난 것과 같은 구조(§3).
+
+### 변경 파일
+
+- `shared/src/skills.ts`(신규) — `SkillKey`, `SkillEffect`(판별 유니온: `self-damage-reduction`/`monster-damage`/`ally-heal`), `SkillDefinition`, `SKILL_DEFINITIONS`(직업당 스킬 1개, 수치는 구현자 판단), `isSkillKey`.
+- `shared/src/classes.ts` — `ClassDefinition.skillKeys: readonly SkillKey[]` 추가, 4개 직업 각각 자기 스킬 1개씩 연결.
+- `shared/src/index.ts` — `skills.ts` re-export.
+- `shared/src/protocol.ts` — `ClientMessage.UseSkill`/`UseSkillRequest`, `ServerMessage.SkillUsed`/`SkillDenied`/`PlayerHealed`와 그 페이로드 타입, `SkillDenialReason`.
+- `server/src/rooms/contracts.ts` — `PlayerSession.skillCooldowns`(`Map<SkillKey, number>`), `PlayerSession.stanceDamageReductionUntil`/`stanceDamageReduction`.
+- `server/src/rooms/metaverseRoom.ts`:
+  - `onCreate`에 `class:choose` 옆으로 `skill:use` 등록.
+  - `onJoin`에서 `skillCooldowns: new Map()`, `stanceDamageReductionUntil: 0`, `stanceDamageReduction: 0` 초기화 — `lastAttackAt: 0`/`mp: 0`과 같은 자리, 같은 이유.
+  - `pickAttackTarget`을 반경 인자로 일반화(D6) — 얼굴 방향→최단거리→id 순서의 tie-break은 그대로, 호출부(`handleAttack`은 `ATTACK_RANGE_TILES`, `handleUseSkill`은 `SkillDefinition.rangeInTiles`)만 갈라졌다.
+  - `handleAttack`의 "몬스터가 피해를 입는" 꼬리(런타임 조회·`MonsterHit` 팬아웃·킬 분기의 loot/EXP/퀘스트)를 `applyMonsterDamage`로 추출 — `handleAttack`과 `handleUseSkill`의 몬스터-대상 스킬(급습·화염구)이 공유한다. 스킬 피해는 별도 메시지 없이 그대로 `MonsterHit`을 탄다(D8).
+  - `equippedDamageReduction`이 `now` 인자를 받아 전사 방어 태세를 장비 감소와 같은 곱셈 결합에 한 항 더 넣는다(D7) — `damagePlayer`가 유일한 호출자.
+  - `damagePlayer`의 사망 분기에 MP 전량 회복 + 활성 방어 태세 해제(`stanceDamageReductionUntil = 0`) 추가 — 아래 "사망 시 MP" 절 참고.
+  - 신규 `handleUseSkill`(검증 순서는 미결 3 그대로: 세션/플레이어 존재 → `no-class` → `unknown-skill` → `on-cooldown` → `insufficient-mp` → **쿨다운 선차감** → 대상 해석(`no-target`/`out-of-range`/`target-dead`) → **MP 청구** → 적용 → 전송)과 `broadcastSkillUsed`(D3 — 시전자 본인 사본에만 `mpRemaining`/`mpMax`를 아예 다른 속성 집합으로 실어 보낸다, `undefined`로 지우는 방식이 아니라).
+- `server/src/rooms/levelSystem.test.ts` — 기존 anchor-invariant 테스트 파일에 R05-b 전용 `describe` 블록 추가(아래 검증 절 참고). 새 테스트 파일을 만들지 않았다(작업 지시).
+- `docs/r05-classes-and-skills.md` — 이 절.
+
+### D7 수치와 그 근거
+
+`SKILL_DEFINITIONS`(전부 provisional, R06 성장 CLI 이전 근거 자료 없음 — `CLASS_DEFINITIONS`의 선례 그대로):
+
+| 스킬 | 직업 | 대상 | 사거리 | MP | 쿨다운 | 효과 |
+|---|---|---|---|---|---|---|
+| `guard-stance` | 전사 | 자기 | — | 8 | 12,000ms | 50% 피해감소, 4,000ms |
+| `ambush` | 도적 | 몬스터 | 1 | 10 | 4,000ms | `totalAttack` × 4 |
+| `fireball` | 주술사 | 몬스터 | 4 | 18 | 1,500ms | `totalAttack` × 2.5 |
+| `heal` | 도사 | 아군/자기 | 3 | 20 | 5,000ms | 대상 `totalMaxHp`의 30%, 오버힐 없음 |
+
+제약이 실제로 수치를 좁힌 지점(브리핑이 요구한 것 그대로):
+
+- **주술사가 두 번보다 많이 화염구를 쓸 수 있어야 한다** — `maxMpBase` 100 / `mpCost` 18 = 마르기 전 5.5회. 통과.
+- **화염구 자체 DPS가 평타 DPS를 터무니없이 넘으면 안 된다** — 레벨1 `totalAttack(주술사) = round(4×1.3) = 5`. 평타 DPS ≈ 5 / 0.6s ≈ 8.3/s. 화염구 DPS ≈ round(5×2.5)=13 / 1.5s ≈ 8.7/s — 같은 자릿수, 절대 배수가 아니다. 원거리라는 이점이 대가이지 순수 딜 배수가 아니게 맞췄다.
+- 급습(도적)은 반대로 "1회 고배율, DPS는 평타보다 낮음"으로 뒀다 — `round(5×4)=20` / 4s = 5/s < 평타 8.3/s. 오프너지 DPS 대체가 아니다.
+- 방어 태세 8 MP는 `maxMpBase` 30의 4분의 1강 — "낮음"을 지키면서도 공짜는 아니게. 12s 쿨다운(`ATTACK_COOLDOWN_MS`의 20배)은 상시 방어 스택이 아니라 순간 완화 도구로 남긴다.
+- 치유 30%는 레벨1 HP(100)의 30 — `COMBAT_RECOVERY_FRACTION_PER_TICK`(틱당 3%)의 자연 회복을 무의미하게 만들지 않으면서 전투 중 의미 있는 한 방이 되게.
+
+### 미결 3(빗나간 스킬의 쿨다운/MP 비대칭) 구현
+
+`handleUseSkill`은 쿨다운을 대상 해석 **이전에** 찍고, MP는 대상 해석이 **성공한 뒤에만** 차감한다 — `no-target`/`out-of-range`/`target-dead`로 거절된 시도는 쿨다운을 잃지만 MP는 그대로다. 테스트 "denies no-target for a monster skill in a room with no monsters, but still stamps the cooldown and spares the MP"·"denies out-of-range…"·"denies target-dead…"가 이 비대칭을 양쪽 다 확인한다. `no-class`/`unknown-skill`/`on-cooldown`/`insufficient-mp`는 쿨다운 선차감보다 앞이므로 아무 비용도 없다 — 대응 테스트가 `skillCooldowns.size === 0`을 확인한다.
+
+### 미결 4(몬스터 없는 방) 구현
+
+`handleUseSkill`의 `monster-damage` 분기가 `this.hasMonsters === false`를 `pickAttackTarget` 호출 전에 걸러 `no-target`으로 거절한다 — 몬스터 인덱스 자체가 없는 방에서 그 인덱스를 조회하는 크래시를 만들지 않는다. `self`/`ally` 대상 스킬은 이 가드를 타지 않으므로 광장에서도 그대로 동작한다.
+
+### D8 명세와의 사소한 불일치 1건 — `SkillDenied`에 `nonce` 포함
+
+설계 문서 §2 D8의 와이어 블록은 `skill:denied { skillKey, reason }`만 적었지만, 바로 아래 산문이 "`nonce`는 `SkillDenied`를 어느 시도에 대한 거절인지 붙이기 위한 상관 키"라고 명시한다 — 상관 키가 되려면 거절 응답 자체에 실려야 하므로, 산문의 명시적 목적을 따라 `SkillDenied.nonce`를 추가했다. 코드 블록의 누락을 그대로 옮기지 않은 것이지 설계 의도를 벗어난 게 아니다.
+
+### `skills.ts`를 별도 파일로 둔 것 — D7 "한 파일" 문구의 정제
+
+D7은 "수치는 `classDefinitions.ts` 한 파일의 명시 필드로 둔다"고 적었다. `shared/src/skills.ts`를 새로 만든 이유는 D5가 이미 `skillCooldowns`를 스킬 키로 사이징해 두 번째 스킬의 자리를 만들어 뒀기 때문이다 — 그 두 번째 스킬이 실제로 생기는 자리가 바로 이 파일이고, `ClassDefinition.skillKeys: readonly SkillKey[]`가 직업↔스킬을 연결한다. 모든 수치는 여전히 정확히 한 곳(스킬마다 하나뿐인 `SkillDefinition`)에만 있다 — "한 파일" 문구가 지키려던 것(수치를 코드 전역에 흩지 않는다)은 그대로이고, 자리만 클래스 모양에서 스킬 모양으로 옮겼다.
+
+### 검증 (실제 출력)
+
+```
+$ npm --prefix shared run typecheck
+> tsc --noEmit
+(에러 0)
+
+$ npm --prefix server run typecheck
+> tsc --noEmit
+(에러 0)
+
+$ npm --prefix server test
+ℹ tests 1130
+ℹ suites 228
+ℹ pass 1130
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 42173.4885
+```
+
+`server/src/rooms/levelSystem.test.ts`에 추가한 R05-b 전용 19케이스(4스킬 각각 종단 검증, 방어 태세의 장비 감소와의 곱셈 결합과 만료, 치유의 오버힐 클램프, 7개 거절 사유 전부, D5 양방향 독립성 2건, 미선택 계정 anchor 불변, 사망 시 MP 전량 회복 + 태세 해제, 방관자 사본에 MP 부재)은 위 1,130개 안에 포함되어 있다 — 단독 실행(`npx tsx --test src/rooms/levelSystem.test.ts`)은 이 파일 전체 53 pass / 0 fail(R05-a 9케이스 포함).
+
+**회귀 확인(되돌려서 실패까지 확인, 2건 모두 수행):**
+
+1. D5 독립성 — `handleUseSkill`의 쿨다운 검사에 `now - session.lastAttackAt < ATTACK_COOLDOWN_MS`를 임시로 덧붙이자 "a skill never consumes or checks lastAttackAt, in either direction"이 정확히 그 1건만 실패했다(`AssertionError: a fresh auto-attack must never gate a skill, 1 !== 0`). 되돌리자 53/53 통과로 복귀.
+2. 방관자 MP 비노출 — `broadcastSkillUsed`의 분기 조건을 임시로 `if (true)`로 바꿔 모두에게 MP를 실어 보내자 "omits mpRemaining/mpMax entirely from the onlooker's copy of SkillUsed"가 정확히 그 1건만 실패했다(`AssertionError: an onlooker must never receive the number, true !== false`). 되돌리자 53/53 통과로 복귀.
+
+### 실행하지 않은 검증과 이유
+
+- **클라이언트 e2e 전체 스위트는 이 머신에서 완주하지 못했다 — 메모리 부족이지 회귀가 아니다.** 세 번 시도했다: ① 하니스가 "critically low memory"로 중단 ② 23 실패 / 72 통과 · 49.9분(기준선 95 통과 / 0 실패 · 5.6분) ③ 실패 spec 3개만 재실행 → 15 실패 / 10 통과 · 24.5분. 실패 원문은 전부 `Test timeout of 60000ms exceeded` + `locator.click: Target page, context or browser has been closed`이고 **단정 불일치는 0건** — 브라우저가 죽고 뒤가 연쇄로 무너진 형태다. 실패 목록에 `client/src`와만 관계있는 순수 DOM 테스트(채팅 포커스 키바인딩, 아바타 피커 방향키 clamp)가 섞여 있는데 이번 변경은 `client/src` 0줄이고, 이 변경이 실제로 건드린 사망 분기의 전용 spec(`phase-x2-death-notice.spec.ts`)은 통과했다. 실행 전 2567/5173에 남아 있던 묵은 dev 서버는 정리했다(`reuseExistingServer` 때문에 안 치우면 구버전 서버로 초록불이 뜬다). **메모리 여유가 있을 때 1회 재실행해 이 항목을 닫을 것** — `decisions.md` 2026-09-18 R05-b 결과 항목 참조.
+- **fresh context tester 재검증**은 이 세션의 범위 밖이다(`docs/decisions.md` 2026-09-18 검증 절 — "구현자 단위 테스트 + fresh context tester 재검증 2단"). 구현자 단위 테스트만 이 보고에 포함된다.
+- 알려진 기존 실패 2건(`progressStore.test.ts` 실DB 팔, `phase-x2-death-notice.spec.ts` e2e teardown)은 재현·재보고하지 않았다 — 이번 범위와 무관.
+
+### 남은 한계
+
+- **PvP 경로 부재는 코드 구조로 보장했지만 grep 재확인은 검증자 몫이다** — 아군 대상 스킬(`heal`)이 대상의 `hp`를 깎는 코드 경로가 `handleUseSkill`에 전혀 없음을 구현 중 직접 확인했으나(§ 브리핑의 "리뷰어가 grep할 것"), 독립적인 재확인은 하지 않았다.
+- **밸런스 수치는 전부 provisional**이다(위 표) — R06 성장 CLI 이전에는 근거 자료가 없다는 사실 자체가 설계 의도(D7).
+- **`nonce`는 원장에 남지 않는다**(설계 §2 D8) — 재전송 방어는 쿨다운이 담당하고, `nonce`는 오직 `SkillDenied` 상관용이다. 멱등 키가 아니므로 같은 `nonce`로 두 번 보내도 두 번째 요청은 쿨다운에 걸려 거절될 뿐, 별도의 멱등 처리는 없다(의도된 것).
+- **R05-c(클라이언트 — MP 게이지·단축키·시전 표현)는 이번 범위가 아니다.** 스킬을 실제로 쓰는 호출자가 아직 없다 — R05-a 종료 시점과 같은 구조.

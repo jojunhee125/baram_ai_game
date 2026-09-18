@@ -94,6 +94,16 @@ export const ClientMessage = {
    * is idempotent by construction), so there is nothing for a nonce to correlate.
    */
   ChooseClass: "class:choose",
+  /**
+   * Casts one skill (roadmap R05-b, design `docs/r05-classes-and-skills.md` D5/D6/D8). The client
+   * names no target for a monster or self skill — {@link ClientMessage.Attack}'s own "the server
+   * picks it, there is no monster to name that is not there" — only an ally-target skill (today,
+   * `heal`) fills {@link UseSkillRequest.targetSessionId}, D6's table. `nonce` is not an idempotency
+   * key the way {@link ClientMessage.BuyItem}'s is (a skill is never settled or written to a
+   * ledger, `docs/decisions.md` 2026-09-18 R05-b) — it exists only to correlate a {@link
+   * SkillDenied} answer to the attempt it refuses.
+   */
+  UseSkill: "skill:use",
 } as const;
 
 export type ClientMessage = (typeof ClientMessage)[keyof typeof ClientMessage];
@@ -225,6 +235,19 @@ export interface ChooseClassRequest {
   classKey: string;
 }
 
+/**
+ * See {@link ClientMessage.UseSkill}. `skillKey` is untyped `string` on the wire, {@link
+ * ChooseClassRequest.classKey}'s own reason — the server validates it against this session's class,
+ * not the client. `targetSessionId` is present only for an ally-target skill; a monster or self
+ * skill ignores it if the client sends one anyway.
+ */
+export interface UseSkillRequest {
+  skillKey: string;
+  targetSessionId?: string;
+  /** Client-generated correlation key for this one attempt — see {@link ClientMessage.UseSkill}. */
+  nonce: string;
+}
+
 export interface ClientMessagePayload {
   [ClientMessage.Move]: MoveRequest;
   [ClientMessage.Chat]: ChatRequest;
@@ -251,6 +274,7 @@ export interface ClientMessagePayload {
   [ClientMessage.SellItem]: SellItemRequest;
   [ClientMessage.UseItem]: UseItemRequest;
   [ClientMessage.ChooseClass]: ChooseClassRequest;
+  [ClientMessage.UseSkill]: UseSkillRequest;
 }
 
 export const ServerMessage = {
@@ -284,6 +308,16 @@ export const ServerMessage = {
   ClassChanged: "class:changed",
   /** roadmap R05-a — a class:choose request was refused, {@link ShopDenied}'s precedent. */
   ClassDenied: "class:denied",
+  /**
+   * roadmap R05-b — a `skill:use` resolved. Sent to every viewer within VIEW_RADIUS_TILES of the
+   * caster, {@link MonsterHit}'s own audience shape, so the cast is visible the same way a swing
+   * is. Skill damage itself still rides {@link MonsterHit}, not this message (design §2 D8).
+   */
+  SkillUsed: "skill:used",
+  /** roadmap R05-b — a `skill:use` request was refused, {@link ShopDenied}'s precedent. */
+  SkillDenied: "skill:denied",
+  /** roadmap R05-b — an ally-heal skill restored HP, sent to both the caster and the target. */
+  PlayerHealed: "player:healed",
 } as const;
 
 export type ServerMessage = (typeof ServerMessage)[keyof typeof ServerMessage];
@@ -781,6 +815,74 @@ export interface ClassDenied {
   reason: "unknown-class" | "already-chosen";
 }
 
+/**
+ * A `skill:use` resolved (roadmap R05-b, design §2 D8). `mpRemaining`/`mpMax` ride along only in
+ * the caster's own copy — {@link ClassChanged}'s "nobody but the owner needs to see it" rule
+ * applied to MP a second time (design §3 D3) — so onlookers get a copy of this message with those
+ * two keys entirely absent, not merely `undefined`. `targetSessionId` is set only for an ally-heal
+ * cast; a monster or self skill leaves it unset and relies on {@link MonsterHit}/the cast animation
+ * to say what was targeted.
+ */
+export interface SkillUsed {
+  skillKey: string;
+  casterSessionId: string;
+  targetSessionId?: string;
+  cooldownUntil: number;
+  mpRemaining?: number;
+  mpMax?: number;
+}
+
+/**
+ * The reasons `handleUseSkill` can refuse a {@link ClientMessage.UseSkill} (design §2 D8, checked
+ * in this order — `docs/decisions.md` 2026-09-18 R05-b 미결 3):
+ *
+ * - `no-class` — the account has not chosen a class yet, so it has no skills at all.
+ * - `unknown-skill` — `skillKey` names no real skill, or one this session's class does not have.
+ * - `on-cooldown` — this skill's own cooldown (independent of every other skill's and of the
+ *   auto-attack's, design §2 D5) has not elapsed.
+ * - `insufficient-mp` — the account does not have `SkillDefinition.mpCost` MP to spend.
+ * - `no-target` — a monster-target skill found nothing in range (including a room with no monsters
+ *   at all), or an ally-target skill named no `targetSessionId`, or one that resolves to nobody in
+ *   this room.
+ * - `out-of-range` — an ally-target skill's named target exists in this room but is further than
+ *   `SkillDefinition.rangeInTiles` away.
+ * - `target-dead` — an ally-target skill's named target exists and is in range, but is not alive.
+ */
+export type SkillDenialReason =
+  | "no-class"
+  | "unknown-skill"
+  | "on-cooldown"
+  | "insufficient-mp"
+  | "no-target"
+  | "out-of-range"
+  | "target-dead";
+
+/**
+ * A {@link ClientMessage.UseSkill} request was refused, {@link ShopDenied}'s own "a refusal needs a
+ * message of its own" shape. `nonce` echoes the request's own — unlike {@link ShopDenied}, which
+ * never needs to (a shop retry reuses the same nonce and the settlement store itself is the source
+ * of truth) — because a skill is answered synchronously and a client casting in quick succession
+ * needs to know which attempt this denial is about (design §2 D8's own stated purpose for `nonce`).
+ */
+export interface SkillDenied {
+  skillKey: string;
+  reason: SkillDenialReason;
+  nonce: string;
+}
+
+/**
+ * An ally-heal skill resolved (design §2 D8). Sent to both the caster and the target — two
+ * different clients, unlike every other unicast message in this file — since neither one is
+ * redundant: the target needs it for their own vitals bar and the caster needs it to know the cast
+ * actually landed and for how much, the same feedback {@link MonsterHit} gives an attacker.
+ */
+export interface PlayerHealed {
+  targetSessionId: string;
+  healAmount: number;
+  hpRemaining: number;
+  hpMax: number;
+}
+
 export interface ServerMessagePayload {
   [ServerMessage.Chat]: ChatBroadcast;
   [ServerMessage.MoveRejected]: MoveRejected;
@@ -800,4 +902,7 @@ export interface ServerMessagePayload {
   [ServerMessage.ShopDenied]: ShopDenied;
   [ServerMessage.ClassChanged]: ClassChanged;
   [ServerMessage.ClassDenied]: ClassDenied;
+  [ServerMessage.SkillUsed]: SkillUsed;
+  [ServerMessage.SkillDenied]: SkillDenied;
+  [ServerMessage.PlayerHealed]: PlayerHealed;
 }

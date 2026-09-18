@@ -1,3 +1,5 @@
+import { SkillKey } from "./skills";
+
 /**
  * The four playable classes (roadmap R05-a, `docs/r05-classes-and-skills.md` D1/D3/D4/D7,
  * `docs/decisions.md` 2026-09-18). `PlayerClassKey` is the DB/wire string form —
@@ -50,6 +52,11 @@ export interface ClassDefinition {
   maxMpBase: number;
   /** MP added per level above 1, added to `maxMpBase` by `totalMaxMp`. */
   mpPerLevel: number;
+  /**
+   * The skills this class can `skill:use` (roadmap R05-b, `docs/r05-classes-and-skills.md` §7) —
+   * one entry each today. `handleUseSkill`'s `unknown-skill` check is exactly "not one of these".
+   */
+  skillKeys: readonly SkillKey[];
 }
 
 /**
@@ -66,6 +73,7 @@ export const CLASS_DEFINITIONS: Readonly<Record<PlayerClassKey, ClassDefinition>
     attackMultiplier: 0.9,
     maxMpBase: 30,
     mpPerLevel: 2,
+    skillKeys: [SkillKey.GuardStance],
   },
   [PlayerClassKey.Rogue]: {
     key: PlayerClassKey.Rogue,
@@ -75,6 +83,7 @@ export const CLASS_DEFINITIONS: Readonly<Record<PlayerClassKey, ClassDefinition>
     attackMultiplier: 1.2,
     maxMpBase: 40,
     mpPerLevel: 2,
+    skillKeys: [SkillKey.Ambush],
   },
   [PlayerClassKey.Shaman]: {
     key: PlayerClassKey.Shaman,
@@ -84,6 +93,7 @@ export const CLASS_DEFINITIONS: Readonly<Record<PlayerClassKey, ClassDefinition>
     attackMultiplier: 1.3,
     maxMpBase: 100,
     mpPerLevel: 6,
+    skillKeys: [SkillKey.Fireball],
   },
   [PlayerClassKey.Cleric]: {
     key: PlayerClassKey.Cleric,
@@ -93,6 +103,7 @@ export const CLASS_DEFINITIONS: Readonly<Record<PlayerClassKey, ClassDefinition>
     attackMultiplier: 0.8,
     maxMpBase: 80,
     mpPerLevel: 5,
+    skillKeys: [SkillKey.Heal],
   },
 };
 
