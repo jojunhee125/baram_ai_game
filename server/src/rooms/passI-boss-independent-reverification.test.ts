@@ -146,6 +146,10 @@ class CountingInventoryStore implements InventoryStore {
   unequip(): Promise<boolean> {
     return Promise.resolve(true);
   }
+
+  remove(): Promise<number | null> {
+    return Promise.resolve(null);
+  }
 }
 
 /** Holds `list` past the caller's await, so two gated joins interleave across the capacity gate. */
@@ -175,6 +179,10 @@ class SlowGateInventoryStore implements InventoryStore {
 
   unequip(): Promise<boolean> {
     return Promise.resolve(true);
+  }
+
+  remove(): Promise<number | null> {
+    return Promise.resolve(null);
   }
 }
 

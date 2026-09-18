@@ -90,7 +90,7 @@ describe(
       const quest = "first-hunt";
       await store.accept(owner, quest);
       const completing = await store.recordKill(owner, quest, 1);
-      assert.deepEqual(completing, { questId: quest, killCount: 1, completed: true });
+      assert.deepEqual(completing, { questId: quest, killCount: 1, completed: true, settled: false });
 
       const before1 = await readRow(owner, quest);
       const again = await store.recordKill(owner, quest, 1);
@@ -133,7 +133,11 @@ describe(
 
       // A single re-accept after progress: must not look like a fresh accept.
       const reaccepted = await store.accept(owner, quest);
-      assert.deepEqual(reaccepted, { questId: quest, killCount: 1, completed: false }, "progress survives re-accept");
+      assert.deepEqual(
+        reaccepted,
+        { questId: quest, killCount: 1, completed: false, settled: false },
+        "progress survives re-accept",
+      );
       const afterSingle = await readRow(owner, quest);
       assert.deepEqual(afterSingle?.updatedAt, beforeRow.updatedAt, "a re-accept must not touch updated_at");
 
@@ -144,8 +148,8 @@ describe(
         store.accept(otherOwner, quest),
         store.accept(otherOwner, quest),
       ]);
-      assert.deepEqual(x, { questId: quest, killCount: 0, completed: false });
-      assert.deepEqual(y, { questId: quest, killCount: 0, completed: false });
+      assert.deepEqual(x, { questId: quest, killCount: 0, completed: false, settled: false });
+      assert.deepEqual(y, { questId: quest, killCount: 0, completed: false, settled: false });
       const rows = await pool.query("SELECT count(*)::int AS n FROM quest_progress WHERE owner_key = $1", [
         otherOwner,
       ]);

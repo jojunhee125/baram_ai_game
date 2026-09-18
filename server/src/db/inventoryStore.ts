@@ -70,6 +70,16 @@ export interface InventoryStore {
    * instead.
    */
   unequip(ownerKey: string, slot: EquipmentSlot): Promise<boolean>;
+
+  /**
+   * Removes `quantity` and answers the total afterwards, or `null` when the account does not hold
+   * that many (roadmap R04-c, design `docs/r04-settlement.md` §9 D10) — `CurrencyStore.debit`'s own
+   * "insufficient is a result, not a fault" convention. A single statement (a conditional UPDATE),
+   * `add`'s own reason: two tabs of one account spending the same consumable must not have their
+   * check and their debit come apart. `quantity` must be a positive integer; anything else is a
+   * caller bug and rejects.
+   */
+  remove(ownerKey: string, itemKey: string, quantity: number): Promise<number | null>;
 }
 
 export interface InventoryRow {
@@ -206,6 +216,26 @@ export class InMemoryInventoryStore implements InventoryStore {
   unequip(ownerKey: string, slot: EquipmentSlot): Promise<boolean> {
     const slots = this.equippedByOwner.get(ownerKey);
     return Promise.resolve(slots?.delete(slot) ?? false);
+  }
+
+  remove(ownerKey: string, itemKey: string, quantity: number): Promise<number | null> {
+    try {
+      assertGrantableQuantity(quantity);
+    } catch (cause) {
+      return Promise.reject(cause);
+    }
+    const bag = this.bagsByOwner.get(ownerKey);
+    const held = bag?.get(itemKey);
+    if (bag === undefined || held === undefined || held < quantity) {
+      return Promise.resolve(null);
+    }
+    const total = held - quantity;
+    if (total === 0) {
+      bag.delete(itemKey);
+    } else {
+      bag.set(itemKey, total);
+    }
+    return Promise.resolve(total);
   }
 
   /**
@@ -359,6 +389,34 @@ export class PostgresInventoryStore implements InventoryStore {
       [ownerKey, slot],
     );
     return result.rows.length > 0;
+  }
+
+  async remove(ownerKey: string, itemKey: string, quantity: number): Promise<number | null> {
+    assertGrantableQuantity(quantity);
+    assertUuidOwnerKey(ownerKey);
+    // Two mutually exclusive CTEs against the same snapshot, rather than a plain conditional
+    // UPDATE, because `inventory_item.quantity` is `CHECK (quantity > 0)` (0002_inventory_item.sql)
+    // — an UPDATE that would land exactly on 0 must delete the row instead, or Postgres rejects the
+    // statement. Exactly one of the two ever matches (`= $3` vs `> $3`), so this stays one round
+    // trip and one atomic decision, `add`'s own reason for folding its capacity test into one
+    // INSERT: a concurrent remove/add against the same row cannot see a stale count between a check
+    // and a write.
+    const result = await this.query<{ quantity: number }>(
+      `WITH removed AS (
+         DELETE FROM inventory_item
+         WHERE owner_key = $1 AND item_key = $2 AND quantity = $3
+         RETURNING 0 AS quantity
+       ), updated AS (
+         UPDATE inventory_item SET quantity = quantity - $3
+         WHERE owner_key = $1 AND item_key = $2 AND quantity > $3
+         RETURNING quantity
+       )
+       SELECT quantity FROM removed
+       UNION ALL
+       SELECT quantity FROM updated`,
+      [ownerKey, itemKey, quantity],
+    );
+    return result.rows[0]?.quantity ?? null;
   }
 
   async getEquippedSlots(ownerKey: string): Promise<Partial<Record<EquipmentSlot, string>>> {

@@ -35,6 +35,7 @@ import {
   levelForExp,
   remainingExpToNextLevel,
   type AcceptQuestRequest,
+  type BuyItemRequest,
   type ChangeSkinRequest,
   type ChatBroadcast,
   type ChatRequest,
@@ -44,6 +45,7 @@ import {
   type ExpGranted,
   type InteractableEntered,
   type ItemGranted,
+  type ItemRemoved,
   type JoinOptions,
   type MonsterHit,
   type MoveRejected,
@@ -54,9 +56,13 @@ import {
   type QuestState,
   type QuizAnswerRequest,
   type QuizResult,
+  type SellItemRequest,
+  type ShopDenied,
+  type ShopOffer,
   type Teleported,
   type TilePosition,
   type UnequipItemRequest,
+  type UseItemRequest,
   type WarpToLandmarkRequest,
 } from "@zep-test/shared";
 import type { BossStateStore } from "../db/bossStateStore";
@@ -64,7 +70,13 @@ import type { CurrencyStore } from "../db/currencyStore";
 import type { InventoryStore } from "../db/inventoryStore";
 import type { ProgressStore } from "../db/progressStore";
 import type { QuestRow, QuestStore } from "../db/questStore";
-import type { SettlementOutcome, SettlementStore } from "../db/settlementStore";
+import type {
+  SettlementBagFull,
+  SettlementInsufficientBalance,
+  SettlementInsufficientItem,
+  SettlementOutcome,
+  SettlementStore,
+} from "../db/settlementStore";
 import { TableInteractableIndex } from "../game/interactables";
 import { TableLandmarkIndex } from "../game/landmarks";
 import { rollLoot, type LootGrant } from "../game/loot";
@@ -84,6 +96,7 @@ import type {
   CollisionMap,
   InteractableDefinition,
   InteractableIndex,
+  ItemDefinition,
   LandmarkIndex,
   MetaverseRoomOptions,
   PlayerSession,
@@ -94,7 +107,7 @@ import type {
 } from "./contracts";
 import { slotFamily } from "./contracts";
 import { INTERACTABLE_DEFINITIONS } from "./interactableDefinitions";
-import { ITEM_DEFINITIONS } from "./itemDefinitions";
+import { ITEM_DEFINITIONS, MAX_REQUEST_QUANTITY } from "./itemDefinitions";
 import { LANDMARK_DEFINITIONS } from "./landmarkDefinitions";
 import {
   BOSS_RESPAWN_MS,
@@ -111,6 +124,7 @@ import {
   QUESTS_BY_ID,
   type QuestDefinition,
 } from "./questDefinitions";
+import { SHOPS_BY_NPC, type ShopDefinition } from "./shopDefinitions";
 import { deriveSsoNickname, deriveSsoUserId } from "./ssoIdentity";
 
 type RoomClient = MetaverseRoomOptions["client"];
@@ -279,6 +293,11 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
    * their reason, and it is the boundary `handleAcceptQuest` checks a client's id against.
    */
   private roomQuests!: ReadonlyMap<string, QuestDefinition>;
+  /**
+   * The shops this room can offer: those whose NPC stands here — `roomQuests`'s own narrowing and
+   * for the same reason (roadmap R04-c, design `docs/r04-settlement.md` §9 D12).
+   */
+  private roomShops!: ReadonlyMap<string, ShopDefinition>;
   /** Death EXP penalty exemptions (design-phase-w-level-system.md §11.0). Empty unless configured. */
   private adminOwnerKeys: ReadonlySet<string> = new Set();
   /** The enforced join cap — {@link RoomCreateOptions.realCapacity}, falling back to `maxClients`. */
@@ -330,6 +349,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.roomQuests = new Map(
       [...QUESTS_BY_ID].filter(([, quest]) => this.interactableIndex.byId(quest.giverObjectId) !== null),
     );
+    this.roomShops = new Map(
+      [...SHOPS_BY_NPC].filter(([npcObjectId]) => this.interactableIndex.byId(npcObjectId) !== null),
+    );
     // Static for the room's lifetime — populated once here, never touched again. This is the
     // only reason the client learns a portal's position at all (never its id or destination).
     for (const tile of this.portalIndex.triggerTiles()) {
@@ -372,6 +394,15 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     });
     this.onMessage(ClientMessage.AcceptQuest, (client: RoomClient, message: AcceptQuestRequest) => {
       this.handleAcceptQuest(client, message);
+    });
+    this.onMessage(ClientMessage.BuyItem, (client: RoomClient, message: BuyItemRequest) => {
+      this.handleBuyItem(client, message);
+    });
+    this.onMessage(ClientMessage.SellItem, (client: RoomClient, message: SellItemRequest) => {
+      this.handleSellItem(client, message);
+    });
+    this.onMessage(ClientMessage.UseItem, (client: RoomClient, message: UseItemRequest) => {
+      this.handleUseItem(client, message);
     });
 
     // Last, and only where there is something to simulate. A room with no monster *rows* stays
@@ -895,7 +926,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         continue;
       }
       client.send(ServerMessage.QuestUpdated, questState(quest, row));
-      if (row.completed && quest.reward !== undefined) {
+      if (row.completed && quest.reward !== undefined && !row.settled) {
         // D6's own retry: the completion that produced this row may have called `settleQuestReward`
         // and lost the race (the process died, or the session left, between `store.recordKill`
         // committing and that call's own `await` landing) — retried here, on every join, because
@@ -903,6 +934,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         // a second credit. `session.ownerKey` rather than the `ownerKey` parameter: the latter falls
         // back to the session id for local development, which `settleQuestReward` must never be
         // handed (see its own doc comment).
+        //
+        // `!row.settled` is §9 D9's performance fix: a row this store already knows was paid skips
+        // the retry transaction entirely rather than replaying a ledger hit every single join.
         retries.push(
           this.settleQuestReward(sessionId, session.ownerKey, quest.id, quest.reward.currencyDelta, false),
         );
@@ -1052,7 +1086,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     if (object !== null) {
       client.send(
         ServerMessage.InteractableEntered,
-        toInteraction(object, this.questsOffered(session, object.id)),
+        toInteraction(object, this.questsOffered(session, object.id), this.shopOffered(object.id)),
       );
     }
   }
@@ -1396,6 +1430,16 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       console.warn(`[zep-test] could not settle ${questId}'s reward for ${ownerKey}`, cause);
       return;
     }
+    if (outcome.ok) {
+      // §9 D9: a performance short-circuit only, raised from both call sites (the completion
+      // transition's own settle and this join-time retry) — never a gate on `settle` itself, which
+      // already applied or replayed the reward above regardless of whether this flag write lands.
+      // Fire-and-forget: a failure here just means the next join retries `settle` once more, and
+      // that retry is a free, ledger-backed no-op.
+      void this.questStore?.markSettled(ownerKey, questId).catch((cause) => {
+        console.warn(`[zep-test] could not flag ${questId} settled for ${ownerKey}`, cause);
+      });
+    }
     if (!notify || !outcome.ok || outcome.balance === undefined) {
       // `ok: false` only ever means insufficient balance for a currency-only credit like this one
       // (never a full bag, since no reward here ever names an item) — and a positive
@@ -1452,6 +1496,362 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   ): readonly QuestState[] | undefined {
     const quests = QUESTS_BY_GIVER.get(objectId);
     return quests?.map((quest) => questState(quest, session.questRows.get(quest.id) ?? null));
+  }
+
+  /**
+   * What this NPC sells, resolved for display, or undefined for an NPC with no shop —
+   * `questsOffered`'s own shape (design §9 D11/D12), except a shop carries no per-account state: it
+   * is a pure projection of the authored table, unlike a quest row.
+   */
+  private shopOffered(objectId: string): ShopOffer | undefined {
+    const shop = this.roomShops.get(objectId);
+    if (shop === undefined) {
+      return undefined;
+    }
+    return {
+      listings: shop.listings.map((listing) => {
+        // `validateShopDefinitions` refuses to boot on a listing naming a key that is not in
+        // `ITEM_DEFINITIONS`, so this is never undefined in a server that started at all.
+        const definition = ITEM_DEFINITIONS.find((item) => item.key === listing.itemKey)!;
+        return {
+          itemKey: listing.itemKey,
+          name: definition.name,
+          icon: definition.icon,
+          price: listing.price,
+        };
+      }),
+    };
+  }
+
+  /**
+   * One buy request. Room-narrowed like {@link handleAcceptQuest}: `npcObjectId` must name a shop
+   * standing in this room, `BuyItemRequest`'s own doc comment. Malformed fields (wrong types, a
+   * non-positive quantity, an empty nonce) are dropped in silence, the same treatment
+   * {@link handleEquipItem} gives a request naming no equipment item at all — that is a client/server
+   * skew, not something a player did, and {@link ShopDenialReason} has no slot for it.
+   */
+  private handleBuyItem(client: RoomClient, message: BuyItemRequest): void {
+    const session = client.userData;
+    const store = this.settlementStore;
+    if (!session || !this.state.players.has(client.sessionId) || store === null) {
+      return;
+    }
+    const npcObjectId = message?.npcObjectId;
+    const itemKey = message?.itemKey;
+    const quantity = message?.quantity;
+    const nonce = message?.nonce;
+    if (
+      typeof npcObjectId !== "string" ||
+      typeof itemKey !== "string" ||
+      typeof nonce !== "string" ||
+      nonce.length === 0 ||
+      !Number.isInteger(quantity) ||
+      quantity < 1 ||
+      // Silently ignored rather than denied, exactly as `quantity < 1` above is: no client this
+      // server ships can produce either, so both are malformed messages and not a purchase to
+      // refuse. See `MAX_REQUEST_QUANTITY` for what an unbounded one actually does.
+      quantity > MAX_REQUEST_QUANTITY
+    ) {
+      return;
+    }
+    const shop = this.roomShops.get(npcObjectId);
+    if (shop === undefined) {
+      // Ignored in silence, `AcceptQuestRequest`'s own treatment of a giver this room does not
+      // recognise — an unknown or stale id, not a purchase this shop is refusing.
+      return;
+    }
+    const itemDefinition = ITEM_DEFINITIONS.find((item) => item.key === itemKey);
+    if (itemDefinition === undefined) {
+      client.send(ServerMessage.ShopDenied, { action: "buy", itemKey, reason: "unknown-item" } satisfies ShopDenied);
+      return;
+    }
+    const listing = shop.listings.find((entry) => entry.itemKey === itemKey);
+    if (listing === undefined) {
+      client.send(
+        ServerMessage.ShopDenied,
+        { action: "buy", itemKey, reason: "not-sold-here" } satisfies ShopDenied,
+      );
+      return;
+    }
+    if (session.ownerKey === null) {
+      // No SSO, no account to settle against — `settleQuestReward`'s own rule: `settle()`'s
+      // `assertUuidOwnerKey` rejects a session id outright, so there is nothing honest to do here
+      // but skip, the same degradation a quest's payout makes in local development.
+      return;
+    }
+    void this.settleBuy(
+      client.sessionId,
+      session.ownerKey,
+      itemKey,
+      quantity,
+      listing.price,
+      nonce,
+      store,
+      itemDefinition,
+    );
+  }
+
+  /** The store half of {@link handleBuyItem}. Async and never awaited, `awardLoot`'s own reason. */
+  private async settleBuy(
+    sessionId: string,
+    ownerKey: string,
+    itemKey: string,
+    quantity: number,
+    unitPrice: number,
+    nonce: string,
+    store: SettlementStore,
+    itemDefinition: ItemDefinition,
+  ): Promise<void> {
+    // §9 D8's exact grantKey shape: item and quantity ride alongside the nonce so a reused nonce for
+    // a genuinely different request never falls into the replay branch of `settle`.
+    const grantKey = `shop:${ownerKey}:${itemKey}:${quantity}:${nonce}`;
+    let outcome: SettlementOutcome;
+    try {
+      outcome = await store.settle(grantKey, ownerKey, {
+        currencyDelta: -(unitPrice * quantity),
+        items: [{ itemKey, quantity }],
+      });
+    } catch (cause) {
+      console.warn(`[zep-test] could not settle a purchase of ${itemKey} for ${ownerKey}`, cause);
+      return;
+    }
+    // Re-resolved after the await, every other store continuation's rule: the buyer may have left
+    // the room, or walked through a door into another one, while the store was answering.
+    const client = this.clientsBySession.get(sessionId);
+    const session = client?.userData;
+    if (!client || !session) {
+      return;
+    }
+    if (!outcome.ok) {
+      this.sendShopDenied(client, "buy", itemKey, outcome);
+      return;
+    }
+    if (outcome.balance !== undefined) {
+      session.currencyBalance = outcome.balance;
+      client.send(ServerMessage.CurrencyChanged, {
+        balance: outcome.balance,
+        delta: -(unitPrice * quantity),
+        reason: "shop-buy",
+      } satisfies CurrencyChanged);
+    }
+    const total = outcome.items.find((item) => item.itemKey === itemKey)?.quantity ?? quantity;
+    client.send(ServerMessage.ItemGranted, {
+      itemKey,
+      name: itemDefinition.name,
+      icon: itemDefinition.icon,
+      quantity,
+      total,
+      damageReductionRatio: itemDefinition.equipment?.stats.damageReduction,
+    } satisfies ItemGranted);
+  }
+
+  /**
+   * One sell request. Not room-scoped, unlike {@link handleBuyItem} — {@link SellItemRequest}'s own
+   * doc comment: a sell price is intrinsic to the item, so this resolves against `ITEM_DEFINITIONS`
+   * alone.
+   */
+  private handleSellItem(client: RoomClient, message: SellItemRequest): void {
+    const session = client.userData;
+    const store = this.settlementStore;
+    if (!session || !this.state.players.has(client.sessionId) || store === null) {
+      return;
+    }
+    const itemKey = message?.itemKey;
+    const quantity = message?.quantity;
+    const nonce = message?.nonce;
+    if (
+      typeof itemKey !== "string" ||
+      typeof nonce !== "string" ||
+      nonce.length === 0 ||
+      !Number.isInteger(quantity) ||
+      quantity < 1 ||
+      // `handleBuyItem`'s own reasoning, and the same column on the other side of the ledger: a
+      // debit binds `quantity` to that `integer` too.
+      quantity > MAX_REQUEST_QUANTITY
+    ) {
+      return;
+    }
+    const itemDefinition = ITEM_DEFINITIONS.find((item) => item.key === itemKey);
+    if (itemDefinition === undefined) {
+      client.send(ServerMessage.ShopDenied, { action: "sell", itemKey, reason: "unknown-item" } satisfies ShopDenied);
+      return;
+    }
+    if (itemDefinition.sellValue === undefined) {
+      client.send(
+        ServerMessage.ShopDenied,
+        { action: "sell", itemKey, reason: "not-sellable" } satisfies ShopDenied,
+      );
+      return;
+    }
+    // Selling what is worn is refused rather than handled, because handling it means unequipping
+    // inside the settlement transaction — `session.equippedItemKeys` is a room-session cache that
+    // `settleSell` does not touch, so a sold-while-worn row would leave its stat bonus applied to a
+    // player who no longer owns the item. Unreachable today (the only row with a `sellValue` is a
+    // consumable, not equipment) and written anyway: the day equipment becomes sellable, the bug
+    // it prevents is silent and shows up as wrong damage numbers, not as an error.
+    if (Object.values(session.equippedItemKeys).includes(itemKey)) {
+      client.send(
+        ServerMessage.ShopDenied,
+        { action: "sell", itemKey, reason: "not-sellable" } satisfies ShopDenied,
+      );
+      return;
+    }
+    if (session.ownerKey === null) {
+      return;
+    }
+    void this.settleSell(client.sessionId, session.ownerKey, itemKey, quantity, itemDefinition, nonce, store);
+  }
+
+  /** The store half of {@link handleSellItem}. Async and never awaited, `awardLoot`'s own reason. */
+  private async settleSell(
+    sessionId: string,
+    ownerKey: string,
+    itemKey: string,
+    quantity: number,
+    itemDefinition: ItemDefinition,
+    nonce: string,
+    store: SettlementStore,
+  ): Promise<void> {
+    const grantKey = `sell:${ownerKey}:${itemKey}:${quantity}:${nonce}`;
+    const unitSellValue = itemDefinition.sellValue!; // guarded by handleSellItem above
+    let outcome: SettlementOutcome;
+    try {
+      outcome = await store.settle(grantKey, ownerKey, {
+        currencyDelta: unitSellValue * quantity,
+        itemDebits: [{ itemKey, quantity }],
+      });
+    } catch (cause) {
+      console.warn(`[zep-test] could not settle a sale of ${itemKey} for ${ownerKey}`, cause);
+      return;
+    }
+    const client = this.clientsBySession.get(sessionId);
+    const session = client?.userData;
+    if (!client || !session) {
+      return;
+    }
+    if (!outcome.ok) {
+      this.sendShopDenied(client, "sell", itemKey, outcome);
+      return;
+    }
+    if (outcome.balance !== undefined) {
+      session.currencyBalance = outcome.balance;
+      client.send(ServerMessage.CurrencyChanged, {
+        balance: outcome.balance,
+        delta: unitSellValue * quantity,
+        reason: "shop-sell",
+      } satisfies CurrencyChanged);
+    }
+    const total = outcome.items.find((item) => item.itemKey === itemKey)?.quantity ?? 0;
+    client.send(ServerMessage.ItemRemoved, {
+      itemKey,
+      name: itemDefinition.name,
+      icon: itemDefinition.icon,
+      quantity,
+      total,
+      reason: "shop-sell",
+    } satisfies ItemRemoved);
+  }
+
+  /**
+   * One consumable use. Always exactly one unit, {@link UseItemRequest}'s own minimalism — there is
+   * no quantity to validate.
+   */
+  private handleUseItem(client: RoomClient, message: UseItemRequest): void {
+    const session = client.userData;
+    const store = this.settlementStore;
+    if (!session || !this.state.players.has(client.sessionId) || store === null) {
+      return;
+    }
+    const itemKey = message?.itemKey;
+    const nonce = message?.nonce;
+    if (typeof itemKey !== "string" || typeof nonce !== "string" || nonce.length === 0) {
+      return;
+    }
+    const itemDefinition = ITEM_DEFINITIONS.find((item) => item.key === itemKey);
+    if (itemDefinition === undefined) {
+      client.send(ServerMessage.ShopDenied, { action: "use", itemKey, reason: "unknown-item" } satisfies ShopDenied);
+      return;
+    }
+    if (itemDefinition.consumable === undefined) {
+      client.send(
+        ServerMessage.ShopDenied,
+        { action: "use", itemKey, reason: "not-consumable" } satisfies ShopDenied,
+      );
+      return;
+    }
+    if (session.ownerKey === null) {
+      return;
+    }
+    void this.settleUse(client.sessionId, session.ownerKey, itemKey, itemDefinition, nonce, store);
+  }
+
+  /**
+   * The store half of {@link handleUseItem}. Debits the item through `settle` first and only then
+   * restores HP (design §9 D10, design §3 D5) — a session that vanishes between the two loses the
+   * heal, `docs/decisions.md` 2026-09-18's accepted loss, chosen over persisting HP or healing
+   * before the debit is known to have committed (which a dropped connection could repeat for free).
+   */
+  private async settleUse(
+    sessionId: string,
+    ownerKey: string,
+    itemKey: string,
+    itemDefinition: ItemDefinition,
+    nonce: string,
+    store: SettlementStore,
+  ): Promise<void> {
+    const grantKey = `use:${ownerKey}:${itemKey}:${nonce}`;
+    let outcome: SettlementOutcome;
+    try {
+      outcome = await store.settle(grantKey, ownerKey, { itemDebits: [{ itemKey, quantity: 1 }] });
+    } catch (cause) {
+      console.warn(`[zep-test] could not settle a use of ${itemKey} for ${ownerKey}`, cause);
+      return;
+    }
+    const client = this.clientsBySession.get(sessionId);
+    const session = client?.userData;
+    if (!client || !session) {
+      return;
+    }
+    if (!outcome.ok) {
+      this.sendShopDenied(client, "use", itemKey, outcome);
+      return;
+    }
+    const maxHp = this.totalMaxHp(session);
+    // Clamped to the current max — `ItemDefinition.consumable.healAmount`'s own "never an overheal".
+    const healAmount = Math.max(0, Math.min(itemDefinition.consumable!.healAmount, maxHp - session.hp));
+    session.hp += healAmount;
+    const total = outcome.items.find((item) => item.itemKey === itemKey)?.quantity ?? 0;
+    client.send(ServerMessage.ItemRemoved, {
+      itemKey,
+      name: itemDefinition.name,
+      icon: itemDefinition.icon,
+      quantity: 1,
+      total,
+      reason: "consume",
+      hpRestored: healAmount,
+      hpRemaining: session.hp,
+      hpMax: maxHp,
+    } satisfies ItemRemoved);
+  }
+
+  /**
+   * Turns a declined `SettlementOutcome` into the wire `ShopDenied` — the shared tail of
+   * {@link settleBuy}/{@link settleSell}/{@link settleUse} (design §9 D13). Every failure reason
+   * `settle` can answer is already a {@link ShopDenialReason}, so this is a straight pass-through
+   * except `insufficient-balance`, which carries no `itemKey` of its own (a balance is account-wide,
+   * not per-item) and falls back to the item the request named.
+   */
+  private sendShopDenied(
+    client: RoomClient,
+    action: "buy" | "sell" | "use",
+    itemKey: string,
+    outcome: SettlementInsufficientBalance | SettlementBagFull | SettlementInsufficientItem,
+  ): void {
+    client.send(ServerMessage.ShopDenied, {
+      action,
+      itemKey: outcome.reason === "insufficient-balance" ? itemKey : outcome.itemKey,
+      reason: outcome.reason,
+    } satisfies ShopDenied);
   }
 
   /**
@@ -2706,6 +3106,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
 function toInteraction(
   object: InteractableDefinition,
   quests?: readonly QuestState[],
+  shop?: ShopOffer,
 ): InteractableEntered {
   switch (object.kind) {
     case InteractableKind.Link:
@@ -2741,6 +3142,7 @@ function toInteraction(
         body: object.body,
         blocksMovement: object.blocksMovement ?? true,
         quests,
+        shop,
       };
   }
 }

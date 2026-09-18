@@ -12,16 +12,45 @@ export interface SettlementItemGrant {
 }
 
 /**
+ * One item debit inside a settlement — a quantity to remove from the account's bag, never a grant
+ * (roadmap R04-c, design `docs/r04-settlement.md` §9 D10). Split from {@link SettlementItemGrant}
+ * as its own type rather than a signed `quantity` on one shape, `CurrencyStore`'s own `credit`/
+ * `debit` split (`currencyStore.ts`) for the same reason: a caller building a batch should not be
+ * able to typo a sign and turn a sale into a free grant.
+ *
+ * Honoured by both {@link SettlementStore} implementations: a shop sale or a consumable use lists
+ * the item here, and `settle` removes it in the same all-or-nothing transaction as any
+ * {@link SettlementEffects.currencyDelta} in the same call, declining with
+ * {@link SettlementInsufficientItem} rather than touching anything if the account does not hold
+ * enough.
+ */
+export interface SettlementItemDebit {
+  readonly itemKey: string;
+  readonly quantity: number;
+}
+
+/**
  * What one call to `settle` changes, all together or not at all (design
  * `docs/r04-settlement.md` §3, §4 D3). `currencyDelta` may be positive (a
  * reward) or negative (a purchase); omitted or `0` means the settlement touches no balance at all.
+ *
+ * `items` and `itemDebits` may both be present in one call (a sale credits currency and debits the
+ * sold item in the same transaction). Lock order for *both* together is the existing
+ * currency-then-inventory rule (design §4 D3), inventory rows taken in `item_key` ascending order
+ * across grants and debits merged as one sequence — not grants-then-debits — so two settlements
+ * touching the same two items in opposite roles can never lock them in opposite orders.
  */
 export interface SettlementEffects {
   readonly currencyDelta?: number;
   readonly items?: readonly SettlementItemGrant[];
+  readonly itemDebits?: readonly SettlementItemDebit[];
 }
 
-/** The stack total after one item's grant — `InventoryStore.add`'s own "answers the total" shape. */
+/**
+ * The stack total after one item's grant or debit — `InventoryStore.add`/`remove`'s own "answers
+ * the total" shape. `quantity` is 0 for a debit that emptied the stack, the row-gone case those
+ * stores' own `remove` documents.
+ */
 export interface SettlementResultItem {
   readonly itemKey: string;
   readonly quantity: number;
@@ -47,7 +76,21 @@ export interface SettlementBagFull {
   readonly itemKey: string;
 }
 
-export type SettlementOutcome = SettlementSuccess | SettlementInsufficientBalance | SettlementBagFull;
+/**
+ * `itemKey` was debited (design §9 D10) for more than the account holds. Nothing in `effects` was
+ * applied — {@link SettlementBagFull}'s own all-or-nothing rule, extended to the debit side.
+ */
+export interface SettlementInsufficientItem {
+  readonly ok: false;
+  readonly reason: "insufficient-item";
+  readonly itemKey: string;
+}
+
+export type SettlementOutcome =
+  | SettlementSuccess
+  | SettlementInsufficientBalance
+  | SettlementBagFull
+  | SettlementInsufficientItem;
 
 /**
  * The reward ledger and its all-or-nothing transaction (design §4 D2/D3). Keyed by a caller-built
@@ -150,18 +193,34 @@ export class InMemorySettlementStore implements SettlementStore {
     }
 
     const nextBag = new Map(this.inventoryStore.peekBag(ownerKey));
-    const sortedItems = [...(effects.items ?? [])].sort((left, right) =>
-      compareItemKeyAscending(left.itemKey, right.itemKey),
-    );
+    // Grants and debits merged into one item_key-ascending sequence, never grants-then-debits —
+    // `SettlementEffects`'s own doc comment on why (design §4 D3, extended by §9 D10).
+    const sortedOps = [
+      ...(effects.items ?? []).map((grant) => ({ ...grant, kind: "grant" as const })),
+      ...(effects.itemDebits ?? []).map((debit) => ({ ...debit, kind: "debit" as const })),
+    ].sort((left, right) => compareItemKeyAscending(left.itemKey, right.itemKey));
     const resultItems: SettlementResultItem[] = [];
-    for (const { itemKey, quantity } of sortedItems) {
+    for (const { itemKey, quantity, kind } of sortedOps) {
       const held = nextBag.get(itemKey);
-      if (held === undefined && nextBag.size >= MAX_DISTINCT_ITEMS) {
-        return { ok: false, reason: "bag-full", itemKey };
+      if (kind === "grant") {
+        if (held === undefined && nextBag.size >= MAX_DISTINCT_ITEMS) {
+          return { ok: false, reason: "bag-full", itemKey };
+        }
+        const total = held === undefined ? quantity : held + quantity;
+        nextBag.set(itemKey, total);
+        resultItems.push({ itemKey, quantity: total });
+      } else {
+        if (held === undefined || held < quantity) {
+          return { ok: false, reason: "insufficient-item", itemKey };
+        }
+        const total = held - quantity;
+        if (total === 0) {
+          nextBag.delete(itemKey);
+        } else {
+          nextBag.set(itemKey, total);
+        }
+        resultItems.push({ itemKey, quantity: total });
       }
-      const total = held === undefined ? quantity : held + quantity;
-      nextBag.set(itemKey, total);
-      resultItems.push({ itemKey, quantity: total });
     }
 
     // Nothing is written until every effect in the batch is known to succeed — a currency change
@@ -169,7 +228,7 @@ export class InMemorySettlementStore implements SettlementStore {
     if (nextBalance !== undefined) {
       this.currencyStore.pokeBalance(ownerKey, nextBalance);
     }
-    if (sortedItems.length > 0) {
+    if (sortedOps.length > 0) {
       this.inventoryStore.pokeBag(ownerKey, nextBag);
     }
     return { ok: true, balance: nextBalance, items: resultItems };
@@ -200,7 +259,9 @@ function compareItemKeyAscending(left: string, right: string): number {
  * an exception.
  */
 class SettlementDeclined extends Error {
-  constructor(readonly outcome: SettlementInsufficientBalance | SettlementBagFull) {
+  constructor(
+    readonly outcome: SettlementInsufficientBalance | SettlementBagFull | SettlementInsufficientItem,
+  ) {
     super(`settlement declined: ${outcome.reason}`);
   }
 }
@@ -322,17 +383,28 @@ export class PostgresSettlementStore implements SettlementStore {
     }
 
     const items: SettlementResultItem[] = [];
-    const sortedItems = [...(effects.items ?? [])].sort((left, right) =>
-      compareItemKeyAscending(left.itemKey, right.itemKey),
-    );
-    if (sortedItems.length > 0) {
+    // Merged into one item_key-ascending sequence, never grants-then-debits — `SettlementEffects`'s
+    // own doc comment on why (design §4 D3, extended by §9 D10).
+    const sortedOps = [
+      ...(effects.items ?? []).map((grant) => ({ ...grant, kind: "grant" as const })),
+      ...(effects.itemDebits ?? []).map((debit) => ({ ...debit, kind: "debit" as const })),
+    ].sort((left, right) => compareItemKeyAscending(left.itemKey, right.itemKey));
+    if (sortedOps.length > 0) {
       const inventoryStore = new PostgresInventoryStore(client);
-      for (const { itemKey, quantity } of sortedItems) {
-        const total = await inventoryStore.add(ownerKey, itemKey, quantity);
-        if (total === null) {
-          throw new SettlementDeclined({ ok: false, reason: "bag-full", itemKey });
+      for (const { itemKey, quantity, kind } of sortedOps) {
+        if (kind === "grant") {
+          const total = await inventoryStore.add(ownerKey, itemKey, quantity);
+          if (total === null) {
+            throw new SettlementDeclined({ ok: false, reason: "bag-full", itemKey });
+          }
+          items.push({ itemKey, quantity: total });
+        } else {
+          const total = await inventoryStore.remove(ownerKey, itemKey, quantity);
+          if (total === null) {
+            throw new SettlementDeclined({ ok: false, reason: "insufficient-item", itemKey });
+          }
+          items.push({ itemKey, quantity: total });
         }
-        items.push({ itemKey, quantity: total });
       }
     }
 
@@ -364,6 +436,11 @@ function assertSettlementEffects(effects: SettlementEffects): void {
   for (const item of effects.items ?? []) {
     if (!Number.isInteger(item.quantity) || item.quantity < 1) {
       throw new TypeError(`settlement item quantity must be a positive integer, not ${item.quantity}`);
+    }
+  }
+  for (const debit of effects.itemDebits ?? []) {
+    if (!Number.isInteger(debit.quantity) || debit.quantity < 1) {
+      throw new TypeError(`settlement item debit quantity must be a positive integer, not ${debit.quantity}`);
     }
   }
 }

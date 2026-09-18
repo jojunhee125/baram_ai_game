@@ -100,7 +100,7 @@ body { background: #18130f; }
   color: #eed8a6;
 }
 .hud__button, .character-menu__item, .landmark-panel__item,
-.bag__equip, .bag__close, .loot-table__close, .character-menu__close, .landmark-panel__close {
+.bag__equip, .bag__sell, .bag__use, .bag__close, .loot-table__close, .character-menu__close, .landmark-panel__close {
   border: 2px solid;
   border-color: #d5bd8b #59452e #59452e #d5bd8b;
   border-radius: 0;

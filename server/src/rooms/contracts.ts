@@ -421,6 +421,24 @@ export interface ItemDefinition {
      */
     stats: Partial<Record<"damageReduction" | "attackDamage" | "maxHp", number>>;
   };
+  /**
+   * 전(錢) this item sells back for, or absent when it cannot be sold at all (roadmap R04-c, design
+   * `docs/r04-settlement.md` §9 D11, `docs/decisions.md` 2026-09-18). Never derived from a shop's
+   * buy price — a drop-only item (e.g. `acorn`) has no buy price to derive from, and a sell price
+   * that moved every time a buy price did would make retuning one a silent retune of the other.
+   * Boot validation refuses anything but a positive integer.
+   */
+  sellValue?: number;
+  /**
+   * Present for an item usable via `ClientMessage.UseItem` (design §9 D10/D11; design §3 D5 —
+   * selected-effect-on-use, loss on a dropped session accepted rather than persisted). Absent for
+   * everything else, including every equipment and possession row today: a consumable is spent by
+   * `use`, an equipment item is worn by `equip`, and this project has no item that is both.
+   */
+  consumable?: {
+    /** HP restored on use, clamped to the account's current max HP — never an overheal. */
+    healAmount: number;
+  };
 }
 
 /**

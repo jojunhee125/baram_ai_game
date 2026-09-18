@@ -294,6 +294,10 @@ class ControlledEquipStore implements InventoryStore {
     });
   }
 
+  remove(): Promise<number | null> {
+    return Promise.resolve(null);
+  }
+
   settleGetEquipped(callIndex: number, value: string | null): void {
     this.getEquippedSlotsWaiters[callIndex]!(value === null ? {} : { armor: value });
   }
@@ -844,6 +848,7 @@ describe("VERIFY grand-plaza pays zero equipment-cache cost, matching the posses
       },
       equip: () => Promise.resolve(false),
       unequip: () => Promise.resolve(false),
+      remove: () => Promise.resolve(null),
     };
     const gameServer = createGameServer(undefined, countingStore);
     await gameServer.listen(PORT);

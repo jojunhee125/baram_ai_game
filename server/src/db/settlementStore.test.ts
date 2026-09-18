@@ -134,6 +134,22 @@ function fakePool(db: FakeDatabase): { pool: Pool; queries: RecordedQuery[] } {
         bag.set(itemKey, total);
         return Promise.resolve({ rows: [{ quantity: total }] });
       }
+      if (sql.includes("DELETE FROM inventory_item")) {
+        // `InventoryStore.remove`'s single-statement DELETE-or-UPDATE (design §9 D10).
+        const [ownerKey, itemKey, quantity] = values as [string, string, number];
+        const bag = db.bagsByOwner.get(ownerKey);
+        const held = bag?.get(itemKey);
+        if (bag === undefined || held === undefined || held < quantity) {
+          return Promise.resolve({ rows: [] });
+        }
+        const total = held - quantity;
+        if (total === 0) {
+          bag.delete(itemKey);
+        } else {
+          bag.set(itemKey, total);
+        }
+        return Promise.resolve({ rows: [{ quantity: total }] });
+      }
       throw new Error(`fake client received unhandled SQL: ${sql}`);
     } catch (error) {
       return Promise.reject(error);
@@ -211,6 +227,47 @@ for (const [name, create] of IMPLEMENTATIONS) {
         currencyDelta: 50,
       });
       assert.deepEqual(retryWithOnlyCurrency, { ok: true, balance: 50, items: [] });
+    });
+
+    it("debits an item and credits currency together, once (a sale, roadmap R04-c)", async () => {
+      const store = create();
+      await store.settle("grant-herb", OWNER, { items: [{ itemKey: "herb", quantity: 5 }] });
+      const outcome = await store.settle("sell:" + OWNER + ":herb:2:n1", OWNER, {
+        currencyDelta: 6,
+        itemDebits: [{ itemKey: "herb", quantity: 2 }],
+      });
+      assert.deepEqual(outcome, { ok: true, balance: 6, items: [{ itemKey: "herb", quantity: 3 }] });
+    });
+
+    it("declines a debit for more than the account holds, refunding no partial currency change", async () => {
+      const store = create();
+      await store.settle("grant-herb-2", OWNER, { items: [{ itemKey: "herb", quantity: 1 }] });
+      const declined = await store.settle("sell:" + OWNER + ":herb:5:n1", OWNER, {
+        currencyDelta: 15,
+        itemDebits: [{ itemKey: "herb", quantity: 5 }],
+      });
+      assert.deepEqual(declined, { ok: false, reason: "insufficient-item", itemKey: "herb" });
+      // No ledger row on a decline (design §4 D3): the same grantKey can be retried once the
+      // account holds enough, and no currency landed from the declined attempt either.
+      const retryCurrencyOnly = await store.settle("sell-retry-currency-only", OWNER, { currencyDelta: 15 });
+      assert.deepEqual(retryCurrencyOnly, { ok: true, balance: 15, items: [] });
+    });
+
+    it("declines a debit against an item the account never held at all", async () => {
+      const store = create();
+      const declined = await store.settle("use:" + OWNER + ":herb:n1", OWNER, {
+        itemDebits: [{ itemKey: "herb", quantity: 1 }],
+      });
+      assert.deepEqual(declined, { ok: false, reason: "insufficient-item", itemKey: "herb" });
+    });
+
+    it("empties the stack to a gone row (quantity 0) when a debit removes every unit", async () => {
+      const store = create();
+      await store.settle("grant-herb-3", OWNER, { items: [{ itemKey: "herb", quantity: 1 }] });
+      const outcome = await store.settle("use:" + OWNER + ":herb:n1", OWNER, {
+        itemDebits: [{ itemKey: "herb", quantity: 1 }],
+      });
+      assert.deepEqual(outcome, { ok: true, balance: undefined, items: [{ itemKey: "herb", quantity: 0 }] });
     });
 
     it("keeps two accounts and two grant keys apart", async () => {

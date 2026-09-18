@@ -12,6 +12,13 @@ export interface QuestRow {
   killCount: number;
   /** `quest_progress.completed_at IS NOT NULL` — the stored fact, derived here, never a stored enum. */
   completed: boolean;
+  /**
+   * `quest_progress.settled_at IS NOT NULL` (roadmap R04-c, design `docs/r04-settlement.md` §9 D9).
+   * `completed` false always makes this false too. A performance short-circuit only — it says
+   * whether `MetaverseRoom.hydrateQuestCache` needs to retry `SettlementStore.settle` on join, never
+   * whether that call is *allowed* to run.
+   */
+  settled: boolean;
 }
 
 /**
@@ -45,6 +52,14 @@ export interface QuestStore {
    * lose one to a read-modify-write, and cannot complete the quest twice.
    */
   recordKill(ownerKey: string, questId: string, requiredCount: number): Promise<QuestRow | null>;
+
+  /**
+   * Flags this account's `questId` reward as settled (design §9 D9). Idempotent — safe to call
+   * again on an account already flagged. Called once `SettlementStore.settle` has answered
+   * `ok: true`; a failure here may be swallowed, since the next join simply retries `settle` again
+   * and that retry is a free, ledger-backed no-op (design §4 D2).
+   */
+  markSettled(ownerKey: string, questId: string): Promise<void>;
 }
 
 /**
@@ -53,14 +68,22 @@ export interface QuestStore {
  * running without a Postgres to point it at.
  */
 export class InMemoryQuestStore implements QuestStore {
-  private readonly byOwner = new Map<string, Map<string, { killCount: number; completed: boolean }>>();
+  private readonly byOwner = new Map<
+    string,
+    Map<string, { killCount: number; completed: boolean; settled: boolean }>
+  >();
 
   list(ownerKey: string): Promise<readonly QuestRow[]> {
     const rows = this.byOwner.get(ownerKey);
     return Promise.resolve(
       rows === undefined
         ? []
-        : [...rows].map(([questId, row]) => ({ questId, killCount: row.killCount, completed: row.completed })),
+        : [...rows].map(([questId, row]) => ({
+            questId,
+            killCount: row.killCount,
+            completed: row.completed,
+            settled: row.settled,
+          })),
     );
   }
 
@@ -70,7 +93,7 @@ export class InMemoryQuestStore implements QuestStore {
     if (existing !== undefined) {
       return Promise.resolve({ questId, ...existing });
     }
-    const created = { killCount: 0, completed: false };
+    const created = { killCount: 0, completed: false, settled: false };
     rows.set(questId, created);
     return Promise.resolve({ questId, ...created });
   }
@@ -90,15 +113,23 @@ export class InMemoryQuestStore implements QuestStore {
     }
     row.killCount = Math.min(requiredCount, row.killCount + 1);
     row.completed = row.killCount >= requiredCount;
-    return Promise.resolve({ questId, killCount: row.killCount, completed: row.completed });
+    return Promise.resolve({ questId, killCount: row.killCount, completed: row.completed, settled: row.settled });
   }
 
-  private rowsOf(ownerKey: string): Map<string, { killCount: number; completed: boolean }> {
+  markSettled(ownerKey: string, questId: string): Promise<void> {
+    const row = this.byOwner.get(ownerKey)?.get(questId);
+    if (row !== undefined) {
+      row.settled = true;
+    }
+    return Promise.resolve();
+  }
+
+  private rowsOf(ownerKey: string): Map<string, { killCount: number; completed: boolean; settled: boolean }> {
     const existing = this.byOwner.get(ownerKey);
     if (existing !== undefined) {
       return existing;
     }
-    const created = new Map<string, { killCount: number; completed: boolean }>();
+    const created = new Map<string, { killCount: number; completed: boolean; settled: boolean }>();
     this.byOwner.set(ownerKey, created);
     return created;
   }
@@ -110,7 +141,7 @@ export class PostgresQuestStore implements QuestStore {
   async list(ownerKey: string): Promise<readonly QuestRow[]> {
     assertUuidOwnerKey(ownerKey);
     const result = await this.query<StoredRow>(
-      "SELECT quest_id, kill_count, completed_at FROM quest_progress WHERE owner_key = $1",
+      "SELECT quest_id, kill_count, completed_at, settled_at FROM quest_progress WHERE owner_key = $1",
       [ownerKey],
     );
     return result.rows.map(toQuestRow);
@@ -128,12 +159,12 @@ export class PostgresQuestStore implements QuestStore {
        VALUES ($1, $2)
        ON CONFLICT (owner_key, quest_id)
        DO UPDATE SET quest_id = quest_progress.quest_id
-       RETURNING quest_id, kill_count, completed_at`,
+       RETURNING quest_id, kill_count, completed_at, settled_at`,
       [ownerKey, questId],
     );
     const row = result.rows[0];
     // RETURNING always answers here: the insert either wrote the row or the DO UPDATE touched it.
-    return row === undefined ? { questId, killCount: 0, completed: false } : toQuestRow(row);
+    return row === undefined ? { questId, killCount: 0, completed: false, settled: false } : toQuestRow(row);
   }
 
   async recordKill(
@@ -155,11 +186,21 @@ export class PostgresQuestStore implements QuestStore {
            completed_at = CASE WHEN kill_count + 1 >= $3::int THEN now() ELSE NULL END,
            updated_at = now()
        WHERE owner_key = $1 AND quest_id = $2 AND completed_at IS NULL
-       RETURNING quest_id, kill_count, completed_at`,
+       RETURNING quest_id, kill_count, completed_at, settled_at`,
       [ownerKey, questId, requiredCount],
     );
     const row = result.rows[0];
     return row === undefined ? null : toQuestRow(row);
+  }
+
+  async markSettled(ownerKey: string, questId: string): Promise<void> {
+    assertUuidOwnerKey(ownerKey);
+    // `settled_at IS NULL` in the WHERE keeps this idempotent without a round trip to check first —
+    // a second flag on an already-settled row matches zero rows and changes nothing.
+    await this.query(
+      `UPDATE quest_progress SET settled_at = now() WHERE owner_key = $1 AND quest_id = $2 AND settled_at IS NULL`,
+      [ownerKey, questId],
+    );
   }
 
   /** Every query reports what it learned about the connection — `PostgresProgressStore.query`'s own contract. */
@@ -182,6 +223,7 @@ interface StoredRow extends Record<string, unknown> {
   quest_id: string;
   kill_count: number;
   completed_at: Date | null;
+  settled_at: Date | null;
 }
 
 function toQuestRow(row: StoredRow): QuestRow {
@@ -190,6 +232,7 @@ function toQuestRow(row: StoredRow): QuestRow {
     // `integer` comes back as a JS number; `bigint` would not, which is why the column is not one.
     killCount: Number(row.kill_count),
     completed: row.completed_at !== null,
+    settled: row.settled_at !== null,
   };
 }
 

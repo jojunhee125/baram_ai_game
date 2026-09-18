@@ -22,6 +22,24 @@ export interface InventoryItem {
   equipped: boolean;
   /** Present only on equipment rows; its absence is what tells a row apart from a possession. */
   damageReductionRatio?: number;
+  /**
+   * 전(錢) this item sells back for (roadmap R04-c, design `docs/r04-settlement.md` §9 D11); its
+   * absence is what tells `InventoryPanel` not to draw a 판매 button for this row — the same
+   * "field present, not a boolean" treatment `damageReductionRatio` already gets.
+   *
+   * **Not yet sent by `/api/inventory`** — the HTTP route (`server/routes.ts`, out of this task's
+   * scope) still presents only the fields R04-b needed. Until it grows this field, every row parses
+   * with `sellValue: undefined` and no 판매 button ever renders; this type and its parser are ready
+   * for the day it does.
+   */
+  sellValue?: number;
+  /**
+   * Whether this item is usable via `item:use` (design §9 D11) — a bare boolean rather than the
+   * server's `{ healAmount }` shape, since the row only needs to decide whether to draw a 사용
+   * button; the heal amount itself is never shown ahead of use. Same unsent-field caveat as
+   * {@link sellValue} above.
+   */
+  consumable?: boolean;
 }
 
 /**
@@ -69,6 +87,8 @@ function isInventoryItem(row: unknown): row is InventoryItem {
     typeof item.quantity === "number" &&
     Number.isFinite(item.quantity) &&
     typeof item.equipped === "boolean" &&
-    (typeof item.damageReductionRatio === "number" || item.damageReductionRatio === undefined)
+    (typeof item.damageReductionRatio === "number" || item.damageReductionRatio === undefined) &&
+    (typeof item.sellValue === "number" || item.sellValue === undefined) &&
+    (typeof item.consumable === "boolean" || item.consumable === undefined)
   );
 }

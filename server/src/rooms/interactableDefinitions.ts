@@ -86,10 +86,11 @@ export const INTERACTABLE_DEFINITIONS: readonly InteractableDefinition[] = [
     // (trigger (31,25)/(32,25), 16 tiles west) and of every avoided band in this file's header
     // comment (spawn row 20, column 16, the column-31 route to the south door).
     at: { room: "plaza", tiles: [{ tileX: 47, tileY: 25 }] },
-    title: "상점 (자리표시)",
-    body:
-      "회복 소모품과 기본 장비를 준비 중입니다.\n\n" +
-      "구매는 아직 열리지 않았습니다 — 정산 기능이 갖춰지면 이곳에서 살 수 있습니다.",
+    title: "상점",
+    // Promoted from the placeholder to real listing copy (roadmap R04-c, `shopDefinitions.ts`'s own
+    // SHOP_DEFINITIONS row for this NPC): the id and tile are unchanged, so no map or object-table
+    // migration is needed, only the words a player reads here.
+    body: "약초를 팔고 있습니다. 다치셨다면 하나 사서 챙겨 두세요.\n\n되팔기도 받습니다.",
     avatarSkin: 16, // 갈색 머리 / 빨강 상의 (assets/README.md 스킨표) — 안내 NPC(21)와 겹치지 않는 인상
   },
   {

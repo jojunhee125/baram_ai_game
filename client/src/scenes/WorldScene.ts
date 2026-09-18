@@ -305,6 +305,28 @@ export class WorldScene extends Phaser.Scene {
         // The bag is the one window that stays open in a fight, so a pickup lands in it live
         // rather than waiting for the next read.
         this.inventoryPanel?.applyGrant(event);
+        // A successful shop:buy's only signal (design §9 D12 reuses this message verbatim rather
+        // than a new "purchase complete" wrapper) — fired on every grant regardless of cause, since
+        // ItemGranted carries no marker distinguishing a purchase from a monster drop
+        // (objectPanel.ts's own `resolveShopAttempt` doc comment records the resulting gap).
+        this.objectPanel?.resolveShopAttempt(event.itemKey);
+      },
+      onItemRemoved: (event) => {
+        this.toasts?.showRemoved(event);
+        this.inventoryPanel?.applyItemRemoved(event);
+        // A consumable's heal (design §9 D12) rides the same hp fields a combat hit would, so the
+        // vitals bar takes the same path PlayerHit already uses rather than a second HP setter.
+        if (event.reason === "consume" && event.hpRemaining !== undefined && event.hpMax !== undefined) {
+          this.vitals?.applyHit({ monsterId: "", damage: 0, hpRemaining: event.hpRemaining, hpMax: event.hpMax });
+        }
+      },
+      onShopDenied: (event) => {
+        this.toasts?.showDenied(event);
+        if (event.action === "buy") {
+          this.objectPanel?.resolveShopAttempt(event.itemKey);
+        } else {
+          this.inventoryPanel?.applyShopDenied(event);
+        }
       },
       onEquipmentChanged: (event) => {
         this.inventoryPanel?.applyEquipmentChange(event);
@@ -359,10 +381,14 @@ export class WorldScene extends Phaser.Scene {
     this.objectPanel = new ObjectPanel(
       (objectId, choiceIndex) => connection.sendQuizAnswer(objectId, choiceIndex),
       (questId) => connection.sendAcceptQuest(questId),
+      (npcObjectId, itemKey, quantity, nonce) =>
+        connection.sendBuyItem(npcObjectId, itemKey, quantity, nonce),
     );
     this.inventoryPanel = new InventoryPanel(
       (itemKey, slot) => connection.sendEquipItem(itemKey, slot),
       (slot) => connection.sendUnequipItem(slot),
+      (itemKey, quantity, nonce) => connection.sendSellItem(itemKey, quantity, nonce),
+      (itemKey, nonce) => connection.sendUseItem(itemKey, nonce),
     );
     this.lootTablePanel = new LootTablePanel(this.connection.roomName);
     this.characterMenu = new CharacterMenu(() => void this.openSkinPicker());

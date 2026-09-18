@@ -770,6 +770,22 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* A sale or a consumable use (roadmap R04-c) — a stack shrinking, not growing. */
+.toast__gain--negative {
+  color: var(--danger);
+}
+
+/* A refused shop:buy/shop:sell/item:use (design §9 D13) — #portal-denial-banner's own tint,
+   applied to one corner notice instead of the whole toast list. */
+.toast--denied {
+  border-color: rgba(224, 128, 111, 0.4);
+}
+
+.toast--denied .toast__name {
+  color: var(--danger);
+  font-weight: 500;
+}
+
 /*
  * Hunting-den entry denial. Centred like .notice, since both are one-off status lines, but
  * tinted with --danger: the point is that a step was refused, not just reported. Click-through
@@ -1039,8 +1055,14 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Equip/unequip toggle, shown only on a row whose item occupies an equipment slot. */
-.bag__equip {
+/*
+ * Equip/unequip toggle, shown only on a row whose item occupies an equipment slot. .bag__sell/
+ * .bag__use (roadmap R04-c, design §9 D11/D12) are independent of it — sellable and equippable are
+ * not mutually exclusive — and share this same look, a row can carry all three at once.
+ */
+.bag__equip,
+.bag__sell,
+.bag__use {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -1058,18 +1080,31 @@ body {
   transition: background-color 120ms ease, border-color 120ms ease;
 }
 
-.bag__equip:hover {
+.bag__equip:hover:not(:disabled),
+.bag__sell:hover:not(:disabled),
+.bag__use:hover:not(:disabled) {
   background: rgba(236, 234, 244, 0.12);
   border-color: rgba(236, 234, 244, 0.32);
 }
 
-.bag__equip:active {
+.bag__equip:active:not(:disabled),
+.bag__sell:active:not(:disabled),
+.bag__use:active:not(:disabled) {
   transform: translateY(1px);
 }
 
-.bag__equip:focus-visible {
+.bag__equip:focus-visible,
+.bag__sell:focus-visible,
+.bag__use:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* A sale/use in flight, .object__quest-accept:disabled's own "sent, not unavailable" reading. */
+.bag__sell:disabled,
+.bag__use:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .bag__section-title {
@@ -1737,7 +1772,8 @@ body {
 }
 
 /* The panel's one affirmative action, so it takes the accent .object__open uses for its own. */
-.object__quest-accept {
+.object__quest-accept,
+.object__shop-buy {
   display: inline-flex;
   align-items: center;
   height: var(--control-height);
@@ -1754,19 +1790,83 @@ body {
   transition: background-color 120ms ease, border-color 120ms ease;
 }
 
-.object__quest-accept:hover:not(:disabled) {
+.object__quest-accept:hover:not(:disabled),
+.object__shop-buy:hover:not(:disabled) {
   background: rgba(236, 234, 244, 0.12);
 }
 
-.object__quest-accept:focus-visible {
+.object__quest-accept:focus-visible,
+.object__shop-buy:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-/* Disabled only while an accept is in flight, so this reads as "sent" rather than "unavailable". */
-.object__quest-accept:disabled {
+/* Disabled only while an accept/purchase is in flight, so this reads as "sent" rather than "unavailable". */
+.object__quest-accept:disabled,
+.object__shop-buy:disabled {
   cursor: default;
   opacity: 0.6;
+}
+
+/*
+ * A shop NPC's listing (roadmap R04-c, design §9 D11/D12) — ruled off exactly like .object__quest,
+ * since both are a second thing said in the same conversation rather than a second window.
+ */
+.object__shop {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid rgba(236, 234, 244, 0.16);
+}
+
+.object__shop-title {
+  margin: 0 0 var(--space-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.object__shop-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.object__shop-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* .bag__icon's own 32px frame of items.png — applyItemIcon paints it, one table for both windows. */
+.object__shop-row .bag__icon {
+  flex: none;
+}
+
+.object__shop-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+/* Tabular figures, .bag__count's own reason: a price must not jitter against its neighbours. */
+.object__shop-price {
+  flex: none;
+  color: rgba(236, 234, 244, 0.72);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.object__shop-buy {
+  flex: none;
+  height: 28px;
+  margin-top: 0;
+  padding: 0 var(--space-3);
+  font-size: 11px;
 }
 
 .object__choices {
@@ -2039,6 +2139,8 @@ body {
   .bag__close,
   .bag__equip,
   .bag__retry,
+  .bag__sell,
+  .bag__use,
   .boot__retry,
   .boss-vitals__fill,
   .character-menu__close,

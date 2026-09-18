@@ -1,0 +1,23 @@
+-- r04-settlement.md §9 D9: removes the per-join settlement retry transaction for an account whose
+-- quest reward is already known paid. hydrateQuestCache (metaverseRoom.ts) currently calls
+-- settle() again on every join for every completed+rewarded quest, unconditionally (§8.7) -- a
+-- full BEGIN/INSERT ON CONFLICT/SELECT/COMMIT against reward_grant, paid by every returning player
+-- who ever finished a quest. This column lets that call be skipped once the reward is known paid,
+-- using data QuestStore.list() already fetches for the quest panel -- zero extra round trips for
+-- the common case, unlike reading reward_grant instead (the rejected alternative, decision D9).
+--
+-- Nullable, like completed_at (0007_quest_progress.sql): NULL while unsettled, unrewarded, or not
+-- yet completed; set once and never cleared. A quest with no QuestDefinition.reward never sets
+-- this -- the room's existing `quest.reward !== undefined` check already skips the settle() call
+-- entirely for one, and this column only ever short-circuits a call that would otherwise happen.
+--
+-- Set by a second UPDATE issued after settle() answers `ok: true`, not by the same statement that
+-- sets completed_at: completing a quest (QuestStore.recordKill) and settling its reward
+-- (SettlementStore.settle) are two different stores against two different tables, and design §4 D6
+-- already accepts the gap between them -- that gap is the whole reason the retry this column
+-- optimises exists at all. A settle() that commits but crashes before this flag is written just
+-- means one more retry on the next join, exactly like today; settle()'s own ledger
+-- (0009_reward_grant.sql) makes that retry a free no-op. This flag is a performance short-circuit
+-- only -- it must never gate whether settle() is *allowed* to run, only whether hydrateQuestCache
+-- bothers to call it.
+ALTER TABLE quest_progress ADD COLUMN settled_at timestamptz;

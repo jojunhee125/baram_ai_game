@@ -4,6 +4,8 @@ import {
   type CurrencyChanged,
   type EquipmentChanged,
   type ItemGranted,
+  type ItemRemoved,
+  type ShopDenied,
 } from "@zep-test/shared";
 import { loadInventory, type InventoryItem } from "../net/inventory";
 import { isTextEntry } from "../input/textEntry";
@@ -122,10 +124,24 @@ export class InventoryPanel {
   private request = 0;
   /** Which block is on screen, so a live grant knows whether there is a list to patch. */
   private view: PanelView = "loading";
+  /**
+   * In-flight sale/use nonces by item key (design §9 D8) — `objectPanel.ts`'s own `pendingBuys`
+   * shape, split into two maps rather than one keyed by `"sell:key"`/`"use:key"` because an item can
+   * be sellable and consumable at once and each action gets its own independent attempt. Kept on the
+   * instance rather than cleared by a refresh, for the same reason `pendingBuys` survives a reopen:
+   * a rebuilt row must redraw already mid-attempt rather than losing track of it (see {@link
+   * buildRow}).
+   */
+  private readonly pendingSell = new Map<string, string>();
+  private readonly pendingUse = new Map<string, string>();
 
   constructor(
     private readonly onEquipItem: (itemKey: string, slot: EquipmentSlot) => void,
     private readonly onUnequipItem: (slot: EquipmentSlot) => void,
+    /** design §9 D8 — nonce is minted by {@link attemptSell}, never here. */
+    private readonly onSellItem: (itemKey: string, quantity: number, nonce: string) => void,
+    /** design §9 D8 — nonce is minted by {@link attemptUse}, never here. */
+    private readonly onUseItem: (itemKey: string, nonce: string) => void,
   ) {
     this.button.addEventListener("click", this.handleToggleClick);
     this.closeButton.addEventListener("click", this.handleCloseClick);
@@ -218,6 +234,52 @@ export class InventoryPanel {
    */
   applyCurrencyChange(event: CurrencyChanged): void {
     this.currencyBalance.textContent = `${event.balance.toLocaleString("ko-KR")}전`;
+  }
+
+  /**
+   * Folds a sale or a consumable use into an open bag (roadmap R04-c, design §9 D12) — {@link
+   * applyGrant}'s own shape run in reverse: `total === 0` drops the row instead of leaving a "0"
+   * count on screen, since a stack that hit zero is gone from the bag entirely. Also resolves
+   * whichever of {@link pendingSell}/{@link pendingUse} this reply answers, by `event.reason`,
+   * which is exact here — unlike a buy, a sale or a use always carries its own cause.
+   *
+   * Dropped under {@link applyGrant}'s own conditions when the window has nothing to patch; the
+   * pending map is still cleared regardless; so is a reopen the other way to resync it.
+   */
+  applyItemRemoved(event: ItemRemoved): void {
+    this.resolvePending(event.reason === "consume" ? this.pendingUse : this.pendingSell, event.itemKey);
+    if (!panelOpen || this.view === "loading" || this.view === "error") {
+      return;
+    }
+    const row = this.findRow(event.itemKey);
+    if (!row) {
+      return;
+    }
+    if (event.total <= 0) {
+      row.remove();
+      if (this.list.children.length === 0) {
+        this.showItems([]);
+      }
+      return;
+    }
+    const count = row.querySelector<HTMLElement>(".bag__count");
+    if (count) {
+      count.textContent = String(event.total);
+    }
+  }
+
+  /**
+   * A `shop:sell`/`item:use` this panel sent was refused (design §9 D12/D13) — `objectPanel.ts`'s
+   * own `resolveShopAttempt` reset, against the two actions this panel owns instead of `"buy"`.
+   * Unlike a buy's `ItemGranted` gap, this has nothing to guess at: `ShopDenied.action` says exactly
+   * which pending map answers it.
+   */
+  applyShopDenied(event: ShopDenied): void {
+    if (event.action === "sell") {
+      this.resolvePending(this.pendingSell, event.itemKey);
+    } else if (event.action === "use") {
+      this.resolvePending(this.pendingUse, event.itemKey);
+    }
   }
 
   /**
@@ -524,7 +586,102 @@ export class InventoryPanel {
       row.append(equip);
     }
 
+    // 판매 — only a row whose item carries a sell price at all (design §9 D11); absent for a
+    // quest-bound possession like entry-pass. Restores the "in flight" reading across a reopen
+    // rather than always starting fresh, since `pendingSell` outlives this row being torn down and
+    // rebuilt by a refresh — the resend such a reopen produces is the same attempt, not a new one.
+    if (item.sellValue !== undefined) {
+      const pendingNonce = this.pendingSell.get(item.itemKey);
+      const sell = document.createElement("button");
+      sell.type = "button";
+      sell.className = "bag__sell";
+      sell.disabled = pendingNonce !== undefined;
+      sell.textContent = pendingNonce !== undefined ? "판매하는 중…" : "판매";
+      sell.addEventListener("click", (event) => {
+        this.attemptSell(item.itemKey, sell);
+        if (event.detail > 0) {
+          sell.blur();
+        }
+      });
+      row.append(sell);
+    }
+
+    // 사용 — only a consumable row (design §9 D11), {@link sellValue}'s own shape and reopen rule.
+    if (item.consumable === true) {
+      const pendingNonce = this.pendingUse.get(item.itemKey);
+      const use = document.createElement("button");
+      use.type = "button";
+      use.className = "bag__use";
+      use.disabled = pendingNonce !== undefined;
+      use.textContent = pendingNonce !== undefined ? "사용하는 중…" : "사용";
+      use.addEventListener("click", (event) => {
+        this.attemptUse(item.itemKey, use);
+        if (event.detail > 0) {
+          use.blur();
+        }
+      });
+      row.append(use);
+    }
+
     return row;
+  }
+
+  /**
+   * Sends one sale of one unit — no quantity stepper, `objectPanel.ts`'s own `buyItem` minimalism.
+   * `pendingSell` is checked first rather than always minting fresh (design §9 D8): a
+   * reopened bag rebuilds this button in its pending reading (see {@link buildRow}), and a click on
+   * it is a resend of the *same* attempt, not a new sale — this is the one path in this panel where
+   * that resend can actually happen, since the row survives a reopen only through the map, not the
+   * DOM.
+   */
+  private attemptSell(itemKey: string, button: HTMLButtonElement): void {
+    if (button.disabled) {
+      return;
+    }
+    let nonce = this.pendingSell.get(itemKey);
+    if (nonce === undefined) {
+      nonce = crypto.randomUUID();
+      this.pendingSell.set(itemKey, nonce);
+    }
+    button.disabled = true;
+    button.textContent = "판매하는 중…";
+    this.onSellItem(itemKey, 1, nonce);
+  }
+
+  /** {@link attemptSell}'s own shape, against `item:use`. Always exactly one unit. */
+  private attemptUse(itemKey: string, button: HTMLButtonElement): void {
+    if (button.disabled) {
+      return;
+    }
+    let nonce = this.pendingUse.get(itemKey);
+    if (nonce === undefined) {
+      nonce = crypto.randomUUID();
+      this.pendingUse.set(itemKey, nonce);
+    }
+    button.disabled = true;
+    button.textContent = "사용하는 중…";
+    this.onUseItem(itemKey, nonce);
+  }
+
+  /**
+   * Clears one pending attempt and restores whatever button is currently on screen for it, if the
+   * bag happens to be open and showing that row — `objectPanel.ts`'s own `resolveShopAttempt`
+   * reset, against a map instead of a per-row field, since this panel's rows do not survive a
+   * refresh the way `ObjectPanel`'s shop block survives being merely reopened.
+   */
+  private resolvePending(pending: Map<string, string>, itemKey: string): void {
+    if (!pending.delete(itemKey)) {
+      return;
+    }
+    const row = this.findRow(itemKey);
+    const button = row?.querySelector<HTMLButtonElement>(
+      pending === this.pendingSell ? ".bag__sell" : ".bag__use",
+    );
+    if (!button) {
+      return;
+    }
+    button.disabled = false;
+    button.textContent = pending === this.pendingSell ? "판매" : "사용";
   }
 
   /**

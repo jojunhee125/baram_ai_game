@@ -7,8 +7,12 @@ import {
   type QuestState,
   type QuizInteraction,
   type QuizResult,
+  type ShopDenied,
+  type ShopListingView,
+  type ShopOffer,
 } from "@zep-test/shared";
 import { isTextEntry } from "../input/textEntry";
+import { applyItemIcon } from "./inventoryPanel";
 
 const KIND_LABELS: Record<InteractableKind, string> = {
   [InteractableKind.Link]: "링크",
@@ -58,11 +62,41 @@ export class ObjectPanel {
   private quiz: OpenQuiz | null = null;
   /** The quest blocks currently drawn, by quest id. Empty for every kind but an NPC with offers. */
   private readonly quests = new Map<string, OpenQuest>();
+  /**
+   * The shop rows' buy buttons currently drawn, by item key — rebuilt on every `open()`, unlike
+   * {@link pendingBuys} below.
+   */
+  private readonly shopRows = new Map<string, HTMLButtonElement>();
+  /**
+   * In-flight purchase nonces by item key (design §9 D8), kept on the instance rather than cleared
+   * by `open()`/`close()` — `inventoryPanel.ts`'s own `pendingSell`/`pendingUse` shape, for the
+   * same reason: stepping off the NPC tile and back on rebuilds {@link shopRows} from a fresh
+   * `NpcInteraction` payload, but a purchase already in flight when that happens is a *dropped
+   * reply*, not a new attempt, and resending it must reuse this same nonce. {@link buildShopRow}
+   * reads this to redraw a reopened row already disabled and "구매하는 중…" when it applies.
+   *
+   * Not scoped by NPC: two different shop NPCs selling the same item key would share one pending
+   * slot here. Unreached today — `docs/r04-settlement.md` §9 D11 authors exactly one shop NPC — and
+   * left rather than keying by `${npcObjectId}:${itemKey}` for a case that cannot happen yet.
+   */
+  private readonly pendingBuys = new Map<string, string>();
+  /** Which NPC the open shop block belongs to — {@link buyItem} names it back in every request. */
+  private currentShopNpcId: string | null = null;
   private currentBlocksMovement = true;
 
   constructor(
     private readonly sendAnswer: (objectId: string, choiceIndex: number) => void,
     private readonly sendAcceptQuest: (questId: string) => void,
+    /**
+     * design §9 D8 — `nonce` is minted by {@link buyItem}, never here: this callback's only job is
+     * to put a message on the wire.
+     */
+    private readonly sendBuyItem: (
+      npcObjectId: string,
+      itemKey: string,
+      quantity: number,
+      nonce: string,
+    ) => void,
   ) {
     this.closeButton.addEventListener("click", this.handleClose);
     window.addEventListener("keydown", this.handleKey);
@@ -90,6 +124,8 @@ export class ObjectPanel {
     this.currentBlocksMovement = payload.blocksMovement;
     this.quiz = null;
     this.quests.clear();
+    this.shopRows.clear();
+    this.currentShopNpcId = null;
     this.body.replaceChildren();
     this.link.hidden = true;
     this.link.removeAttribute("href");
@@ -180,6 +216,8 @@ export class ObjectPanel {
     this.heading.textContent = "";
     this.quiz = null;
     this.quests.clear();
+    this.shopRows.clear();
+    this.currentShopNpcId = null;
     this.currentBlocksMovement = true; // back to the safe default for whatever opens next
   }
 
@@ -227,6 +265,126 @@ export class ObjectPanel {
     for (const quest of payload.quests ?? []) {
       this.renderQuest(quest);
     }
+    if (payload.shop) {
+      this.renderShop(payload.objectId, payload.shop);
+    }
+  }
+
+  /**
+   * The giver's quest treatment, applied to a shop listing (roadmap R04-c, design §9 D11/D12):
+   * ruled off from whatever is above it, one row per listing, drawn once from the payload the NPC
+   * panel carried — a listing's price never changes underneath an open panel, unlike a quest's
+   * status, so there is no `applyX` counterpart here to patch a row in place.
+   */
+  private renderShop(npcObjectId: string, offer: ShopOffer): void {
+    this.currentShopNpcId = npcObjectId;
+
+    const section = document.createElement("section");
+    section.className = "object__shop";
+
+    const title = document.createElement("h3");
+    title.className = "object__shop-title";
+    title.textContent = "상점";
+    section.append(title);
+
+    const list = document.createElement("ul");
+    list.className = "object__shop-list";
+    for (const listing of offer.listings) {
+      list.append(this.buildShopRow(listing));
+    }
+    section.append(list);
+
+    this.body.append(section);
+  }
+
+  private buildShopRow(listing: ShopListingView): HTMLLIElement {
+    const row = document.createElement("li");
+    row.className = "object__shop-row";
+
+    const icon = document.createElement("span");
+    applyItemIcon(icon, listing.icon);
+
+    const name = document.createElement("span");
+    name.className = "object__shop-name";
+    name.textContent = listing.name;
+
+    const price = document.createElement("span");
+    price.className = "object__shop-price";
+    price.textContent = `${listing.price.toLocaleString("ko-KR")}전`;
+
+    // A reopen (stepping off the tile and back on) rebuilds this row from scratch, but a purchase
+    // already in flight when that happens is a dropped reply, not a new attempt — `pendingBuys`
+    // outlives the rebuild, so the fresh button starts exactly where the old one left off.
+    const pending = this.pendingBuys.has(listing.itemKey);
+    const buy = document.createElement("button");
+    buy.type = "button";
+    buy.className = "object__shop-buy";
+    buy.disabled = pending;
+    buy.textContent = pending ? "구매하는 중…" : "구매";
+    buy.addEventListener("click", () => this.buyItem(listing.itemKey));
+
+    row.append(icon, name, price, buy);
+    this.shopRows.set(listing.itemKey, buy);
+    return row;
+  }
+
+  /**
+   * Sends one purchase of one unit — there is no quantity stepper, {@link
+   * ClientMessage.UseItem}'s own "nothing more to say" minimalism applied to buying. Disables the
+   * row's button until a terminal reply resolves it ({@link resolveShopAttempt}/{@link
+   * applyShopDenied}), the same wait `acceptQuest` already holds its own button through.
+   *
+   * `pendingBuys` is checked before minting a nonce (design §9 D8): a click reaching here with one
+   * already recorded — only possible via a reopened row that redrew itself disabled-and-pending,
+   * since a live button is disabled for the whole in-flight window — is a resend of that same
+   * attempt, not a new purchase, and must carry the identical nonce back out.
+   */
+  private buyItem(itemKey: string): void {
+    const button = this.shopRows.get(itemKey);
+    const npcObjectId = this.currentShopNpcId;
+    if (!button || !npcObjectId || button.disabled) {
+      return;
+    }
+    let nonce = this.pendingBuys.get(itemKey);
+    if (nonce === undefined) {
+      nonce = crypto.randomUUID();
+      this.pendingBuys.set(itemKey, nonce);
+    }
+    button.disabled = true;
+    button.textContent = "구매하는 중…";
+    this.sendBuyItem(npcObjectId, itemKey, 1, nonce);
+  }
+
+  /**
+   * Clears an in-flight purchase and restores the row to its pressable state — called on both a
+   * successful buy and a refused one, {@link acceptQuest}'s "answer only ever comes from the
+   * server" rule applied here too. Ignored for an item this panel is not currently selling, or one
+   * with no purchase in flight, the same guard {@link applyQuestUpdate} gives a foreign quest id.
+   *
+   * **Known gap**: a successful buy has no message of its own to call this from — `ItemGranted`
+   * carries no "this came from a shop" marker (design §9 D12 reuses it verbatim), so `WorldScene`
+   * calls this on every `ItemGranted` for the item key regardless of cause. A monster dropping the
+   * exact item being bought at the same moment would clear this early; harmless (the button simply
+   * re-enables a beat sooner) but worth knowing rather than papering over.
+   */
+  resolveShopAttempt(itemKey: string): void {
+    if (!this.pendingBuys.delete(itemKey)) {
+      return;
+    }
+    const button = this.shopRows.get(itemKey);
+    if (!button) {
+      return;
+    }
+    button.disabled = false;
+    button.textContent = "구매";
+  }
+
+  /** A `shop:buy` this panel's own NPC sent was refused — {@link resolveShopAttempt}'s own reset. */
+  applyShopDenied(event: ShopDenied): void {
+    if (event.action !== "buy") {
+      return;
+    }
+    this.resolveShopAttempt(event.itemKey);
   }
 
   private renderQuest(state: QuestState): void {

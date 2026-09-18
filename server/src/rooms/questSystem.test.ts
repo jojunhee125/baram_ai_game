@@ -361,7 +361,9 @@ describe("accepting a quest", () => {
         requiredCount: QUEST.objective.count,
       } satisfies QuestState,
     ]);
-    assert.deepEqual(await store.list(OWNER), [{ questId: QUEST.id, killCount: 0, completed: false }]);
+    assert.deepEqual(await store.list(OWNER), [
+      { questId: QUEST.id, killCount: 0, completed: false, settled: false },
+    ]);
     dispose(room);
   });
 
@@ -381,7 +383,9 @@ describe("accepting a quest", () => {
     await flush();
 
     assert.deepEqual(questUpdates(client).at(-1)?.killCount, 1, "the second accept re-stated the row");
-    assert.deepEqual(await store.list(OWNER), [{ questId: QUEST.id, killCount: 1, completed: false }]);
+    assert.deepEqual(await store.list(OWNER), [
+      { questId: QUEST.id, killCount: 1, completed: false, settled: false },
+    ]);
     dispose(room);
   });
 
@@ -463,7 +467,9 @@ describe("kills advancing a quest", () => {
       ],
       "the kill past the requirement must produce no fifth message",
     );
-    assert.deepEqual(await store.list(OWNER), [{ questId: QUEST.id, killCount: required, completed: true }]);
+    assert.deepEqual(await store.list(OWNER), [
+      { questId: QUEST.id, killCount: required, completed: true, settled: false },
+    ]);
     dispose(room);
   });
 
@@ -505,7 +511,9 @@ describe("kills advancing a quest", () => {
     await flush();
 
     assert.equal(questUpdates(client).length, 1, "only the accept — a rabbit is not a squirrel");
-    assert.deepEqual(await store.list(OWNER), [{ questId: QUEST.id, killCount: 0, completed: false }]);
+    assert.deepEqual(await store.list(OWNER), [
+      { questId: QUEST.id, killCount: 0, completed: false, settled: false },
+    ]);
     dispose(room);
   });
 
@@ -526,7 +534,9 @@ describe("kills advancing a quest", () => {
 
     assert.equal(questUpdates(killer).at(-1)?.killCount, 1);
     assert.equal(questUpdates(bystander).at(-1)?.killCount, 0, "standing nearby is not hunting");
-    assert.deepEqual(await store.list(OTHER_OWNER), [{ questId: QUEST.id, killCount: 0, completed: false }]);
+    assert.deepEqual(await store.list(OTHER_OWNER), [
+      { questId: QUEST.id, killCount: 0, completed: false, settled: false },
+    ]);
     dispose(room);
   });
 
@@ -546,7 +556,7 @@ describe("kills advancing a quest", () => {
 
     assert.deepEqual(
       await store.list(OWNER),
-      [{ questId: QUEST.id, killCount: 1, completed: false }],
+      [{ questId: QUEST.id, killCount: 1, completed: false, settled: false }],
       "the kill belongs to the account, not to the session that walked out",
     );
     dispose(room);
@@ -605,6 +615,7 @@ describe("rejoining", () => {
         killCalls += 1;
         return inner.recordKill(ownerKey, questId, required);
       },
+      markSettled: (ownerKey, questId) => inner.markSettled(ownerKey, questId),
     };
     const room = await createRoom({ questStore: holding }, squirrelsBeside(ROOM_OPTIONS.spawn, 1));
     const client = join(room, "hunter");
@@ -641,6 +652,7 @@ describe("rejoining", () => {
         killCalls += 1;
         return inner.recordKill(ownerKey, questId, required);
       },
+      markSettled: (ownerKey, questId) => inner.markSettled(ownerKey, questId),
     };
     const room = await createRoom({ questStore: counting }, squirrelsBeside(ROOM_OPTIONS.spawn, 1));
     const client = join(room, "hunter");
@@ -836,6 +848,87 @@ describe("quest completion rewards (roadmap R04-b)", () => {
     // `settlementStore.settle` would have thrown on a non-uuid ownerKey (`assertUuidOwnerKey`) had
     // this codebase fallen back to the session id the way loot/EXP/quest-progress do; reaching
     // here at all is the assertion that it did not.
+    dispose(room);
+  });
+});
+
+describe("the settled flag short-circuits the join-time retry (roadmap R04-c, design §9 D9)", () => {
+  const REWARD = QUEST.reward;
+  assert.ok(REWARD, "the fixture needs the authored table's own reward");
+
+  /** Counts `settle()` calls without changing what it answers — the retry-skip is the thing under test. */
+  function countingSettlementStore(inner: SettlementStore): {
+    store: SettlementStore;
+    settleCalls: () => number;
+  } {
+    let calls = 0;
+    return {
+      store: {
+        settle: (grantKey, ownerKey, effects) => {
+          calls += 1;
+          return inner.settle(grantKey, ownerKey, effects);
+        },
+      },
+      settleCalls: () => calls,
+    };
+  }
+
+  it("calls settle zero times on a rejoin once the reward is flagged settled", async () => {
+    const questStore = new InMemoryQuestStore();
+    const currencyStore = new InMemoryCurrencyStore();
+    const { store: settlementStore, settleCalls } = countingSettlementStore(
+      new InMemorySettlementStore(currencyStore),
+    );
+    const required = QUEST.objective.count;
+    const room = await createRoom(
+      { questStore, currencyStore, settlementStore },
+      squirrelsBeside(ROOM_OPTIONS.spawn, required),
+    );
+    const first = join(room, "hunter");
+    await flush();
+    accept(room, first);
+    await flush();
+    place(room, "hunter", ROOM_OPTIONS.spawn);
+    room.state.players.get("hunter")!.facing = Direction.Right;
+    for (let kill = 0; kill < required; kill++) {
+      attack(room, first);
+      await flush();
+    }
+    assert.equal(settleCalls(), 1, "the completion transition itself settles once");
+    assert.equal((await questStore.list(OWNER))[0]?.settled, true, "settleQuestReward must flag it on success");
+    room.onLeave(asRoomClient(first));
+
+    join(room, "hunter-again", OWNER);
+    await flush();
+
+    assert.equal(settleCalls(), 1, "a rejoin of an already-flagged quest must not call settle again at all");
+    dispose(room);
+  });
+
+  it("still retries settle on rejoin when the row completed but was never flagged settled", async () => {
+    const questStore = new InMemoryQuestStore();
+    const currencyStore = new InMemoryCurrencyStore();
+    const { store: settlementStore, settleCalls } = countingSettlementStore(
+      new InMemorySettlementStore(currencyStore),
+    );
+    // The exact crash window design §4 D6/§9 D9 exist for: the row is complete but never went
+    // through `settleQuestReward` at all, so `settled_at` was never written.
+    await questStore.accept(OWNER, QUEST.id);
+    for (let kill = 0; kill < QUEST.objective.count; kill++) {
+      await questStore.recordKill(OWNER, QUEST.id, QUEST.objective.count);
+    }
+    assert.equal((await questStore.list(OWNER))[0]?.settled, false, "precondition: not yet flagged");
+
+    const room = await createRoom(
+      { questStore, currencyStore, settlementStore },
+      squirrelsBeside(ROOM_OPTIONS.spawn, 1),
+    );
+    join(room, "hunter");
+    await flush();
+
+    assert.equal(settleCalls(), 1, "an unflagged completion must still retry settle on join");
+    assert.equal(await currencyStore.getBalance(OWNER), REWARD.currencyDelta);
+    assert.equal((await questStore.list(OWNER))[0]?.settled, true, "the retry itself must flag it");
     dispose(room);
   });
 });

@@ -770,6 +770,10 @@ describe("VERIFY a store that actually throws (not just a full bag)", () => {
     unequip(): Promise<boolean> {
       return Promise.resolve(false);
     }
+
+    remove(): Promise<number | null> {
+      return Promise.resolve(null);
+    }
   }
 
   it("drops the failed grant in silence, still credits and announces the other, and never throws unhandled", async () => {

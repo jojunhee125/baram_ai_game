@@ -253,6 +253,8 @@ function presentInventory(rows: readonly InventoryRow[]): readonly {
   quantity: number;
   equipped: boolean;
   damageReductionRatio?: number;
+  sellValue?: number;
+  consumable?: boolean;
 }[] {
   const rowsByKey = new Map(rows.map((row) => [row.itemKey, row]));
   const items = [];
@@ -268,6 +270,12 @@ function presentInventory(rows: readonly InventoryRow[]): readonly {
       quantity: row.quantity,
       equipped: row.equipped,
       damageReductionRatio: definition.equipment?.stats.damageReduction,
+      // roadmap R04-c (design `docs/r04-settlement.md` §9 D11): `sellValue` travels as-is
+      // (`client/src/net/inventory.ts` parses the same name and type), and `consumable` collapses
+      // to a bare boolean — the client's own row only ever needs "can this be used", never the heal
+      // amount ahead of use (that type is `client/src/net/inventory.ts`'s own documented contract).
+      sellValue: definition.sellValue,
+      consumable: definition.consumable !== undefined ? true : undefined,
     });
   }
   return items;

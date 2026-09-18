@@ -29,6 +29,7 @@ import {
 } from "./rooms/monsterDefinitions";
 import { PORTAL_DEFINITIONS } from "./rooms/portalDefinitions";
 import { QUEST_DEFINITIONS, validateQuestDefinitions } from "./rooms/questDefinitions";
+import { SHOP_DEFINITIONS, validateShopDefinitions } from "./rooms/shopDefinitions";
 
 export const DEFAULT_PORT = 2567;
 
@@ -224,6 +225,17 @@ async function validateRoomMaps(): Promise<void> {
   }
   if (quests.errors.length > 0) {
     refuseBoot(`invalid quest definitions: ${quests.errors.join("; ")}`);
+  }
+
+  // Same "both sides" reasoning as quests, applied to shops (roadmap R04-c, design
+  // `docs/r04-settlement.md` §9 D11): a listing's NPC or item can go stale independently of this
+  // table, and each fault is a purchase that silently cannot resolve after the deploy.
+  const shops = validateShopDefinitions(SHOP_DEFINITIONS, INTERACTABLE_DEFINITIONS, ITEM_DEFINITIONS);
+  for (const warning of shops.warnings) {
+    console.warn(`[zep-test] ${warning}`);
+  }
+  if (shops.errors.length > 0) {
+    refuseBoot(`invalid shop definitions: ${shops.errors.join("; ")}`);
   }
 
   // No map argument: an item is not placed anywhere. It is checked here anyway because this is

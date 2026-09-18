@@ -179,6 +179,10 @@ class SlowPassInventoryStore implements InventoryStore {
   unequip(): Promise<boolean> {
     return Promise.resolve(true);
   }
+
+  remove(): Promise<number | null> {
+    return Promise.resolve(null);
+  }
 }
 
 // -- harness ------------------------------------------------------------------------------------

@@ -232,6 +232,9 @@ class MultiSlotControlledStore implements InventoryStore {
       this.unequipWaiters.push({ resolve });
     });
   }
+  remove(): Promise<number | null> {
+    return Promise.resolve(null);
+  }
 
   settleEquip(callIndex: number, value: boolean): void {
     this.equipWaiters[callIndex]!.resolve(value);
@@ -561,6 +564,7 @@ describe("T4 — getEquippedSlots: one round trip for every slot, and the hasMon
       },
       equip: () => Promise.resolve(false),
       unequip: () => Promise.resolve(false),
+      remove: () => Promise.resolve(null),
     };
     const room = await createRoom([INERT_SPAWN], store);
     try {
@@ -586,6 +590,7 @@ describe("T4 — getEquippedSlots: one round trip for every slot, and the hasMon
       },
       equip: () => Promise.resolve(false),
       unequip: () => Promise.resolve(false),
+      remove: () => Promise.resolve(null),
     };
     // No monster spawns at all: `hasMonsters` is computed from `this.state.monsters.size > 0`
     // (metaverseRoom.ts:1484), so an empty spawn list is what a real grand-plaza-shaped room is.

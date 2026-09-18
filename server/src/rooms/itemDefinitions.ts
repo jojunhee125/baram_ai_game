@@ -15,6 +15,21 @@ import type { ItemDefinition } from "./contracts";
 export const MAX_DISTINCT_ITEMS = 24;
 
 /**
+ * The largest `quantity` one shop message may name (roadmap R04-c). **Not** a stack cap — the
+ * comment above still holds and nothing limits what a bag accumulates from drops. This bounds what
+ * a *client request* may ask for, which is a different thing.
+ *
+ * It exists because `inventory_item.quantity` is a Postgres `integer`
+ * (`0002_inventory_item.sql`), so a request for 3e9 passes `Number.isInteger` and then fails deep
+ * inside the settlement transaction as a raw driver error (`22003`). That rolls everything back —
+ * no asset is ever corrupted — but it takes the `markDatabaseDegraded` path for a database that is
+ * perfectly healthy, and the settle caller's `catch` swallows it, so the player's purchase
+ * disappears without even a `ShopDenied`. Rejected up front instead, and deliberately far below the
+ * column's own bound so repeated purchases stay nowhere near it.
+ */
+export const MAX_REQUEST_QUANTITY = 9_999;
+
+/**
  * Everything a player can be carrying. A pure data table like `PORTAL_DEFINITIONS` and
  * `INTERACTABLE_DEFINITIONS`, on the same layer and with the same trust model: what is in code
  * is authoritative, and editing it means deploying.
@@ -42,7 +57,13 @@ export const ITEM_DEFINITIONS: readonly ItemDefinition[] = [
   { key: "acorn", name: "도토리", icon: "acorn" },
   { key: "carrot", name: "당근", icon: "carrot" },
   { key: "copper-coin", name: "구리 동전", icon: "copper-coin" },
-  { key: "herb", name: "약초", icon: "herb" },
+  // Promoted to the shop's recovery consumable (roadmap R04-c, design `docs/r04-settlement.md` §9
+  // D11, `docs/decisions.md` 2026-09-18) — no new key or icon: a healing herb is exactly what this
+  // drop-only row already was, so `plaza-shop-npc` sells the same item a squirrel/rabbit/deer can
+  // already drop rather than introducing a second, unrelated "recovery item". `sellValue` is a
+  // separate, explicit figure from the shop's buy price (`shopDefinitions.ts`) — decisions.md's own
+  // rule for a price with no balancing data behind it yet.
+  { key: "herb", name: "약초", icon: "herb", sellValue: 3, consumable: { healAmount: 30 } },
   // Promoted to a weapon-slot equipment item (design-phase-v-equipment-system.md §5.5): the `key`/
   // `icon`/`name` are unchanged, so the Pass G swing visual keyed on `old-dagger` still applies —
   // only the `equipment` field is new. Left without `possession: true`, unlike the design doc's

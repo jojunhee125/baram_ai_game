@@ -201,6 +201,53 @@ function assertInventoryStoreContract(label: string, create: () => InventoryStor
       assert.equal(results.filter((won) => !won).length, 24);
       assert.deepEqual(await store.list(OWNER), [{ itemKey: "entry-pass", quantity: 1, equipped: false }]);
     });
+
+    it("removes a partial stack and answers the total afterwards (roadmap R04-c)", async () => {
+      const store = create();
+      await store.add(OWNER, "herb", 5);
+      assert.equal(await store.remove(OWNER, "herb", 2), 3);
+      assert.deepEqual(await store.list(OWNER), [{ itemKey: "herb", quantity: 3, equipped: false }]);
+    });
+
+    it("removing every unit drops the row entirely rather than leaving quantity 0", async () => {
+      const store = create();
+      await store.add(OWNER, "herb", 3);
+      assert.equal(await store.remove(OWNER, "herb", 3), 0);
+      assert.deepEqual(await store.list(OWNER), [], "an emptied stack must not appear as a 0-quantity row");
+    });
+
+    it("answers null instead of throwing when the account does not hold enough", async () => {
+      const store = create();
+      await store.add(OWNER, "herb", 1);
+      assert.equal(await store.remove(OWNER, "herb", 5), null);
+      assert.deepEqual(
+        await store.list(OWNER),
+        [{ itemKey: "herb", quantity: 1, equipped: false }],
+        "a declined removal must not touch the stack",
+      );
+    });
+
+    it("answers null for an item the account never held at all", async () => {
+      const store = create();
+      assert.equal(await store.remove(OWNER, "herb", 1), null);
+    });
+
+    it("does not let two owners' removals interfere", async () => {
+      const store = create();
+      await store.add(OWNER, "herb", 5);
+      await store.add(OTHER_OWNER, "herb", 5);
+      assert.equal(await store.remove(OWNER, "herb", 5), 0);
+      assert.deepEqual(await store.list(OTHER_OWNER), [{ itemKey: "herb", quantity: 5, equipped: false }]);
+    });
+
+    it("rejects a quantity the quantity > 0 CHECK would reject, in both implementations", async () => {
+      const store = create();
+      await store.add(OWNER, "herb", 5);
+      for (const quantity of [0, -1, 1.5, Number.NaN]) {
+        await assert.rejects(() => store.remove(OWNER, "herb", quantity), /positive integer/, `quantity ${quantity}`);
+      }
+      assert.deepEqual(await store.list(OWNER), [{ itemKey: "herb", quantity: 5, equipped: false }], "nothing may have been touched");
+    });
   });
 }
 
@@ -224,6 +271,21 @@ function inMemoryBackedPostgresStore(): InventoryStore {
       return { rows: [...bag].map(([item_key, quantity]) => ({ item_key, quantity, equipped: false })) };
     }
     const itemKey = String(values[1]);
+    if (sql.includes("DELETE FROM inventory_item")) {
+      // `remove`'s single-statement DELETE-or-UPDATE (design §9 D10).
+      const quantity = Number(values[2]);
+      const held = bag.get(itemKey);
+      if (held === undefined || held < quantity) {
+        return { rows: [] };
+      }
+      const total = held - quantity;
+      if (total === 0) {
+        bag.delete(itemKey);
+      } else {
+        bag.set(itemKey, total);
+      }
+      return { rows: [{ quantity: total }] };
+    }
     const held = bag.get(itemKey);
     // grantOnce's statement carries no quantity parameter — cap is $3, not $4 — and DO NOTHING
     // instead of DO UPDATE, so a held key answers false rather than topping up.
@@ -495,6 +557,7 @@ function ownerScopedStore(pool: Pool): InventoryStore {
     getEquippedSlots: (ownerKey) => inner.getEquippedSlots(resolve(ownerKey)),
     equip: (ownerKey, itemKey, slot) => inner.equip(resolve(ownerKey), itemKey, slot),
     unequip: (ownerKey, slot) => inner.unequip(resolve(ownerKey), slot),
+    remove: (ownerKey, itemKey, quantity) => inner.remove(resolve(ownerKey), itemKey, quantity),
   };
 }
 

@@ -61,6 +61,30 @@ export const ClientMessage = {
    * message costs a round trip and changes nothing.
    */
   AcceptQuest: "quest:accept",
+  /**
+   * Buys `quantity` of `itemKey` from the shop NPC named by `npcObjectId` (roadmap R04-c, design
+   * `docs/r04-settlement.md` §9 D8/D10/D11). `npcObjectId` is resolved against this room's own
+   * {@link InteractableIndex} the way {@link AcceptQuestRequest.questId} is resolved against the
+   * giver index — the price is never trusted from the client, only looked up server-side from the
+   * matching `ShopDefinition`. `nonce` is client-generated and must be resent unchanged on a retry
+   * of the *same* purchase attempt (§9 D8) — a fresh nonce means a fresh purchase.
+   */
+  BuyItem: "shop:buy",
+  /**
+   * Sells `quantity` of `itemKey` back for its item definition's `sellValue` (§9 D11). Not scoped
+   * to a shop NPC, unlike {@link ClientMessage.BuyItem}: a sell price is intrinsic to the item, not
+   * authored per-shop, so there is no room-narrowed table to resolve against — only
+   * `ITEM_DEFINITIONS` itself. `nonce` is the same per-attempt idempotency key {@link
+   * ClientMessage.BuyItem} uses.
+   */
+  SellItem: "shop:sell",
+  /**
+   * Uses one unit of a consumable `itemKey` (§9 D10/D11, design §3 D5 — selfrestore, loss on a
+   * dropped session accepted). Always exactly one unit; there is no `quantity`, {@link
+   * ClientMessage.Attack}'s own "nothing more to say" minimalism. `nonce` is the same per-attempt
+   * idempotency key {@link ClientMessage.BuyItem} uses.
+   */
+  UseItem: "item:use",
 } as const;
 
 export type ClientMessage = (typeof ClientMessage)[keyof typeof ClientMessage];
@@ -156,6 +180,32 @@ export interface AcceptQuestRequest {
   questId: string;
 }
 
+/** See {@link ClientMessage.BuyItem}. */
+export interface BuyItemRequest {
+  npcObjectId: string;
+  itemKey: string;
+  /** Positive integer; total cost is the shop's per-unit price times this. */
+  quantity: number;
+  /** Client-generated idempotency key for this one purchase attempt (design §9 D8). */
+  nonce: string;
+}
+
+/** See {@link ClientMessage.SellItem}. */
+export interface SellItemRequest {
+  itemKey: string;
+  /** Positive integer. */
+  quantity: number;
+  /** Client-generated idempotency key for this one sale attempt (design §9 D8). */
+  nonce: string;
+}
+
+/** See {@link ClientMessage.UseItem}. */
+export interface UseItemRequest {
+  itemKey: string;
+  /** Client-generated idempotency key for this one use attempt (design §9 D8). */
+  nonce: string;
+}
+
 export interface ClientMessagePayload {
   [ClientMessage.Move]: MoveRequest;
   [ClientMessage.Chat]: ChatRequest;
@@ -178,6 +228,9 @@ export interface ClientMessagePayload {
   [ClientMessage.ChangeSkin]: ChangeSkinRequest;
   [ClientMessage.WarpToLandmark]: WarpToLandmarkRequest;
   [ClientMessage.AcceptQuest]: AcceptQuestRequest;
+  [ClientMessage.BuyItem]: BuyItemRequest;
+  [ClientMessage.SellItem]: SellItemRequest;
+  [ClientMessage.UseItem]: UseItemRequest;
 }
 
 export const ServerMessage = {
@@ -198,6 +251,10 @@ export const ServerMessage = {
   QuestUpdated: "quest:updated",
   /** roadmap R04-b — the account's currency balance changed, and once as a plain sync at join. */
   CurrencyChanged: "currency:changed",
+  /** roadmap R04-c — a stack shrank from a sale or a consumable use (design §9 D12). */
+  ItemRemoved: "inventory:removed",
+  /** roadmap R04-c — a shop/consumable request was refused (design §9 D12/D13). */
+  ShopDenied: "shop:denied",
 } as const;
 
 export type ServerMessage = (typeof ServerMessage)[keyof typeof ServerMessage];
@@ -382,6 +439,24 @@ export interface QuestState {
   requiredCount: number;
 }
 
+/**
+ * One item a shop NPC sells, resolved for display — the {@link QuestState} treatment applied to a
+ * shop row: the whole thing travels, including text, so a client older than `ShopDefinition`
+ * (server/src/rooms/shopDefinitions.ts) still renders exactly what it was handed.
+ */
+export interface ShopListingView {
+  itemKey: string;
+  name: string;
+  icon: string;
+  /** 전(錢), per unit. Never trusted back from the client — {@link BuyItemRequest} sends no price. */
+  price: number;
+}
+
+/** What one shop NPC offers, in authored (display) order — design §9 D11. */
+export interface ShopOffer {
+  listings: readonly ShopListingView[];
+}
+
 /** Same shape as {@link NoticeInteraction} — the panel is identical; only the marker differs. */
 export interface NpcInteraction extends InteractionBase {
   kind: typeof InteractableKind.Npc;
@@ -396,6 +471,12 @@ export interface NpcInteraction extends InteractionBase {
    * that silently showed only the first would make the table's meaning depend on its order.
    */
   quests?: readonly QuestState[];
+  /**
+   * This NPC's shop listing, absent for an NPC that sells nothing — {@link NpcInteraction.quests}'
+   * own "absent, not empty" convention, and independent of it: an NPC may offer quests, a shop,
+   * both or neither (design §9 D11).
+   */
+  shop?: ShopOffer;
 }
 
 /**
@@ -506,6 +587,36 @@ export interface ItemGranted {
 }
 
 /**
+ * A stack shrank: a sale (`reason: "shop-sell"`) or a consumable use (`reason: "consume"`) —
+ * {@link ItemGranted}'s own shape, mirrored rather than turned into a signed `quantity` on that
+ * type, so a client reading "how many arrived" never has to remember that a shrink is a grant with
+ * a negative sign (design §9 D12).
+ *
+ * Sent only once the store has committed it, {@link ItemGranted}'s own ordering guarantee.
+ */
+export interface ItemRemoved {
+  itemKey: string;
+  /** Same terms as {@link ItemGranted.name}. */
+  name: string;
+  /** Same terms as {@link ItemGranted.icon}. */
+  icon: string;
+  /** How many were removed this time. */
+  quantity: number;
+  /** Total held afterwards; 0 means the stack is gone and the row disappears from the bag. */
+  total: number;
+  reason: "shop-sell" | "consume";
+  /**
+   * Present only when `reason` is `"consume"` and the item restored HP — {@link
+   * ItemGranted.damageReductionRatio}'s own "only this variant sets it" convention. Paired with
+   * `hpRemaining`/`hpMax`, {@link PlayerHit}'s own fields, so a consuming client updates its vitals
+   * bar off this one message instead of inferring a heal from the item's own catalogue entry.
+   */
+  hpRestored?: number;
+  hpRemaining?: number;
+  hpMax?: number;
+}
+
+/**
  * The result of one equip or unequip request. Unicast to the requester and to nobody else — the
  * same rule as {@link PlayerHit}: what somebody else has equipped is their own business.
  */
@@ -559,16 +670,53 @@ export interface ExpGranted {
  * today: `"quest"` for a completed quest's reward (`docs/decisions.md` 2026-09-17 — 화폐만, 소액),
  * and `"sync"` for the one-time push at join that gives a client with no schema field for
  * currency (nobody but the owner needs to see it, {@link PlayerHit.hpRemaining}'s own reasoning)
- * something to show before its first grant — `delta` is 0 for that one. Shop purchases and
- * consumable spend (D4/D5) will add causes here when R04-c wires them; nothing in this codebase
- * sends those yet.
+ * something to show before its first grant — `delta` is 0 for that one. `"shop-buy"`/`"shop-sell"`
+ * are R04-c's additions (design §9 D12): a successful {@link ClientMessage.BuyItem}/{@link
+ * ClientMessage.SellItem} sends this instead of a new "purchase complete" wrapper — D7's own
+ * decision extended, not reopened. {@link ClientMessage.UseItem} never sends this: a consumable
+ * moves no currency.
  */
 export interface CurrencyChanged {
   /** Balance after this change — the server's own truth, never a client-side running total. */
   balance: number;
   /** How much `balance` moved by this message; 0 for the join-time sync. */
   delta: number;
-  reason: "quest" | "sync";
+  reason: "quest" | "sync" | "shop-buy" | "shop-sell";
+}
+
+/**
+ * Every reason a {@link ClientMessage.BuyItem}/{@link ClientMessage.SellItem}/{@link
+ * ClientMessage.UseItem} can be refused (design §9 D13). Distinguished for the client so a
+ * "잔액 부족" toast never reads as "가방이 가득 찼습니다":
+ *
+ * - `insufficient-balance` — cannot afford the purchase.
+ * - `bag-full` — the purchase would add a new distinct item past `MAX_DISTINCT_ITEMS`.
+ * - `insufficient-item` — selling or using more units than the account holds.
+ * - `unknown-item` — `itemKey` names no row in `ITEM_DEFINITIONS` at all (a client/server skew).
+ * - `not-sold-here` — the item exists, but this shop's listing does not carry it (this project's
+ *   stand-in for "품절": shops have no stock model to run out of, design §9 D11).
+ * - `not-sellable` — the item exists but has no `sellValue`.
+ * - `not-consumable` — the item exists but has no `consumable` effect.
+ */
+export type ShopDenialReason =
+  | "insufficient-balance"
+  | "bag-full"
+  | "insufficient-item"
+  | "unknown-item"
+  | "not-sold-here"
+  | "not-sellable"
+  | "not-consumable";
+
+/**
+ * A shop/consumable request was refused, sent instead of any state message — the
+ * {@link PortalEntered}/{@link PortalDenied} pairing's own shape: success is told by whatever
+ * actually changed ({@link CurrencyChanged}, {@link ItemGranted}, {@link ItemRemoved}), and only a
+ * refusal needs a message of its own.
+ */
+export interface ShopDenied {
+  action: "buy" | "sell" | "use";
+  itemKey: string;
+  reason: ShopDenialReason;
 }
 
 export interface ServerMessagePayload {
@@ -586,4 +734,6 @@ export interface ServerMessagePayload {
   [ServerMessage.ExpGranted]: ExpGranted;
   [ServerMessage.QuestUpdated]: QuestState;
   [ServerMessage.CurrencyChanged]: CurrencyChanged;
+  [ServerMessage.ItemRemoved]: ItemRemoved;
+  [ServerMessage.ShopDenied]: ShopDenied;
 }

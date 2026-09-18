@@ -227,6 +227,9 @@ describe("INDEPENDENT — Bug3 consequence: a same-answer hydration must never c
         this.unequipResolve = resolve;
       });
     }
+    remove(): Promise<number | null> {
+      return Promise.resolve(null);
+    }
     /** Every test in this suite equips only the armor slot, so `null` means "no slots equipped". */
     settleGetEquipped(value: string | null): void {
       assert.ok(this.getEquippedSlotsResolve, "getEquippedSlots was never called");

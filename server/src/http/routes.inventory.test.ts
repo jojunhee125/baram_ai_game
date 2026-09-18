@@ -42,6 +42,8 @@ interface InventoryItemView {
   quantity: number;
   equipped: boolean;
   damageReductionRatio?: number;
+  sellValue?: number;
+  consumable?: boolean;
 }
 
 /**
@@ -79,6 +81,10 @@ class ScriptedInventoryStore implements InventoryStore {
 
   unequip(): Promise<boolean> {
     throw new Error("GET /api/inventory must never touch equipment");
+  }
+
+  remove(): Promise<number | null> {
+    throw new Error("GET /api/inventory must never remove anything");
   }
 }
 
@@ -207,6 +213,34 @@ describe("GET /api/inventory", () => {
       [definitionAt(0).key],
       "the code table defines what an item is; the database only stores amounts",
     );
+  });
+
+  it("carries sellValue for a sellable item and consumable for a usable one (roadmap R04-c)", async () => {
+    const sellable = ITEM_DEFINITIONS.find((item) => item.sellValue !== undefined);
+    assert.ok(sellable, "the fixture needs a sellable item in ITEM_DEFINITIONS");
+    const consumable = ITEM_DEFINITIONS.find((item) => item.consumable !== undefined);
+    assert.ok(consumable, "the fixture needs a consumable item in ITEM_DEFINITIONS");
+    const plainItem = ITEM_DEFINITIONS[0];
+    assert.ok(plainItem, "ITEM_DEFINITIONS needs at least 1 row for this test");
+    assert.equal(plainItem.sellValue, undefined, "precondition: this row has neither field");
+    assert.equal(plainItem.consumable, undefined, "precondition: this row has neither field");
+
+    store.bags.set(SUB_A, [
+      { itemKey: sellable.key, quantity: 1, equipped: false },
+      { itemKey: consumable.key, quantity: 1, equipped: false },
+      { itemKey: plainItem.key, quantity: 1, equipped: false },
+    ]);
+    const { items } = await readInventory(tokenHeader(SUB_A));
+
+    const sellableRow = items.find((item) => item.itemKey === sellable.key);
+    assert.equal(sellableRow?.sellValue, sellable.sellValue, "sellValue must travel verbatim");
+    const consumableRow = items.find((item) => item.itemKey === consumable.key);
+    assert.equal(consumableRow?.consumable, true, "consumable collapses to a bare boolean on the wire");
+    const plainRow = items.find((item) => item.itemKey === plainItem.key);
+    assert.equal(plainRow?.sellValue, undefined, "a non-sellable row must not carry the field at all");
+    assert.equal(plainRow?.consumable, undefined, "a non-consumable row must not carry the field at all");
+    assert.equal(JSON.stringify(plainRow)?.includes("sellValue"), false, "absent on the wire, not present-and-undefined");
+    assert.equal(JSON.stringify(plainRow)?.includes("consumable"), false, "absent on the wire, not present-and-undefined");
   });
 
   it("answers 200 with an empty list and never a 4xx when there is no SSO identity", async () => {

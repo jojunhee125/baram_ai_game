@@ -24,8 +24,10 @@ import type {
 } from "./contracts";
 import { ROOM_DEFINITIONS } from "./definitions";
 import { INTERACTABLE_DEFINITIONS } from "./interactableDefinitions";
+import { ITEM_DEFINITIONS } from "./itemDefinitions";
 import { PORTAL_DEFINITIONS } from "./portalDefinitions";
 import { QUESTS_BY_GIVER } from "./questDefinitions";
+import { SHOPS_BY_NPC } from "./shopDefinitions";
 
 /**
  * Its own port, for the reason `metaverseRoom.integration.test.ts` records: node:test runs test
@@ -62,6 +64,12 @@ const FIRST_QUEST = (() => {
   const [quest] = QUESTS_BY_GIVER.get(NPC.id) ?? [];
   assert.ok(quest, `the quest table no longer has a row given by "${NPC.id}"`);
   return quest;
+})();
+/** Read from the shop table rather than repeated here (roadmap R04-c) — the panel quotes it verbatim. */
+const SHOP = (() => {
+  const shop = SHOPS_BY_NPC.get(SHOP_NPC.id);
+  assert.ok(shop, `the shop table no longer has a row for "${SHOP_NPC.id}"`);
+  return shop;
 })();
 
 /** Fails loudly if the placeholder table is swapped for one that renames or re-kinds a row. */
@@ -455,12 +463,13 @@ describe("MetaverseRoom — entering an object", () => {
             requiredCount: FIRST_QUEST.objective.count,
           },
         ],
+        shop: undefined,
       },
     ]);
     assert.deepEqual(bystanderInbox.objects, [], "an object is not broadcast to the room");
   });
 
-  it("delivers the shop npc's placeholder content and no quest (R03 content, no purchase path)", async () => {
+  it("delivers the shop npc's real listing and no quest (roadmap R04-c)", async () => {
     const { room, client, inbox } = await joinRoom(plaza.name);
 
     await walkTo(room, client, tileOf(SHOP_NPC));
@@ -474,11 +483,16 @@ describe("MetaverseRoom — entering an object", () => {
         body: SHOP_NPC.body,
         blocksMovement: true,
         quests: undefined,
+        shop: {
+          listings: SHOP.listings.map((listing) => {
+            const item = ITEM_DEFINITIONS.find((candidate) => candidate.key === listing.itemKey);
+            assert.ok(item, `"${listing.itemKey}" is not in ITEM_DEFINITIONS`);
+            return { itemKey: listing.itemKey, name: item.name, icon: item.icon, price: listing.price };
+          }),
+        },
       },
     ]);
     assert.equal(QUESTS_BY_GIVER.get(SHOP_NPC.id), undefined, "the shop npc gives no quest");
-    // The one rule this row must never break: no currency/price field anywhere on the wire.
-    assert.equal(JSON.stringify(inbox.objects).match(/price|cost|currency/i), null);
   });
 
   it("delivers the hunting-ground return npc's content from its own room", async () => {
@@ -497,6 +511,7 @@ describe("MetaverseRoom — entering an object", () => {
         // player would hold them still while one is hitting them (see the row's own comment).
         blocksMovement: false,
         quests: undefined,
+        shop: undefined,
       },
     ]);
   });

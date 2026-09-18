@@ -278,6 +278,7 @@ describe("VERIFY hydration race: a pending list() must not corrupt state, and a 
       getEquippedSlots: () => Promise.resolve({}),
       equip: () => Promise.resolve(false),
       unequip: () => Promise.resolve(false),
+      remove: () => Promise.resolve(null),
     };
 
     const room = await createGatedRoom([], store);
@@ -385,6 +386,7 @@ describe("VERIFY grand-plaza pays zero cost for a gate it does not have", () => 
       },
       equip: () => Promise.resolve(false),
       unequip: () => Promise.resolve(false),
+      remove: () => Promise.resolve(null),
     };
     (globalThis as { __listCalls?: string[] }).__listCalls = listCalls;
     (globalThis as { __getEquippedSlotsCalls?: string[] }).__getEquippedSlotsCalls = getEquippedSlotsCalls;
@@ -466,6 +468,10 @@ describe("VERIFY concurrent same-key grants settle correctly regardless of resol
 
     unequip(): Promise<boolean> {
       return Promise.resolve(false);
+    }
+
+    remove(): Promise<number | null> {
+      return Promise.resolve(null);
     }
 
     /** Resolves the Nth `grantOnce` call in call order (0-indexed) — not in resolution order. */
