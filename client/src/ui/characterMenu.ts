@@ -30,11 +30,20 @@ export class CharacterMenu {
     "#character-menu-atk-bonus",
   )!;
   private readonly hpBonusValue = document.querySelector<HTMLElement>("#character-menu-hp-bonus")!;
+  private readonly classValue = document.querySelector<HTMLElement>("#character-menu-class-value")!;
+  private readonly chooseClassButton = document.querySelector<HTMLButtonElement>(
+    "#character-menu-choose-class",
+  )!;
 
-  constructor(private readonly onChangeSkin: () => void) {
+  constructor(
+    private readonly onChangeSkin: () => void,
+    /** roadmap R05-a (design D9) — reopens `ClassPicker` for an account that dismissed it unchosen. */
+    private readonly onChooseClass: () => void,
+  ) {
     this.button.addEventListener("click", this.handleToggleClick);
     this.closeButton.addEventListener("click", this.handleCloseClick);
     this.changeSkinButton.addEventListener("click", this.handleChangeSkinClick);
+    this.chooseClassButton.addEventListener("click", this.handleChooseClassClick);
     window.addEventListener("keydown", this.handleKey);
     this.button.hidden = false;
     this.applyOpenState();
@@ -58,6 +67,16 @@ export class CharacterMenu {
   }
 
   /**
+   * The account's class, or the lack of one (roadmap R05-a, design D9) — `null` shows "미선택" and
+   * the 직업 선택 row that reopens `ClassPicker`; a real label hides that row, since D1 leaves no
+   * way to change a class once chosen and there is nothing left to reopen.
+   */
+  applyClass(label: string | null): void {
+    this.classValue.textContent = label ?? "미선택";
+    this.chooseClassButton.hidden = label !== null;
+  }
+
+  /**
    * Mandatory before constructing a successor, which a room hop does. The keydown listener is on
    * `window` and every node here is shared, so an abandoned instance would toggle `panelOpen`
    * back on every press and answer clicks meant for the room it left.
@@ -66,6 +85,7 @@ export class CharacterMenu {
     this.button.removeEventListener("click", this.handleToggleClick);
     this.closeButton.removeEventListener("click", this.handleCloseClick);
     this.changeSkinButton.removeEventListener("click", this.handleChangeSkinClick);
+    this.chooseClassButton.removeEventListener("click", this.handleChooseClassClick);
     window.removeEventListener("keydown", this.handleKey);
   }
 
@@ -96,6 +116,15 @@ export class CharacterMenu {
       this.changeSkinButton.blur();
     }
     this.onChangeSkin();
+  };
+
+  /** {@link handleChangeSkinClick}'s own "close this popover before handing off" order. */
+  private readonly handleChooseClassClick = (event: MouseEvent): void => {
+    this.setOpen(false);
+    if (event.detail > 0) {
+      this.chooseClassButton.blur();
+    }
+    this.onChooseClass();
   };
 
   private readonly handleKey = (event: KeyboardEvent): void => {

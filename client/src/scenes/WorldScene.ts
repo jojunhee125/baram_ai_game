@@ -1,8 +1,10 @@
 import Phaser from "phaser";
 import {
+  CLASS_DEFINITIONS,
   LANDMARK_DEFINITIONS,
   TILE_SIZE_PX,
   type ChatBroadcast,
+  type ClassChanged,
   type ExpGranted,
   type JoinOptions,
   type MonsterHit,
@@ -19,6 +21,7 @@ import { fadeFromBlack, fadeToBlack, showDeathNotice, showTransitionNotice } fro
 import { chooseAvatarSkin } from "../ui/avatarPicker";
 import { BossVitals } from "../ui/bossVitals";
 import { CharacterMenu } from "../ui/characterMenu";
+import { ClassPicker } from "../ui/classPicker";
 import { ChatPanel } from "../ui/chatPanel";
 import { HomeButton } from "../ui/homeButton";
 import { InventoryPanel } from "../ui/inventoryPanel";
@@ -130,6 +133,7 @@ export class WorldScene extends Phaser.Scene {
   private inventoryPanel: InventoryPanel | null = null;
   private lootTablePanel: LootTablePanel | null = null;
   private characterMenu: CharacterMenu | null = null;
+  private classPicker: ClassPicker | null = null;
   private landmarkPanel: LandmarkPanel | null = null;
   private vitals: PlayerVitals | null = null;
   private bossVitals: BossVitals | null = null;
@@ -172,6 +176,7 @@ export class WorldScene extends Phaser.Scene {
     this.inventoryPanel = null;
     this.lootTablePanel = null;
     this.characterMenu = null;
+    this.classPicker = null;
     this.landmarkPanel = null;
     this.vitals = null;
     this.bossVitals = null;
@@ -357,6 +362,8 @@ export class WorldScene extends Phaser.Scene {
           this.toasts?.showCurrency(event);
         }
       },
+      onClassChanged: (event) => this.applyClassChanged(event),
+      onClassDenied: (event) => this.classPicker?.applyClassDenied(event),
       onLeave: () => {
         // Not the leave we asked for; that one never reaches here (RoomConnection.leaving).
         // This is a drop mid-hop, which leave() then early-returns on — the hop still lands, so
@@ -391,7 +398,11 @@ export class WorldScene extends Phaser.Scene {
       (itemKey, nonce) => connection.sendUseItem(itemKey, nonce),
     );
     this.lootTablePanel = new LootTablePanel(this.connection.roomName);
-    this.characterMenu = new CharacterMenu(() => void this.openSkinPicker());
+    this.classPicker = new ClassPicker((classKey) => connection.sendChooseClass(classKey));
+    this.characterMenu = new CharacterMenu(
+      () => void this.openSkinPicker(),
+      () => this.classPicker?.open(),
+    );
     this.landmarkPanel = new LandmarkPanel((landmarkId) => this.warpToLandmark(landmarkId));
     this.toasts = new ItemToasts();
     this.portalDenialBanner = new PortalDenialBanner();
@@ -722,6 +733,7 @@ export class WorldScene extends Phaser.Scene {
     this.inventoryPanel?.destroy();
     this.lootTablePanel?.destroy();
     this.characterMenu?.destroy();
+    this.classPicker?.destroy();
     this.landmarkPanel?.destroy();
     this.vitals?.destroy();
     this.bossVitals?.destroy();
@@ -789,6 +801,29 @@ export class WorldScene extends Phaser.Scene {
       this.vitals?.announceLevelUp(event.level);
     }
     this.lastKnownLevel = event.level;
+  }
+
+  /**
+   * The account's class, or the lack of one (roadmap R05-a, design D9) — arrives once at join as
+   * a plain sync and again after a pick. Fans out to the picker (opens itself on `classKey: null`,
+   * settles and closes on a real one) and the character menu's read-only row.
+   *
+   * `hpRemaining`/`hpMax` ride along on this message (a class pick can move both caps in the same
+   * instant) and take the same path `onItemRemoved`'s consume-heal branch already gives a heal
+   * that arrived outside `PlayerHit` — no new plumbing for a bar this scene already draws.
+   * `mpRemaining`/`mpMax` are R05-c's gauge (out of scope here) and are not read.
+   */
+  private applyClassChanged(event: ClassChanged): void {
+    this.classPicker?.applyClassChanged(event);
+    this.characterMenu?.applyClass(
+      event.classKey === null ? null : CLASS_DEFINITIONS[event.classKey].label,
+    );
+    this.vitals?.applyHit({
+      monsterId: "",
+      damage: 0,
+      hpRemaining: event.hpRemaining,
+      hpMax: event.hpMax,
+    });
   }
 
   private showChat(message: ChatBroadcast): void {

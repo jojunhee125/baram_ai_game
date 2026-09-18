@@ -2,23 +2,31 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   ATTACK_PER_LEVEL,
+  CLASS_DEFINITIONS,
   COMBAT_EXIT_MS,
   Direction,
   HP_PER_LEVEL,
   LEVEL_CAP,
   MONSTER_TICK_MS,
+  MP_COMBAT_RECOVERY_FRACTION_PER_TICK,
+  MP_RECOVERY_FRACTION_PER_TICK,
   PLAYER_ATTACK_DAMAGE,
   PLAYER_MAX_HP,
+  PlayerClassKey,
   ServerMessage,
+  classCodeFor,
   cumulativeExpForLevel,
   expToNextLevel,
   levelForExp,
   remainingExpToNextLevel,
+  type ClassChanged,
+  type ClassDenied,
   type ExpGranted,
   type JoinOptions,
   type PlayerHit,
   type TilePosition,
 } from "@zep-test/shared";
+import { InMemoryClassStore, type ClassStore } from "../db/classStore";
 import { CachedProgressStore } from "../db/progressCache";
 import { InMemoryProgressStore, type ProgressStore } from "../db/progressStore";
 import type { CollisionMap, ProximityIndex, RoomCreateOptions } from "./contracts";
@@ -714,6 +722,259 @@ describe("VERIFY recoverOutOfCombat's fraction conversion (§4.4)", () => {
 
       room["tick"](1000 + COMBAT_EXIT_MS);
       assert.equal(hurt.userData.hp, 200 - 12 + 6, "round(200 * 0.03) === 6, not the level-1 constant 3");
+    } finally {
+      dispose(room);
+    }
+  });
+});
+
+// -- R05-a: class multipliers, MP, and the class picker --------------------------------------------
+
+describe("VERIFY R05-a class multipliers and MP (docs/r05-classes-and-skills.md D3/D4)", () => {
+  it("leaves an unchosen player's totalAttack/totalMaxHp exactly where Phase W left them, and MP at 0", async () => {
+    const room = await createRoom([], { classStore: new InMemoryClassStore() });
+    try {
+      const visitor = join(room, "unchosen", undefined, "owner-unchosen");
+      await flush();
+      const session = asRoomClient(visitor).userData!;
+      assert.equal(session.playerClass, null);
+      assert.equal(room["totalAttack"](session), PLAYER_ATTACK_DAMAGE);
+      assert.equal(room["totalMaxHp"](session), PLAYER_MAX_HP);
+      assert.equal(room["totalMaxMp"](session), 0);
+      assert.equal(session.mp, 0);
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("matches every class's own multiplier table exactly, at level 1", async () => {
+    for (const classKey of Object.values(PlayerClassKey)) {
+      const store = new InMemoryClassStore();
+      await store.chooseOnce(`owner-${classKey}`, classKey);
+      const room = await createRoom([], { classStore: store });
+      try {
+        const visitor = join(room, `chosen-${classKey}`, undefined, `owner-${classKey}`);
+        await flush();
+        const session = asRoomClient(visitor).userData!;
+        const definition = CLASS_DEFINITIONS[classKey];
+        assert.equal(session.playerClass, classKey);
+        assert.equal(
+          room["totalAttack"](session),
+          Math.max(1, Math.round(PLAYER_ATTACK_DAMAGE * definition.attackMultiplier)),
+          `${classKey} attack`,
+        );
+        assert.equal(
+          room["totalMaxHp"](session),
+          Math.max(1, Math.round(PLAYER_MAX_HP * definition.maxHpMultiplier)),
+          `${classKey} maxHp`,
+        );
+        assert.equal(room["totalMaxMp"](session), definition.maxMpBase, `${classKey} maxMp`);
+        assert.equal(session.mp, definition.maxMpBase, `${classKey} is full-on-join once chosen`);
+      } finally {
+        dispose(room);
+      }
+    }
+  });
+
+  it("regenerates MP out of combat, and more slowly while in combat", async () => {
+    const store = new InMemoryClassStore();
+    await store.chooseOnce("owner-shaman", PlayerClassKey.Shaman);
+    const room = await createRoom([], { classStore: store });
+    try {
+      const visitor = join(room, "shaman-mp", undefined, "owner-shaman");
+      await flush();
+      place(room, "shaman-mp", OPEN_CENTRE);
+      const session = asRoomClient(visitor).userData!;
+      const mpCap = CLASS_DEFINITIONS[PlayerClassKey.Shaman].maxMpBase; // 100
+
+      session.mp = 0;
+      session.lastDamagedAt = 0; // never hit — out of combat by the time `now` is large
+      room["tick"](1_000_000);
+      assert.equal(
+        session.mp,
+        Math.max(1, Math.round(mpCap * MP_RECOVERY_FRACTION_PER_TICK)),
+        "out-of-combat fraction",
+      );
+
+      session.mp = 0;
+      session.lastDamagedAt = 1_000_000; // hit just now — inside COMBAT_EXIT_MS of the next tick
+      room["tick"](1_000_000 + 1);
+      assert.equal(
+        session.mp,
+        Math.max(1, Math.round(mpCap * MP_COMBAT_RECOVERY_FRACTION_PER_TICK)),
+        "in-combat fraction is the smaller trickle, not zero and not the out-of-combat rate",
+      );
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("keeps a chosen class, its stats and its MP across a rejoin", async () => {
+    const store = new InMemoryClassStore();
+    const room = await createRoom([], { classStore: store });
+    try {
+      const firstVisit = join(room, "first-visit", undefined, "owner-rejoin");
+      await flush();
+      room["handleChooseClass"](asRoomClient(firstVisit), { classKey: PlayerClassKey.Rogue });
+      await flush();
+      room.onLeave(asRoomClient(firstVisit));
+
+      const rejoined = join(room, "second-visit", undefined, "owner-rejoin");
+      await flush();
+      const session = asRoomClient(rejoined).userData!;
+      assert.equal(session.playerClass, PlayerClassKey.Rogue);
+      assert.equal(room["totalMaxMp"](session), CLASS_DEFINITIONS[PlayerClassKey.Rogue].maxMpBase);
+      assert.equal(session.mp, CLASS_DEFINITIONS[PlayerClassKey.Rogue].maxMpBase);
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("sends ClassChanged once at join, classKey null for an account that has never chosen", async () => {
+    const room = await createRoom([], { classStore: new InMemoryClassStore() });
+    try {
+      const visitor = join(room, "never-chosen", undefined, "owner-never-chosen");
+      await flush();
+      const changes = sentOfType<ClassChanged>(visitor, ServerMessage.ClassChanged);
+      assert.equal(changes.length, 1);
+      assert.deepEqual(changes[0], {
+        classKey: null,
+        classCode: 0,
+        hpRemaining: PLAYER_MAX_HP,
+        hpMax: PLAYER_MAX_HP,
+        mpRemaining: 0,
+        mpMax: 0,
+      });
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("answers a successful class:choose with ClassChanged and persists it; replaying it is idempotent", async () => {
+    const store = new InMemoryClassStore();
+    const room = await createRoom([], { classStore: store });
+    try {
+      const visitor = join(room, "chooser", undefined, "owner-chooser");
+      await flush();
+
+      room["handleChooseClass"](asRoomClient(visitor), { classKey: PlayerClassKey.Warrior });
+      await flush();
+      assert.equal(await store.getClass("owner-chooser"), PlayerClassKey.Warrior);
+      let changes = sentOfType<ClassChanged>(visitor, ServerMessage.ClassChanged);
+      assert.equal(changes.length, 2, "the join sync, then the choice");
+      assert.equal(changes[1]?.classKey, PlayerClassKey.Warrior);
+      assert.equal(sentOfType<ClassDenied>(visitor, ServerMessage.ClassDenied).length, 0);
+
+      // Replaying the same choice must not deny it and must not change the stored class.
+      room["handleChooseClass"](asRoomClient(visitor), { classKey: PlayerClassKey.Warrior });
+      await flush();
+      assert.equal(await store.getClass("owner-chooser"), PlayerClassKey.Warrior);
+      changes = sentOfType<ClassChanged>(visitor, ServerMessage.ClassChanged);
+      assert.equal(changes.length, 3, "the replay still answers, it just changes nothing");
+      assert.equal(sentOfType<ClassDenied>(visitor, ServerMessage.ClassDenied).length, 0);
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("denies already-chosen for a different class, and settles the picker on the stored one", async () => {
+    const store = new InMemoryClassStore();
+    const room = await createRoom([], { classStore: store });
+    try {
+      const visitor = join(room, "second-guesser", undefined, "owner-second-guesser");
+      await flush();
+      room["handleChooseClass"](asRoomClient(visitor), { classKey: PlayerClassKey.Cleric });
+      await flush();
+
+      room["handleChooseClass"](asRoomClient(visitor), { classKey: PlayerClassKey.Rogue });
+      await flush();
+
+      const denials = sentOfType<ClassDenied>(visitor, ServerMessage.ClassDenied);
+      assert.equal(denials.length, 1);
+      assert.equal(denials[0]?.reason, "already-chosen");
+      const changes = sentOfType<ClassChanged>(visitor, ServerMessage.ClassChanged);
+      assert.equal(changes.at(-1)?.classKey, PlayerClassKey.Cleric, "settles on the stored class, not the request");
+      assert.equal(await store.getClass("owner-second-guesser"), PlayerClassKey.Cleric, "never overwritten");
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("does not let a stale join-time read undo a class chosen while hydration was still pending", async () => {
+    // Simulates a real-Postgres timing window: `hydrateClassCache`'s `getClass` is issued at
+    // join and is still in flight (imagine network latency) when `class:choose` arrives and
+    // completes first on a separate, faster round trip.
+    class DelayedGetClassStore implements ClassStore {
+      private readonly inner = new InMemoryClassStore();
+      private release: ((value: PlayerClassKey | null) => void) | null = null;
+
+      getClass(ownerKey: string): Promise<PlayerClassKey | null> {
+        return new Promise((resolve) => {
+          this.release = resolve;
+          void ownerKey;
+        });
+      }
+
+      chooseOnce(ownerKey: string, classKey: string): Promise<PlayerClassKey> {
+        return this.inner.chooseOnce(ownerKey, classKey);
+      }
+
+      releasePendingGetClass(value: PlayerClassKey | null): void {
+        assert.ok(this.release, "getClass must have been called before releasing it");
+        this.release!(value);
+      }
+    }
+
+    const store = new DelayedGetClassStore();
+    const room = await createRoom([], { classStore: store });
+    try {
+      const visitor = join(room, "racer", undefined, "owner-racer");
+      // `hydrateClassCache`'s `getClass(owner-racer)` is now pending, unresolved.
+
+      room["handleChooseClass"](asRoomClient(visitor), { classKey: PlayerClassKey.Warrior });
+      await flush();
+
+      const session = asRoomClient(visitor).userData!;
+      assert.equal(session.playerClass, PlayerClassKey.Warrior, "precondition: the live pick landed first");
+      assert.equal(session.mp, CLASS_DEFINITIONS[PlayerClassKey.Warrior].maxMpBase, "precondition: MP filled");
+
+      // The stale read finally resolves with what it saw *before* the choice: unchosen.
+      store.releasePendingGetClass(null);
+      await flush();
+
+      assert.equal(
+        session.playerClass,
+        PlayerClassKey.Warrior,
+        "a stale join-time read must not undo a class chosen while it was in flight",
+      );
+      assert.equal(
+        room.state.players.get("racer")?.playerClass,
+        classCodeFor(PlayerClassKey.Warrior),
+        "the public schema field must not be reverted either",
+      );
+      assert.equal(
+        session.mp,
+        CLASS_DEFINITIONS[PlayerClassKey.Warrior].maxMpBase,
+        "MP must not be reset to 0 by the stale hydration resolving late",
+      );
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("denies unknown-class for an invalid key without ever touching the store", async () => {
+    const store = new InMemoryClassStore();
+    const room = await createRoom([], { classStore: store });
+    try {
+      const visitor = join(room, "typo", undefined, "owner-typo");
+      await flush();
+      room["handleChooseClass"](asRoomClient(visitor), { classKey: "wizard" });
+      await flush();
+
+      const denials = sentOfType<ClassDenied>(visitor, ServerMessage.ClassDenied);
+      assert.equal(denials.length, 1);
+      assert.equal(denials[0]?.reason, "unknown-class");
+      assert.equal(await store.getClass("owner-typo"), null);
     } finally {
       dispose(room);
     }

@@ -8,6 +8,9 @@ import {
   type ChangeSkinRequest,
   type ChatBroadcast,
   type ChatRequest,
+  type ChooseClassRequest,
+  type ClassChanged,
+  type ClassDenied,
   type CurrencyChanged,
   type Direction,
   type EquipItemRequest,
@@ -24,6 +27,7 @@ import {
   type MoveRejected,
   type MoveRequest,
   type Player,
+  type PlayerClassKey,
   type PlayerHit,
   type PortalDenied,
   type PortalEntered,
@@ -152,6 +156,16 @@ export interface RoomEvents {
    * state message, {@link onPortalDenied}'s own pairing.
    */
   onShopDenied?(event: ShopDenied): void;
+  /**
+   * The account's chosen class, or the lack of one (roadmap R05-a, design `docs/r05-classes-and-
+   * skills.md` D9) — `classKey: null` for an account that has never chosen. Also fires before
+   * `attach()` for {@link onCurrencyChanged}'s own reason: the room sends this the moment it has
+   * read the class, which lands during the map-loading window this class is alive for and
+   * `attach()` is not.
+   */
+  onClassChanged?(event: ClassChanged): void;
+  /** One `class:choose` this client sent was refused (design D9) — {@link onShopDenied}'s own pairing. */
+  onClassDenied?(event: ClassDenied): void;
   /** The server warped the local player. Apply as an absolute position, never as a step. */
   onTeleported?(event: Teleported): void;
   /** Connection closed after a successful join — includes kick, server restart, network drop. */
@@ -195,6 +209,8 @@ export class RoomConnection {
    * this class is alive for and `attach()` is not.
    */
   private readonly pendingCurrencyChanges: CurrencyChanged[] = [];
+  /** {@link pendingCurrencyChanges}'s own queue and reason, against the join-time `class:changed` sync. */
+  private readonly pendingClassChanges: ClassChanged[] = [];
 
   private constructor(
     private readonly room: Room<unknown, RoomState>,
@@ -222,6 +238,7 @@ export class RoomConnection {
     this.bindLifecycle();
     this.bindQuestUpdates();
     this.bindCurrencyChanges();
+    this.bindClassChanges();
   }
 
   /**
@@ -256,6 +273,7 @@ export class RoomConnection {
     this.replayPendingLifecycle();
     this.replayPendingQuestUpdates();
     this.replayPendingCurrencyChanges();
+    this.replayPendingClassChanges();
   }
 
   get sessionId(): string {
@@ -369,6 +387,15 @@ export class RoomConnection {
    */
   sendChangeSkin(skin: number): void {
     this.room.send(ClientMessage.ChangeSkin, { skin } satisfies ChangeSkinRequest);
+  }
+
+  /**
+   * Picks a class once (roadmap R05-a, design D1/D9). Write-once and idempotent server-side —
+   * unlike {@link sendBuyItem} there is no nonce, since a resend of an already-settled pick cannot
+   * be retried into a different outcome (`ChooseClass`'s own doc comment).
+   */
+  sendChooseClass(classKey: PlayerClassKey): void {
+    this.room.send(ClientMessage.ChooseClass, { classKey } satisfies ChooseClassRequest);
   }
 
   /**
@@ -492,6 +519,9 @@ export class RoomConnection {
     this.room.onMessage(ServerMessage.ShopDenied, (event: ShopDenied) => {
       this.events.onShopDenied?.(event);
     });
+    this.room.onMessage(ServerMessage.ClassDenied, (event: ClassDenied) => {
+      this.events.onClassDenied?.(event);
+    });
   }
 
   /**
@@ -521,6 +551,21 @@ export class RoomConnection {
         return;
       }
       this.events.onCurrencyChanged?.(event);
+    });
+  }
+
+  /**
+   * Registered here rather than in {@link bindMessages}, {@link bindCurrencyChanges}'s own reason:
+   * the join-time sync is the server's own initiative, not a reply to anything this client asked
+   * for, so a handler that only exists from `attach()` onwards would miss it.
+   */
+  private bindClassChanges(): void {
+    this.room.onMessage(ServerMessage.ClassChanged, (event: ClassChanged) => {
+      if (!this.attached) {
+        this.pendingClassChanges.push(event);
+        return;
+      }
+      this.events.onClassChanged?.(event);
     });
   }
 
@@ -578,6 +623,19 @@ export class RoomConnection {
     queueMicrotask(() => {
       for (const event of pending) {
         this.events.onCurrencyChanged?.(event);
+      }
+    });
+  }
+
+  /** {@link replayPendingQuestUpdates}'s own shape and reason, against {@link pendingClassChanges}. */
+  private replayPendingClassChanges(): void {
+    if (this.pendingClassChanges.length === 0) {
+      return;
+    }
+    const pending = this.pendingClassChanges.splice(0);
+    queueMicrotask(() => {
+      for (const event of pending) {
+        this.events.onClassChanged?.(event);
       }
     });
   }

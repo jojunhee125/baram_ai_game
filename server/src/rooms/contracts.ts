@@ -1,5 +1,6 @@
 import type { Client } from "colyseus";
 import type { BossStateStore } from "../db/bossStateStore";
+import type { ClassStore } from "../db/classStore";
 import type { CurrencyStore } from "../db/currencyStore";
 import type { InventoryStore } from "../db/inventoryStore";
 import type { ProgressStore } from "../db/progressStore";
@@ -11,6 +12,7 @@ import {
   EquipmentSlot,
   InteractableKind,
   type Direction,
+  type PlayerClassKey,
   type RoomState,
   type TilePosition,
 } from "@zep-test/shared";
@@ -90,6 +92,15 @@ export interface RoomCreateOptions {
    * a room with no `inventoryStore` already makes for drops.
    */
   settlementStore?: SettlementStore;
+  /**
+   * Where an account's chosen class is filed (roadmap R05-a, `docs/r05-classes-and-skills.md`
+   * D1), injected the same way and for the same reason as {@link currencyStore}/{@link
+   * progressStore}. Optional for the same reason too — the tests, the load-test harness and
+   * `npm run dev` all build rooms without one, and a room with no store leaves every session
+   * permanently unchosen: `MetaverseRoom.handleChooseClass` no-ops the same way {@link
+   * handleBuyItem}'s own `settlementStore === null` branch does.
+   */
+  classStore?: ClassStore;
   /**
    * The death EXP penalty (design §11.0) exempts these accounts entirely — an env-configured
    * allowlist (`ADMIN_OWNER_KEYS`), never a key literal in this codebase. Undefined means nobody is
@@ -485,6 +496,26 @@ export interface PlayerSession {
    * change, so no message is needed to establish it; it travels only as `PlayerHit`.
    */
   hp: number;
+  /**
+   * MP, {@link hp}'s own treatment for the same reason (roadmap R05-a, `docs/r05-classes-and-
+   * skills.md` D2, `docs/decisions.md` 2026-09-18 — "HP는 룸 세션 런타임 값이라 DB와 원자적으로
+   * 묶을 수 없다"): a room-session value with no atomic way to bind it to the database, so MP
+   * follows HP's rule rather than this feature inventing a second, asymmetric one. Never in
+   * `RoomState` — nobody but the owner needs to see it, and a schema field would patch every
+   * viewer in range on every cast. Full at join and after every room change, `hp`'s own "no
+   * message needed to establish it" — the client mirrors the recovery curve exactly as it already
+   * does for HP. `0` while {@link playerClass} is `null` (`MetaverseRoom.totalMaxMp`).
+   */
+  mp: number;
+  /**
+   * The class this account has chosen, hydrated once on join (`MetaverseRoom.hydrateClassCache`)
+   * and never re-read from the store on the combat path — roadmap §6's "no DB reads in the server
+   * tick", `totalAttack`/`totalMaxHp`/`totalMaxMp` all read this cached value instead. `null`
+   * until chosen; unlike {@link ownerKey} this is not a local-development fallback shape, it is
+   * the account's actual, current state (design §2 D9 — an unchosen account plays on with no
+   * skills, never a fabricated default class).
+   */
+  playerClass: PlayerClassKey | null;
   /**
    * Server clock of the last hit taken; COMBAT_EXIT_MS is measured from it, and 0 means never hit.
    * "Taken", not "dealt" — attacking something does not keep you in combat, being attacked does.

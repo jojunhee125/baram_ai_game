@@ -156,6 +156,25 @@ export const COMBAT_RECOVERY_HP_PER_TICK = 3;
 export const COMBAT_RECOVERY_FRACTION_PER_TICK = 0.03;
 
 /**
+ * Fraction of a class's `totalMaxMp` restored per MONSTER_TICK_MS once out of combat (roadmap
+ * R05-a, design `docs/r05-classes-and-skills.md` D2, `docs/decisions.md` 2026-09-18 열린 질문 3).
+ * MP has no absolute-per-tick predecessor to match the way COMBAT_RECOVERY_FRACTION_PER_TICK
+ * matches PLAYER_MAX_HP's old constant — resources start life as a fraction, since there is no
+ * legacy client curve to stay anchored to. Rides the same `recoverOutOfCombat` tick as HP; no
+ * separate timer.
+ */
+export const MP_RECOVERY_FRACTION_PER_TICK = 0.02;
+
+/**
+ * Fraction of `totalMaxMp` restored per MONSTER_TICK_MS **while in combat** — deliberately
+ * smaller than {@link MP_RECOVERY_FRACTION_PER_TICK} rather than zero (decisions.md 2026-09-18):
+ * a MP-based class (주술사) that hits zero mid-fight would otherwise have nothing left to do
+ * until it disengages, and disengaging is not always the attacker's choice. A small trickle keeps
+ * a cooldown-gated skill meaningful without making the cooldown itself pointless.
+ */
+export const MP_COMBAT_RECOVERY_FRACTION_PER_TICK = 0.005;
+
+/**
  * Number of selectable avatar variants. Must equal the skin block count baked into
  * `assets/sprites/avatar.png` — the sheet is `row = skin * 4 + direction`, so its height
  * is `AVATAR_SKIN_COUNT * 4 * TILE_SIZE_PX`. Raising this without regenerating the sheet

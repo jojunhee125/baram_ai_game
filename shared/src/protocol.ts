@@ -1,3 +1,4 @@
+import type { PlayerClassKey } from "./classes";
 import type { Direction } from "./geometry";
 
 /** Options sent with joinOrCreate(). Validated server-side before the player is spawned. */
@@ -85,6 +86,14 @@ export const ClientMessage = {
    * idempotency key {@link ClientMessage.BuyItem} uses.
    */
   UseItem: "item:use",
+  /**
+   * Picks a class (roadmap R05-a, design `docs/r05-classes-and-skills.md` D1/D9). Write-once: the
+   * server never trusts `classKey` and answers with the account's *stored* class regardless —
+   * {@link ClassChanged}/{@link ClassDenied} — which may not be the one this request named. No
+   * `nonce`: unlike a shop request this cannot be retried into a different outcome (`chooseOnce`
+   * is idempotent by construction), so there is nothing for a nonce to correlate.
+   */
+  ChooseClass: "class:choose",
 } as const;
 
 export type ClientMessage = (typeof ClientMessage)[keyof typeof ClientMessage];
@@ -206,6 +215,16 @@ export interface UseItemRequest {
   nonce: string;
 }
 
+/**
+ * See {@link ClientMessage.ChooseClass}. `classKey` is untyped `string` on the wire, not
+ * {@link PlayerClassKey} — the whole point of this request is that the server validates it,
+ * {@link BuyItemRequest.itemKey}'s own "never trust the shape a client claims" treatment applied
+ * to a closed set instead of a table.
+ */
+export interface ChooseClassRequest {
+  classKey: string;
+}
+
 export interface ClientMessagePayload {
   [ClientMessage.Move]: MoveRequest;
   [ClientMessage.Chat]: ChatRequest;
@@ -231,6 +250,7 @@ export interface ClientMessagePayload {
   [ClientMessage.BuyItem]: BuyItemRequest;
   [ClientMessage.SellItem]: SellItemRequest;
   [ClientMessage.UseItem]: UseItemRequest;
+  [ClientMessage.ChooseClass]: ChooseClassRequest;
 }
 
 export const ServerMessage = {
@@ -255,6 +275,15 @@ export const ServerMessage = {
   ItemRemoved: "inventory:removed",
   /** roadmap R04-c — a shop/consumable request was refused (design §9 D12/D13). */
   ShopDenied: "shop:denied",
+  /**
+   * roadmap R05-a — the account's chosen class, or the lack of one (design `docs/r05-classes-
+   * and-skills.md` D3/D9). Sent once at join as a plain sync — {@link CurrencyChanged}'s own
+   * `"sync"` precedent — with `classKey: null` for an account that has never chosen, and again
+   * after a successful {@link ClientMessage.ChooseClass}.
+   */
+  ClassChanged: "class:changed",
+  /** roadmap R05-a — a class:choose request was refused, {@link ShopDenied}'s precedent. */
+  ClassDenied: "class:denied",
 } as const;
 
 export type ServerMessage = (typeof ServerMessage)[keyof typeof ServerMessage];
@@ -719,6 +748,39 @@ export interface ShopDenied {
   reason: ShopDenialReason;
 }
 
+/**
+ * The account's chosen class, or the lack of one (roadmap R05-a, design `docs/r05-classes-and-
+ * skills.md` D1/D3/D9). `classKey`/`classCode` are the same fact in both forms — the wire's own
+ * string and the schema's own code — so a client never has to derive one from the other.
+ *
+ * `hpRemaining`/`hpMax`/`mpRemaining`/`mpMax` ride along rather than arriving as a follow-up
+ * message: a class pick can move both caps in the same instant (D4), and splitting that across
+ * two messages would let a client apply one half before the other lands.
+ */
+export interface ClassChanged {
+  classKey: PlayerClassKey | null;
+  classCode: number;
+  hpRemaining: number;
+  hpMax: number;
+  mpRemaining: number;
+  mpMax: number;
+}
+
+/**
+ * A {@link ClientMessage.ChooseClass} request was refused, {@link ShopDenied}'s own "a refusal
+ * needs a message of its own" shape.
+ *
+ * - `unknown-class` — `classKey` names none of the four classes.
+ * - `already-chosen` — the account already holds a *different* class than the one requested. Sent
+ *   alongside a {@link ClassChanged} carrying the account's actual, stored class (design §2 D1):
+ *   the store is the single source of truth, and the picker has to settle on it rather than keep
+ *   showing what the player just clicked. Re-requesting the *same* class the account already
+ *   holds is not this — `chooseOnce`'s idempotent replay sends {@link ClassChanged} alone.
+ */
+export interface ClassDenied {
+  reason: "unknown-class" | "already-chosen";
+}
+
 export interface ServerMessagePayload {
   [ServerMessage.Chat]: ChatBroadcast;
   [ServerMessage.MoveRejected]: MoveRejected;
@@ -736,4 +798,6 @@ export interface ServerMessagePayload {
   [ServerMessage.CurrencyChanged]: CurrencyChanged;
   [ServerMessage.ItemRemoved]: ItemRemoved;
   [ServerMessage.ShopDenied]: ShopDenied;
+  [ServerMessage.ClassChanged]: ClassChanged;
+  [ServerMessage.ClassDenied]: ClassDenied;
 }

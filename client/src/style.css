@@ -1998,6 +1998,254 @@ body {
   outline-offset: 2px;
 }
 
+/*
+ * The class picker (roadmap R05-a, docs/r05-classes-and-skills.md D9). Covers the whole stage
+ * like .object rather than reflowing into the HUD column like .character-menu/.bag — a permanent
+ * choice earns the same full-attention treatment a fixed-object reading does. Deliberately keeps
+ * this dark, skin-independent chrome rather than heritage.css's wood/parchment reskin, the same
+ * choice .object and .picker already make: a "step out of the world" screen reads better staying
+ * neutral than matching whichever room happens to be open when it appears.
+ */
+.class-picker {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  place-items: center;
+  padding: var(--space-4);
+  background: rgba(20, 19, 26, 0.55);
+}
+
+.class-picker__dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(100%, 480px);
+  max-height: 100%;
+  padding: var(--space-4);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(20, 19, 26, 0.94);
+  color: #eceaf4;
+}
+
+.class-picker__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.class-picker__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.class-picker__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: rgba(236, 234, 244, 0.62);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.class-picker__close:hover {
+  background: rgba(236, 234, 244, 0.1);
+  border-color: rgba(236, 234, 244, 0.24);
+  color: #eceaf4;
+}
+
+.class-picker__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.class-picker__close-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.class-picker__notice {
+  margin: 0;
+  color: rgba(236, 234, 244, 0.72);
+  font-size: 12px;
+  text-wrap: pretty;
+}
+
+/* The grid scrolls, not the dialog: 선택하기 has to stay reachable under four cards in a short window. */
+.class-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.class-picker__card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(236, 234, 244, 0.04);
+  color: #eceaf4;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.class-picker__card:hover {
+  background: rgba(236, 234, 244, 0.1);
+  border-color: rgba(236, 234, 244, 0.32);
+}
+
+.class-picker__card[aria-checked="true"] {
+  background: rgba(110, 168, 220, 0.16);
+  border-color: var(--accent);
+}
+
+.class-picker__card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.class-picker__card-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.class-picker__card-role {
+  color: rgba(236, 234, 244, 0.72);
+  font-size: 12px;
+}
+
+.class-picker__card-stats {
+  color: rgba(236, 234, 244, 0.55);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Reserves one line at rest so 선택하는 중… / a denial notice never shifts the footer above it. */
+.class-picker__status {
+  margin: var(--space-2) 0 0;
+  min-height: 16px;
+  color: rgba(236, 234, 244, 0.72);
+  font-size: 12px;
+}
+
+.class-picker__footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-2);
+}
+
+.class-picker__choose {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-height);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: rgba(236, 234, 244, 0.06);
+  color: #eceaf4;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.class-picker__choose:hover:not(:disabled) {
+  background: rgba(236, 234, 244, 0.12);
+}
+
+.class-picker__choose:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.class-picker__choose:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.class-picker__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.class-picker__confirm-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+.class-picker__confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.class-picker__confirm-back,
+.class-picker__confirm-yes {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-height);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.class-picker__confirm-back {
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  background: rgba(236, 234, 244, 0.06);
+  color: #eceaf4;
+}
+
+.class-picker__confirm-back:hover:not(:disabled) {
+  background: rgba(236, 234, 244, 0.12);
+}
+
+/* --danger, not --accent: this is the one button in this dialog that cannot be undone. */
+.class-picker__confirm-yes {
+  border: 1px solid var(--danger);
+  background: rgba(224, 128, 111, 0.12);
+  color: #eceaf4;
+}
+
+.class-picker__confirm-yes:hover:not(:disabled) {
+  background: rgba(224, 128, 111, 0.22);
+}
+
+.class-picker__confirm-back:focus-visible,
+.class-picker__confirm-yes:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.class-picker__confirm-back:disabled,
+.class-picker__confirm-yes:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 /* Covers the stage the way .boot does: it stands in for the boot overlay, never over the world. */
 .picker {
   position: absolute;
@@ -2146,6 +2394,11 @@ body {
   .character-menu__close,
   .character-menu__item,
   .chat__input,
+  .class-picker__card,
+  .class-picker__choose,
+  .class-picker__close,
+  .class-picker__confirm-back,
+  .class-picker__confirm-yes,
   .hud__button,
   .landmark-panel__close,
   .landmark-panel__item,

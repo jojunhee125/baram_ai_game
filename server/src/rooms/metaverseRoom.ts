@@ -6,6 +6,7 @@ import {
   ATTACK_RANGE_TILES,
   AVATAR_SKIN_COUNT,
   CHAT_RADIUS_TILES,
+  CLASS_DEFINITIONS,
   COMBAT_EXIT_MS,
   COMBAT_RECOVERY_FRACTION_PER_TICK,
   ClientMessage,
@@ -21,6 +22,8 @@ import {
   MAX_MOVES_PER_SECOND,
   MAX_NICKNAME_LENGTH,
   MONSTER_TICK_MS,
+  MP_COMBAT_RECOVERY_FRACTION_PER_TICK,
+  MP_RECOVERY_FRACTION_PER_TICK,
   Monster,
   PATCH_RATE_MS,
   PLAYER_ATTACK_DAMAGE,
@@ -31,7 +34,9 @@ import {
   RoomState,
   ServerMessage,
   VIEW_RADIUS_TILES,
+  classCodeFor,
   cumulativeExpForLevel,
+  isPlayerClassKey,
   levelForExp,
   remainingExpToNextLevel,
   type AcceptQuestRequest,
@@ -39,6 +44,9 @@ import {
   type ChangeSkinRequest,
   type ChatBroadcast,
   type ChatRequest,
+  type ChooseClassRequest,
+  type ClassChanged,
+  type ClassDenied,
   type CurrencyChanged,
   type EquipItemRequest,
   type EquipmentChanged,
@@ -50,6 +58,7 @@ import {
   type MonsterHit,
   type MoveRejected,
   type MoveRequest,
+  type PlayerClassKey,
   type PlayerHit,
   type PortalDenied,
   type PortalEntered,
@@ -66,6 +75,7 @@ import {
   type WarpToLandmarkRequest,
 } from "@zep-test/shared";
 import type { BossStateStore } from "../db/bossStateStore";
+import type { ClassStore } from "../db/classStore";
 import type { CurrencyStore } from "../db/currencyStore";
 import type { InventoryStore } from "../db/inventoryStore";
 import type { ProgressStore } from "../db/progressStore";
@@ -287,6 +297,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   private currencyStore: CurrencyStore | null = null;
   /** Where a quest reward is settled exactly once. Null in every room built without one — see {@link RoomCreateOptions.settlementStore}. */
   private settlementStore: SettlementStore | null = null;
+  /** Where an account's chosen class is filed. Null in every room built without one — see {@link RoomCreateOptions.classStore}. */
+  private classStore: ClassStore | null = null;
   /**
    * The quests this room can offer: those whose giver NPC stands here. Resolved once at `onCreate`
    * against this room's own object index — the `PortalIndex`/`InteractableIndex` narrowing, for
@@ -334,6 +346,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.questStore = options.questStore ?? null;
     this.currencyStore = options.currencyStore ?? null;
     this.settlementStore = options.settlementStore ?? null;
+    this.classStore = options.classStore ?? null;
     this.adminOwnerKeys = options.adminOwnerKeys ?? new Set();
     this.setPatchRate(PATCH_RATE_MS);
     this.maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
@@ -403,6 +416,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     });
     this.onMessage(ClientMessage.UseItem, (client: RoomClient, message: UseItemRequest) => {
       this.handleUseItem(client, message);
+    });
+    this.onMessage(ClientMessage.ChooseClass, (client: RoomClient, message: ChooseClassRequest) => {
+      this.handleChooseClass(client, message);
     });
 
     // Last, and only where there is something to simulate. A room with no monster *rows* stays
@@ -591,6 +607,12 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         // system.md, W-2 handoff: a client that has not yet learned to read this field never sees an
         // implausible Lv.0).
         level: 1,
+        // Always the unchosen code, never left unset — `hydrateClassCache` (below) raises this
+        // once it learns the account's real class, exactly as `level`'s own placeholder above
+        // waits on `hydrateProgressCache`. A multiplier of exactly 1.0 while unchosen
+        // (`totalAttack`/`totalMaxHp`, design §2 D4) is what keeps this placeholder harmless to
+        // every existing combat/level test in the window before hydration resolves.
+        playerClass: classCodeFor(null),
       }),
     );
     this.proximityIndex.insert(client.sessionId, spawnTile);
@@ -604,6 +626,12 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       // injury that outlived the room it happened in, so carrying one across would be a state
       // nothing could undo.
       hp: PLAYER_MAX_HP,
+      // 0, not `totalMaxMp(session)`: this object *is* the session, so it cannot read itself
+      // mid-construction — but `totalMaxMp` returns exactly 0 for an unchosen class regardless of
+      // level, which `playerClass: null` on the next line always is at this point, so the two
+      // agree without the call. `hydrateClassCache` raises this once a class is known.
+      mp: 0,
+      playerClass: null,
       lastDamagedAt: 0,
       // Hydration supplies the initial value; account subscriptions keep every active session current.
       totalExp: 0,
@@ -673,6 +701,14 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       });
       void this.hydrateProgressCache(client.sessionId, ownerKey).catch((cause) => {
         console.warn(`[zep-test] could not hydrate progress for ${ownerKey}`, cause);
+      });
+    }
+    // Not gated on `hasMonsters`, `hydrateProgressCache`'s own reasoning: the class picker (D9)
+    // shows in every room, including grand-plaza, so every room's join path touches
+    // `player_class`. Fire-and-forget, every other hydration here's own rule.
+    if (this.classStore !== null) {
+      void this.hydrateClassCache(client.sessionId, ownerKey).catch((cause) => {
+        console.warn(`[zep-test] could not hydrate class for ${ownerKey}`, cause);
       });
     }
     // Gated on this room having something to do with a quest at all — a giver standing here, or
@@ -875,6 +911,153 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       delta: 0,
       reason: "sync",
     } satisfies CurrencyChanged);
+  }
+
+  /**
+   * Fills a freshly joined session's {@link PlayerSession.playerClass} from the store, raises the
+   * public `Player.playerClass` schema field to match, recomputes the HP/MP caps the class
+   * multiplier touches, and pushes the result as a join-time {@link ServerMessage.ClassChanged}
+   * sync — {@link hydrateCurrencyCache}'s own shape, `classKey: null` standing in for its `balance:
+   * 0` when the account has never chosen (design §9 D8/D9).
+   *
+   * Never awaited by its caller, every other hydration here's own rule — the session may have
+   * left, or walked through a door into another room, while the store was answering; re-resolved
+   * after the `await` below exactly as `hydrateCurrencyCache` re-resolves its own client/session.
+   */
+  private async hydrateClassCache(sessionId: string, ownerKey: string): Promise<void> {
+    const store = this.classStore;
+    if (store === null) {
+      return;
+    }
+    const classKey = await store.getClass(ownerKey);
+    const client = this.clientsBySession.get(sessionId);
+    const session = client?.userData;
+    const player = this.state.players.get(sessionId);
+    if (!client || !session || !player) {
+      return;
+    }
+    // Applied only while this session still has no class *at all* — never merely because
+    // hydration's answer differs from what the session currently holds.
+    //
+    // The difference is a real race, not a hypothetical (independent verification, 2026-09-18):
+    // this read and a `class:choose` sent moments after the join are two independent round trips
+    // with no ordering guarantee between them, and D9's approved flow is precisely "join, then
+    // pick right away". A "differs from what I see" guard treats the *newer* live pick as the
+    // wrong value and reverts it — the account loses its class, all of its MP and the HP cap the
+    // multiplier gave it, silently, with no denial sent and nothing thrown.
+    //
+    // `null` is therefore the only state hydration may overwrite. A landed pick is authoritative
+    // against a read that started before it: `chooseOnce` is write-once, so the store can never
+    // hold a class this session did not already settle on. The `classKey !== null` half keeps the
+    // never-chosen case a no-op rather than a pointless full-MP reapplication of `null`.
+    if (classKey !== null && session.playerClass === null) {
+      this.applyChosenClass(session, player, classKey);
+    }
+    this.sendClassChanged(client, session, player);
+  }
+
+  /**
+   * Sets {@link PlayerSession.playerClass}/`Player.playerClass` and recomputes the HP/MP caps the
+   * class multiplier feeds — the one place either ever changes, shared by {@link
+   * hydrateClassCache} (join) and {@link settleChooseClass} (a live pick), so the two can never
+   * disagree on how a cap change is applied.
+   *
+   * HP carries across with the exact rule `updateProgress` uses for a level-up
+   * (`Math.min(newMax, hp + newMax - oldMax)`), except a class pick can *shrink* the cap where a
+   * level-up never does (a lower `maxHpMultiplier`), so the result is additionally floored at 1 —
+   * a class pick must never itself read as the death `hpRemaining === 0` means everywhere else.
+   * MP has no such carry: it was exactly 0 while unchosen (`totalMaxMp`) and always goes to the
+   * new full amount, design §2 D2's "MP is 0 unchosen and full-on-join once chosen".
+   */
+  private applyChosenClass(
+    session: PlayerSession,
+    player: Player,
+    classKey: PlayerClassKey | null,
+  ): void {
+    const oldMaxHp = this.totalMaxHp(session);
+    session.playerClass = classKey;
+    player.playerClass = classCodeFor(classKey);
+    const newMaxHp = this.totalMaxHp(session);
+    session.hp = Math.max(1, Math.min(newMaxHp, session.hp + newMaxHp - oldMaxHp));
+    session.mp = this.totalMaxMp(session);
+  }
+
+  /** The {@link ServerMessage.ClassChanged} shape, shared by {@link hydrateClassCache} and {@link settleChooseClass}. */
+  private sendClassChanged(client: RoomClient, session: PlayerSession, player: Player): void {
+    client.send(ServerMessage.ClassChanged, {
+      classKey: session.playerClass,
+      classCode: player.playerClass,
+      hpRemaining: Math.max(0, session.hp),
+      hpMax: this.totalMaxHp(session),
+      mpRemaining: session.mp,
+      mpMax: this.totalMaxMp(session),
+    } satisfies ClassChanged);
+  }
+
+  /**
+   * One class pick (roadmap R05-a, design §2 D1/D9). Validated against the four real classes
+   * before the store is ever touched — {@link BuyItemRequest}'s own "reject the shape before
+   * spending a round trip" order, and `ClassStore.chooseOnce`'s own guard repeats it for defence
+   * in depth rather than trusting this call site alone.
+   *
+   * Falls back to the session id when there is no SSO identity, `awardExp`'s own convention —
+   * unlike a purchase (`handleBuyItem`'s own `ownerKey === null` skip) a class pick has an honest
+   * place to go in local development: the in-memory store, keyed by session id (design §2 D1's
+   * last bullet).
+   *
+   * No rate limit of its own: `ClassStore.chooseOnce` is one indexed upsert and write-once, so a
+   * client spamming this buys repeated round trips — capped by `maxMessagesPerSecond` like any
+   * other message — and never a second effect, `handleAcceptQuest`'s own reasoning for the same
+   * shape of write.
+   */
+  private handleChooseClass(client: RoomClient, message: ChooseClassRequest): void {
+    const session = client.userData;
+    const store = this.classStore;
+    if (!session || !this.state.players.has(client.sessionId) || store === null) {
+      return;
+    }
+    const classKey = message?.classKey;
+    if (!isPlayerClassKey(classKey)) {
+      client.send(ServerMessage.ClassDenied, { reason: "unknown-class" } satisfies ClassDenied);
+      return;
+    }
+    const ownerKey = session.ownerKey ?? client.sessionId;
+    void this.settleChooseClass(client.sessionId, ownerKey, classKey, store);
+  }
+
+  /** The store half of {@link handleChooseClass}. Async and never awaited, `awardLoot`'s own reason. */
+  private async settleChooseClass(
+    sessionId: string,
+    ownerKey: string,
+    classKey: PlayerClassKey,
+    store: ClassStore,
+  ): Promise<void> {
+    let stored: PlayerClassKey;
+    try {
+      stored = await store.chooseOnce(ownerKey, classKey);
+    } catch (cause) {
+      console.warn(`[zep-test] could not choose class ${classKey} for ${ownerKey}`, cause);
+      return;
+    }
+    // Re-resolved after the await, every other store continuation's rule: the chooser may have
+    // left the room, or walked through a door into another one, while the store was answering.
+    const client = this.clientsBySession.get(sessionId);
+    const session = client?.userData;
+    const player = this.state.players.get(sessionId);
+    if (!client || !session || !player) {
+      return;
+    }
+    if (stored !== classKey) {
+      // The store already held a *different* class than the one just requested — design §2 D1's
+      // race, two tabs choosing at once. The requester is told no, and settles on the account's
+      // real class below exactly as `hydrateClassCache` would if it read this row on the next
+      // join, rather than being left showing the class it clicked but never actually got.
+      client.send(ServerMessage.ClassDenied, { reason: "already-chosen" } satisfies ClassDenied);
+    }
+    if (session.playerClass !== stored) {
+      this.applyChosenClass(session, player, stored);
+    }
+    this.sendClassChanged(client, session, player);
   }
 
   /**
@@ -1859,11 +2042,14 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
    * `stats.attackDamage`, summed across whichever slots happen to carry that axis (design
    * -phase-w-level-system.md §4.2; equipment axis is design-phase-v-equipment-system.md §5.1,
    * §5.5 — today only the weapon slot's `old-dagger`, but the loop costs nothing extra the day a
-   * ring picks up the same axis). Looked up by key on every swing rather than cached,
+   * ring picks up the same axis), the whole sum then scaled by this session's class
+   * `attackMultiplier` (roadmap R05-a, design `docs/r05-classes-and-skills.md` D4 — "직업 차이는
+   * totalAttack/totalMaxHp 안에서만 발생한다"). Looked up by key on every swing rather than cached,
    * `damagePlayer`'s own reasoning: `ITEM_DEFINITIONS` is a handful of rows and `equippedItemKeys`
-   * is the hot value. `level = 1` (no EXP hydrated yet, or none ever granted) makes this exactly
-   * `PLAYER_ATTACK_DAMAGE + equipment` — today's value, unchanged — which is the anchor invariant
-   * §4.2 requires.
+   * is the hot value. `level = 1`, no equipment and an unchosen class (multiplier exactly `1`,
+   * `docs/decisions.md` 2026-09-18) makes this exactly `PLAYER_ATTACK_DAMAGE` — today's value,
+   * unchanged — which is the anchor invariant §4.2 requires; `Math.round` cannot move an already
+   * -integer sum, and `Math.max(1, ...)` cannot floor a value that is always `>= 4`.
    */
   private totalAttack(session: PlayerSession): number {
     const level = levelForExp(session.totalExp);
@@ -1876,16 +2062,20 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       const definition = ITEM_DEFINITIONS.find((item) => item.key === itemKey);
       bonus += definition?.equipment?.stats.attackDamage ?? 0;
     }
-    return PLAYER_ATTACK_DAMAGE + (level - 1) * ATTACK_PER_LEVEL + bonus;
+    const sum = PLAYER_ATTACK_DAMAGE + (level - 1) * ATTACK_PER_LEVEL + bonus;
+    return Math.max(1, Math.round(sum * this.classAttackMultiplier(session)));
   }
 
   /**
    * `PLAYER_MAX_HP` plus this session's level bonus plus every equipped item's `stats.maxHp`
-   * (design-phase-w-level-system.md §4.2). The `maxHp` axis is `totalAttack`'s `attackDamage`
-   * twin, and its first real consumer: `ItemDefinition.equipment.stats.maxHp` has been declared
-   * since Phase V (`contracts.ts`) but nothing read it before this Phase — no catalogue row sets
-   * it today, so this loop currently always adds 0, exactly as `totalAttack`'s did before Phase V
-   * shipped `old-dagger`.
+   * (design-phase-w-level-system.md §4.2), scaled by this session's class `maxHpMultiplier` —
+   * {@link totalAttack}'s own extension, same design §4 D4. The `maxHp` axis is `totalAttack`'s
+   * `attackDamage` twin, and its first real consumer: `ItemDefinition.equipment.stats.maxHp` has
+   * been declared since Phase V (`contracts.ts`) but nothing read it before this Phase — no
+   * catalogue row sets it today, so this loop currently always adds 0, exactly as `totalAttack`'s
+   * did before Phase V shipped `old-dagger`. {@link totalAttack}'s own anchor-invariant argument
+   * applies here unchanged: an unchosen class's multiplier of exactly `1` leaves level 1, no
+   * equipment at `PLAYER_MAX_HP`, today's value.
    */
   private totalMaxHp(session: PlayerSession): number {
     const level = levelForExp(session.totalExp);
@@ -1898,7 +2088,35 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       const definition = ITEM_DEFINITIONS.find((item) => item.key === itemKey);
       bonus += definition?.equipment?.stats.maxHp ?? 0;
     }
-    return PLAYER_MAX_HP + (level - 1) * HP_PER_LEVEL + bonus;
+    const sum = PLAYER_MAX_HP + (level - 1) * HP_PER_LEVEL + bonus;
+    return Math.max(1, Math.round(sum * this.classMaxHpMultiplier(session)));
+  }
+
+  /**
+   * This session's class MP pool at its current level — `maxMpBase` plus `mpPerLevel` for every
+   * level past 1 (design §4 D7), `HP_PER_LEVEL`'s own shape applied per class instead of shared by
+   * all four. `0` while {@link PlayerSession.playerClass} is `null`: there is no "unchosen MP
+   * multiplier" the way HP/attack have one, because a class that does not exist yet has no resource
+   * pool to scale — an unchosen account simply has none to spend (design §2 D9, no skills before a
+   * class is picked).
+   */
+  private totalMaxMp(session: PlayerSession): number {
+    if (session.playerClass === null) {
+      return 0;
+    }
+    const level = levelForExp(session.totalExp);
+    const definition = CLASS_DEFINITIONS[session.playerClass];
+    return definition.maxMpBase + (level - 1) * definition.mpPerLevel;
+  }
+
+  /** `1` for an unchosen class — {@link totalAttack}'s own anchor-invariant requirement. */
+  private classAttackMultiplier(session: PlayerSession): number {
+    return session.playerClass === null ? 1 : CLASS_DEFINITIONS[session.playerClass].attackMultiplier;
+  }
+
+  /** `1` for an unchosen class — {@link totalMaxHp}'s own anchor-invariant requirement. */
+  private classMaxHpMultiplier(session: PlayerSession): number {
+    return session.playerClass === null ? 1 : CLASS_DEFINITIONS[session.playerClass].maxHpMultiplier;
   }
 
   /**
@@ -2919,15 +3137,23 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   }
 
   /**
-   * Gives health back to everyone who has been left alone for COMBAT_EXIT_MS.
+   * Gives health back to everyone who has been left alone for COMBAT_EXIT_MS, and MP back to
+   * *everyone* regardless of combat state (roadmap R05-a, design `docs/r05-classes-and-skills.md`
+   * D2, `docs/decisions.md` 2026-09-18 열린 질문 3) — MP recovers mid-fight too, just slower, so an
+   * MP-based class never simply runs dry with nothing left to do until it disengages, and
+   * disengaging is not always its choice to make. The method keeps HP's name: it predates MP and
+   * still does most of its work for HP's rule, restructured minimally (one more guarded branch per
+   * session, not a second loop) rather than split in two, since both resources ride the exact same
+   * tick and the exact same per-session lookup.
    *
-   * Sends nothing at all. The client redraws the same curve from COMBAT_EXIT_MS,
-   * COMBAT_RECOVERY_HP_PER_TICK and the time of its own last `PlayerHit`, so a per-tick unicast
-   * to every hurt player would be exactly the traffic this design keeps off the wire — and the
-   * next `PlayerHit` carries the server's number anyway, which bounds how far the two can drift.
+   * Sends nothing at all, for either resource. The client redraws both curves from COMBAT_EXIT_MS,
+   * the fraction constants and the time of its own last `PlayerHit`/cast, so a per-tick unicast to
+   * every affected player would be exactly the traffic this design keeps off the wire — and the
+   * next `PlayerHit`/`ClassChanged` carries the server's real number anyway, which bounds how far
+   * the two can drift.
    *
    * Rides the monster tick, so it runs only in a room that has monsters. That is the only room
-   * health can be lost in, and any room change restores it in full regardless.
+   * either resource can be spent in, and any room change restores both in full regardless.
    *
    * Per-session `totalMaxHp` and COMBAT_RECOVERY_FRACTION_PER_TICK replace the flat
    * PLAYER_MAX_HP/COMBAT_RECOVERY_HP_PER_TICK pair (design-phase-w-level-system.md §4.4): a level
@@ -2943,14 +3169,25 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       if (!session) {
         continue;
       }
-      const cap = this.totalMaxHp(session);
       // `lastDamagedAt` is 0 for a player who has never been hit, and this guard is what stops
       // that from reading as "out of combat since the epoch" on somebody already at full health.
-      if (session.hp >= cap || now - session.lastDamagedAt < COMBAT_EXIT_MS) {
-        continue;
+      const inCombat = now - session.lastDamagedAt < COMBAT_EXIT_MS;
+
+      const hpCap = this.totalMaxHp(session);
+      if (session.hp < hpCap && !inCombat) {
+        const hpPerTick = Math.max(1, Math.round(hpCap * COMBAT_RECOVERY_FRACTION_PER_TICK));
+        session.hp = Math.min(hpCap, session.hp + hpPerTick);
       }
-      const recoveryPerTick = Math.max(1, Math.round(cap * COMBAT_RECOVERY_FRACTION_PER_TICK));
-      session.hp = Math.min(cap, session.hp + recoveryPerTick);
+
+      // `0` while `playerClass` is `null` (`totalMaxMp`), which the `session.mp < mpCap` guard
+      // already makes a no-op for — `mp` is also always `0` then, so the two sides are equal and
+      // this branch is skipped, exactly as intended for an account with no resource pool yet.
+      const mpCap = this.totalMaxMp(session);
+      if (session.mp < mpCap) {
+        const mpFraction = inCombat ? MP_COMBAT_RECOVERY_FRACTION_PER_TICK : MP_RECOVERY_FRACTION_PER_TICK;
+        const mpPerTick = Math.max(1, Math.round(mpCap * mpFraction));
+        session.mp = Math.min(mpCap, session.mp + mpPerTick);
+      }
     }
   }
 

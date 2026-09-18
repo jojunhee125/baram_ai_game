@@ -19,6 +19,17 @@ export const Player = schema({
    * `undefined` default — see `MetaverseRoom.onJoin`.
    */
   level: "uint8",
+  /**
+   * A `PlayerClassCode` value (roadmap R05-a, `docs/r05-classes-and-skills.md` D3). Public for
+   * `level`'s reason and *more* strongly so: a class changes **at most once per account
+   * lifetime** (design §2 D1 — no respec in V1), so the patch cost of syncing it to every viewer
+   * is nowhere near even `level`'s few-dozen-times-a-session rate, let alone `hp`/`mp`'s
+   * every-hit-or-cast rate, which is why those two stay off the schema entirely. Always set at
+   * spawn (never left unassigned) so it is never the schema's own `undefined` default — `0`
+   * (`PlayerClassCode.Unchosen`) is the honest value for an account that has not picked yet, and
+   * `MetaverseRoom.onJoin`/`hydrateClassCache` are what raise it once the store answers.
+   */
+  playerClass: "uint8",
 });
 
 export type Player = SchemaType<typeof Player>;

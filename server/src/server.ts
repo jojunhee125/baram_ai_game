@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { Encoder } from "@colyseus/schema";
 import { Server, WebSocketTransport } from "colyseus";
 import type { BossStateStore } from "./db/bossStateStore";
+import type { ClassStore } from "./db/classStore";
 import type { CurrencyStore } from "./db/currencyStore";
 import type { InventoryStore } from "./db/inventoryStore";
 import type { ProfileStore } from "./db/profileStore";
@@ -34,14 +35,15 @@ import { SHOP_DEFINITIONS, validateShopDefinitions } from "./rooms/shopDefinitio
 export const DEFAULT_PORT = 2567;
 
 /**
- * All seven stores are resolved at boot by `index.ts` — Postgres when `DATABASE_URL` is set and
+ * All eight stores are resolved at boot by `index.ts` — Postgres when `DATABASE_URL` is set and
  * process memory when it is not. Omitting them takes the same in-memory path, which is what a
  * test or a local `npm run dev` runs on. `adminOwnerKeys` defaults to nobody exempt, the same
  * "opt in, never a hardcoded key" default `ADMIN_OWNER_KEYS` is meant to have
- * (design-phase-w-level-system.md §11.0). `currencyStore`/`settlementStore` trail `adminOwnerKeys`
- * rather than sitting beside `questStore` (roadmap R04-b): every existing positional call in this
- * codebase's own tests stops before that argument, and inserting earlier would silently reassign
- * `adminOwnerKeys` in every one of them instead of leaving it at its default.
+ * (design-phase-w-level-system.md §11.0). `currencyStore`/`settlementStore`/`classStore` trail
+ * `adminOwnerKeys` rather than sitting beside `questStore` (roadmap R04-b/R05-a): every existing
+ * positional call in this codebase's own tests stops before that argument, and inserting earlier
+ * would silently reassign `adminOwnerKeys` in every one of them instead of leaving it at its
+ * default.
  */
 export function createGameServer(
   profileStore?: ProfileStore,
@@ -52,6 +54,7 @@ export function createGameServer(
   adminOwnerKeys: ReadonlySet<string> = new Set(),
   currencyStore?: CurrencyStore,
   settlementStore?: SettlementStore,
+  classStore?: ClassStore,
 ): Server {
   // Has to be set explicitly: the 8 KB default is nowhere near one patch of a 500-view room.
   // Every client's view is appended to one shared buffer, so a patch needs the sum of all 500
@@ -120,6 +123,7 @@ export function createGameServer(
       questStore,
       currencyStore,
       settlementStore,
+      classStore,
       adminOwnerKeys,
     });
   }
