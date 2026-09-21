@@ -4,6 +4,8 @@ import {
   COMBAT_RECOVERY_FRACTION_PER_TICK,
   cumulativeExpForLevel,
   MONSTER_TICK_MS,
+  MP_COMBAT_RECOVERY_FRACTION_PER_TICK,
+  MP_RECOVERY_FRACTION_PER_TICK,
   PLAYER_MAX_HP,
   type ExpGranted,
   type PlayerHit,
@@ -48,6 +50,10 @@ export class PlayerVitals {
   private readonly expTrack = document.querySelector<HTMLElement>("#vitals-exp-track")!;
   private readonly expFill = document.querySelector<HTMLElement>("#vitals-exp-fill")!;
   private readonly levelUpBanner = document.querySelector<HTMLElement>("#vitals-levelup")!;
+  private readonly mpHead = document.querySelector<HTMLElement>("#vitals-mp-head")!;
+  private readonly mpCount = document.querySelector<HTMLElement>("#vitals-mp-count")!;
+  private readonly mpTrack = document.querySelector<HTMLElement>("#vitals-mp-track")!;
+  private readonly mpFill = document.querySelector<HTMLElement>("#vitals-mp-fill")!;
   private readonly attackStatus = document.createElement("span");
   /**
    * Read once rather than per swing: a change of preference mid-session is not worth a listener,
@@ -60,6 +66,30 @@ export class PlayerVitals {
   private hpMax = PLAYER_MAX_HP;
   /** When the next local recovery tick is due; infinite while there is nothing to recover. */
   private nextRecoveryAt = Number.POSITIVE_INFINITY;
+  /**
+   * MP and its cap (roadmap R05-c). Both are `0` until a {@link setMp} arrives, which is exactly
+   * the server's own reading for an account that has not chosen a class (`totalMaxMp` returns 0
+   * then) — so the starting value is correct rather than a placeholder, and {@link renderMp} keeps
+   * the gauge hidden while the cap is 0.
+   */
+  private mp = 0;
+  private mpMax = 0;
+  /**
+   * When the next local MP tick is due. Separate from {@link nextRecoveryAt} rather than sharing
+   * it, because the server recovers the two on different rules (`recoverOutOfCombat`): HP only
+   * after `COMBAT_EXIT_MS` of quiet, MP on *every* tick — at
+   * `MP_COMBAT_RECOVERY_FRACTION_PER_TICK` while in combat and
+   * `MP_RECOVERY_FRACTION_PER_TICK` outside it. Sharing the HP gate would freeze this gauge for
+   * the whole of a fight, which is the one stretch a caster is actually watching it.
+   */
+  private nextMpRecoveryAt = Number.POSITIVE_INFINITY;
+  /**
+   * Real damage only — the server's own `lastDamagedAt`, mirrored so {@link update} can pick the
+   * in-combat MP fraction. Deliberately not set by the synthetic zero-damage {@link applyHit} the
+   * class sync sends (`WorldScene.applyClassChanged`): choosing a class is not being hit, and
+   * treating it as one would slow MP regen for `COMBAT_EXIT_MS` right after every join.
+   */
+  private lastDamagedAt = Number.NEGATIVE_INFINITY;
   private cooldownTimer: number | undefined;
   private revivalTimer: number | undefined;
   private levelUpTimer: number | undefined;
@@ -82,6 +112,9 @@ export class PlayerVitals {
     delete this.levelBadge.dataset.levelup;
     this.levelUpBanner.hidden = true;
     this.render();
+    // Same reset reason as the EXP bits above: a room hop hands these shared nodes over mid-play,
+    // and the successor's first real reading is the `ClassChanged` this room is about to send.
+    this.renderMp();
   }
 
   /**
@@ -106,7 +139,11 @@ export class PlayerVitals {
 
     this.hpMax = event.hpMax > 0 ? event.hpMax : PLAYER_MAX_HP;
     this.hp = Math.max(0, Math.min(this.hpMax, event.hpRemaining));
-    this.nextRecoveryAt = performance.now() + COMBAT_EXIT_MS;
+    const now = performance.now();
+    this.nextRecoveryAt = now + COMBAT_EXIT_MS;
+    if (event.damage > 0) {
+      this.lastDamagedAt = now;
+    }
     this.render();
 
     if (event.hpRemaining > 0) {
@@ -116,7 +153,14 @@ export class PlayerVitals {
       this.revivalTimer = undefined;
       this.hp = this.hpMax;
       this.nextRecoveryAt = Number.POSITIVE_INFINITY;
+      // Death refills MP too (`metaverseRoom.ts:3309`, `docs/decisions.md` 2026-09-18 R05-b 미결
+      // 2) — the server has already done it, and without this the gauge would sit at whatever was
+      // left when the player died until the next cast corrected it.
+      this.mp = this.mpMax;
+      this.nextMpRecoveryAt = Number.POSITIVE_INFINITY;
+      this.lastDamagedAt = Number.NEGATIVE_INFINITY;
       this.render();
+      this.renderMp();
     }, REVIVAL_HOLD_MS);
   }
 
@@ -175,8 +219,39 @@ export class PlayerVitals {
     this.levelUpTimer = window.setTimeout(this.endLevelUp, LEVEL_UP_BANNER_MS);
   }
 
+  /**
+   * The server's MP, which always wins over the locally estimated recovery below — {@link
+   * applyHit}'s own rule for HP. Arrives from `ClassChanged` (join and pick) and from the
+   * caster's own copy of `SkillUsed`; there is no periodic MP message, the same deliberate
+   * silence HP recovery keeps.
+   *
+   * `mpMax` of 0 is not a missing value: it is what the server reports for an account with no
+   * class, and {@link renderMp} hides the gauge on exactly that reading.
+   */
+  setMp(mpRemaining: number, mpMax: number): void {
+    if (mpMax > 0) {
+      // Redundant against today's only caller — `WorldScene` has revealed this panel
+      // unconditionally since Pass F (2026-09-02), whatever {@link reveal}'s own older doc comment
+      // still says about a first monster. Kept anyway, and deliberately: MP is spent and recovered
+      // in *every* room (방어 태세 and 치유 are castable in the plaza, `docs/decisions.md`
+      // 2026-09-18 R05-b 미결 4), so if that unconditional reveal is ever narrowed back this
+      // class does not silently lose its gauge along with it.
+      this.reveal();
+    }
+    this.mpMax = Math.max(0, mpMax);
+    this.mp = Math.max(0, Math.min(this.mpMax, mpRemaining));
+    this.nextMpRecoveryAt = performance.now() + MONSTER_TICK_MS;
+    this.renderMp();
+  }
+
+  /** This session's MP, for a caller deciding whether a cast is affordable before sending it. */
+  get currentMp(): number {
+    return this.mp;
+  }
+
   /** Called every frame. Does nothing at full health, which is every room but a hunting ground. */
   update(): void {
+    this.updateMp();
     if (this.hp >= this.hpMax) {
       return;
     }
@@ -196,6 +271,35 @@ export class PlayerVitals {
     const recoveryPerTick = Math.max(1, Math.round(this.hpMax * COMBAT_RECOVERY_FRACTION_PER_TICK));
     this.hp = Math.min(this.hpMax, this.hp + ticks * recoveryPerTick);
     this.render();
+  }
+
+  /**
+   * The MP half of {@link update}, mirroring `recoverOutOfCombat`'s MP branch rather than its HP
+   * one — the two branches differ, which is the whole reason this is not folded into the loop
+   * above (see {@link nextMpRecoveryAt}).
+   *
+   * The in/out-of-combat fraction is chosen once for the whole catch-up rather than per tick: a
+   * backgrounded tab can wake up owing ticks that straddle the moment combat ended, and resolving
+   * that exactly would mean replaying a damage history this class does not keep. It is an
+   * estimate either way — the next `ClassChanged` or `SkillUsed` overwrites it outright.
+   */
+  private updateMp(): void {
+    if (this.mpMax <= 0 || this.mp >= this.mpMax) {
+      return;
+    }
+    const now = performance.now();
+    if (now < this.nextMpRecoveryAt) {
+      return;
+    }
+    const ticks = Math.floor((now - this.nextMpRecoveryAt) / MONSTER_TICK_MS) + 1;
+    this.nextMpRecoveryAt += ticks * MONSTER_TICK_MS;
+    const inCombat = now - this.lastDamagedAt < COMBAT_EXIT_MS;
+    const fraction = inCombat ? MP_COMBAT_RECOVERY_FRACTION_PER_TICK : MP_RECOVERY_FRACTION_PER_TICK;
+    // Math.max(1, …) is the server's own floor, not a client embellishment: without it a warrior's
+    // 0.005 × 30 would round to 0 and the gauge would never move in combat.
+    const perTick = Math.max(1, Math.round(this.mpMax * fraction));
+    this.mp = Math.min(this.mpMax, this.mp + ticks * perTick);
+    this.renderMp();
   }
 
   /**
@@ -232,6 +336,10 @@ export class PlayerVitals {
     delete this.panel.dataset.attack;
     delete this.levelBadge.dataset.levelup;
     this.levelUpBanner.hidden = true;
+    // Shared nodes, same as every other one above: left visible they would sit in the successor's
+    // panel showing the MP of the room this instance was destroyed in.
+    this.mpHead.hidden = true;
+    this.mpTrack.hidden = true;
     this.attackStatus.remove();
   }
 
@@ -248,6 +356,24 @@ export class PlayerVitals {
     this.levelUpBanner.hidden = true;
     delete this.levelBadge.dataset.levelup;
   };
+
+  /**
+   * Hidden rather than empty while `mpMax` is 0 — an account with no class has no resource pool,
+   * and a permanently empty bar reads as a broken gauge instead of as "not yet".
+   */
+  private renderMp(): void {
+    const hasPool = this.mpMax > 0;
+    this.mpHead.hidden = !hasPool;
+    this.mpTrack.hidden = !hasPool;
+    if (!hasPool) {
+      return;
+    }
+    const ratio = Math.max(0, Math.min(1, this.mp / this.mpMax));
+    this.mpCount.textContent = `${this.mp} / ${this.mpMax}`;
+    this.mpFill.style.transform = `scaleX(${ratio})`;
+    this.mpTrack.setAttribute("aria-valuenow", String(this.mp));
+    this.mpTrack.setAttribute("aria-valuemax", String(this.mpMax));
+  }
 
   private render(): void {
     const ratio = this.hpMax > 0 ? Math.max(0, Math.min(1, this.hp / this.hpMax)) : 0;

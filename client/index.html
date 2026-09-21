@@ -71,6 +71,32 @@
             <span class="vitals__fill" id="vitals-fill"></span>
           </div>
           <!--
+            마력 (MP, roadmap R05-c). Hidden for an account with no class: `totalMaxMp` is 0 until
+            one is chosen, and an always-empty bar would read as a broken gauge rather than as
+            "you have no resource pool yet". playerVitals.ts reveals it on the first ClassChanged
+            carrying a real class.
+
+            Its own row rather than a second reading on the HP head, because the server recovers
+            the two on different rules — HP only out of combat, MP always (at a smaller fraction
+            in combat, `recoverOutOfCombat`) — so the two bars genuinely move independently.
+          -->
+          <p class="vitals__head vitals__head--mp" id="vitals-mp-head" hidden>
+            <span class="vitals__label">마력</span>
+            <span class="vitals__count" id="vitals-mp-count">0 / 0</span>
+          </p>
+          <div
+            class="vitals__mp-track"
+            id="vitals-mp-track"
+            role="progressbar"
+            aria-label="마력"
+            aria-valuemin="0"
+            aria-valuemax="0"
+            aria-valuenow="0"
+            hidden
+          >
+            <span class="vitals__mp-fill" id="vitals-mp-fill"></span>
+          </div>
+          <!--
             EXP. Its only data source is ExpGranted (design §2.1), so it starts at 0% and holds
             that reading until this session's first kill — the same "assume the default until the
             first message says otherwise" rule the HP track above already follows for PLAYER_MAX_HP.
@@ -99,6 +125,17 @@
             in the same stroke and hides this again on its own timer).
           -->
           <p class="vitals__levelup" id="vitals-levelup" role="status" aria-live="polite" hidden></p>
+          <!--
+            Skill slots (roadmap R05-c). Filled by skillBar.ts from the class's own
+            `CLASS_DEFINITIONS[...].skillKeys` rather than written out here: the list is one row
+            per class today and grows by a second skill later (`skills.ts` doc comment), and a
+            static markup copy would be a second place that list lives.
+
+            Inside .vitals rather than beside it so both skins place it without a second rule —
+            heritage.css moves this whole panel into the classic sidebar.
+          -->
+          <ul class="skills" id="skills" hidden></ul>
+          <p class="skills__denial" id="skills-denial" role="status" aria-live="polite" hidden></p>
         </div>
 
         <!--

@@ -2,17 +2,24 @@ import Phaser from "phaser";
 import {
   CLASS_DEFINITIONS,
   LANDMARK_DEFINITIONS,
+  SKILL_DEFINITIONS,
   TILE_SIZE_PX,
+  isSkillKey,
   type ChatBroadcast,
   type ClassChanged,
   type ExpGranted,
   type JoinOptions,
   type MonsterHit,
+  type PlayerHealed,
   type PlayerHit,
+  type SkillDenied,
+  type SkillKey,
+  type SkillUsed,
 } from "@zep-test/shared";
 import { hideBootStatus, showBootError } from "../bootStatus";
 import { AttackKey } from "../input/attackKey";
 import { MovementKeys } from "../input/movementKeys";
+import { SkillKeys } from "../input/skillKeys";
 import { resolveJoinOptions, updateAvatarSkin } from "../net/identity";
 import { saveAvatarSkin } from "../net/profile";
 import { RoomConnection, type PlayerSnapshot } from "../net/roomConnection";
@@ -33,10 +40,11 @@ import { buildMinimapTerrain } from "../ui/minimapTerrain";
 import { ObjectPanel } from "../ui/objectPanel";
 import { PlayerVitals } from "../ui/playerVitals";
 import { QuestTracker } from "../ui/questTracker";
+import { SkillBar } from "../ui/skillBar";
 import { PortalDenialBanner } from "../ui/portalDenialBanner";
 import { ChatBubbles } from "../world/chatBubbles";
 import { createAvatarArt, type AvatarArt } from "../world/avatarArt";
-import { CombatEffects, type DamageTone } from "../world/combatEffects";
+import { CombatEffects, type CastTone, type DamageTone } from "../world/combatEffects";
 import { drawInteractableMarkers } from "../world/interactableMarkers";
 import { LocalPlayer } from "../world/localPlayer";
 import { MonsterHealthBars } from "../world/monsterHealthBars";
@@ -112,6 +120,22 @@ function arrivalFailureNotice(arrival: Arrival): string {
   return "홈으로 돌아가지 못했습니다. 잠시 후 다시 시도해 주세요.";
 }
 
+/**
+ * Which fallback ring a cast draws, derived from the skill's own `SkillEffect.kind` rather than
+ * from a per-skill table (roadmap R05-c): a skill added later gets a sensible ring for free, and
+ * the three kinds are what a bystander can actually distinguish at this size.
+ */
+function castToneOf(skillKey: SkillKey): CastTone {
+  switch (SKILL_DEFINITIONS[skillKey].effect.kind) {
+    case "self-damage-reduction":
+      return "defensive";
+    case "ally-heal":
+      return "restorative";
+    default:
+      return "offensive";
+  }
+}
+
 export class WorldScene extends Phaser.Scene {
   static readonly KEY = "world";
 
@@ -134,6 +158,8 @@ export class WorldScene extends Phaser.Scene {
   private lootTablePanel: LootTablePanel | null = null;
   private characterMenu: CharacterMenu | null = null;
   private classPicker: ClassPicker | null = null;
+  private skillBar: SkillBar | null = null;
+  private skillKeys: SkillKeys | null = null;
   private landmarkPanel: LandmarkPanel | null = null;
   private vitals: PlayerVitals | null = null;
   private bossVitals: BossVitals | null = null;
@@ -177,6 +203,8 @@ export class WorldScene extends Phaser.Scene {
     this.lootTablePanel = null;
     this.characterMenu = null;
     this.classPicker = null;
+    this.skillBar = null;
+    this.skillKeys = null;
     this.landmarkPanel = null;
     this.vitals = null;
     this.bossVitals = null;
@@ -278,6 +306,16 @@ export class WorldScene extends Phaser.Scene {
     // account's accepted quests on its own right after the join, and RoomConnection holds those
     // only until attach() (RoomConnection.pendingQuestUpdates). Reveals itself on the first row.
     this.questTracker = new QuestTracker();
+    // Before attach() for the quest tracker's exact reason, and it is not optional here: the room
+    // sends `ClassChanged` on its own initiative right after the join, and RoomConnection holds it
+    // only until attach() (`pendingClassChanges`). Built after that flush, these three would be
+    // handed a sync that had already been delivered to nobody — and a second `ClassChanged` only
+    // ever arrives on a *pick*, so an account that already has a class would go the whole session
+    // with no MP gauge and no skill slots. The class picker sat in the late block from R05-a and
+    // had the same hole; it moves up with them.
+    this.classPicker = new ClassPicker((classKey) => this.connection.sendChooseClass(classKey));
+    this.skillBar = new SkillBar((skillKey, nonce) => this.cast(skillKey, nonce));
+    this.skillKeys = new SkillKeys((index) => this.skillBar?.castSlot(index) ?? false);
 
     this.connection.attach({
       onPlayerAdd: (sessionId, snapshot) => this.addPlayer(sessionId, snapshot),
@@ -364,6 +402,9 @@ export class WorldScene extends Phaser.Scene {
       },
       onClassChanged: (event) => this.applyClassChanged(event),
       onClassDenied: (event) => this.classPicker?.applyClassDenied(event),
+      onSkillUsed: (event) => this.applySkillUsed(event),
+      onSkillDenied: (event) => this.applySkillDenied(event),
+      onPlayerHealed: (event) => this.applyPlayerHealed(event),
       onLeave: () => {
         // Not the leave we asked for; that one never reaches here (RoomConnection.leaving).
         // This is a drop mid-hop, which leave() then early-returns on — the hop still lands, so
@@ -398,7 +439,6 @@ export class WorldScene extends Phaser.Scene {
       (itemKey, nonce) => connection.sendUseItem(itemKey, nonce),
     );
     this.lootTablePanel = new LootTablePanel(this.connection.roomName);
-    this.classPicker = new ClassPicker((classKey) => connection.sendChooseClass(classKey));
     this.characterMenu = new CharacterMenu(
       () => void this.openSkinPicker(),
       () => this.classPicker?.open(),
@@ -441,6 +481,12 @@ export class WorldScene extends Phaser.Scene {
     this.monsterHealth.update();
     // Out-of-combat recovery is drawn, never messaged (design §6.3), so it ticks here.
     this.vitals?.update();
+    // MP recovers with no message to hang this on (the server is deliberately silent, mirroring
+    // HP recovery), so the affordability of a slot is re-read from the gauge each frame. SkillBar
+    // returns early on an unchanged value, so this is a comparison and nothing more.
+    if (this.vitals && this.skillBar) {
+      this.skillBar.applyMp(this.vitals.currentMp);
+    }
     // Renderers, not input: these belong above the transition gate with the other two.
     this.minimap?.update(this.observeMinimap());
     const localSprite = this.players.get(this.connection.sessionId);
@@ -734,6 +780,8 @@ export class WorldScene extends Phaser.Scene {
     this.lootTablePanel?.destroy();
     this.characterMenu?.destroy();
     this.classPicker?.destroy();
+    this.skillBar?.destroy();
+    this.skillKeys?.destroy();
     this.landmarkPanel?.destroy();
     this.vitals?.destroy();
     this.bossVitals?.destroy();
@@ -811,13 +859,97 @@ export class WorldScene extends Phaser.Scene {
    * `hpRemaining`/`hpMax` ride along on this message (a class pick can move both caps in the same
    * instant) and take the same path `onItemRemoved`'s consume-heal branch already gives a heal
    * that arrived outside `PlayerHit` — no new plumbing for a bar this scene already draws.
-   * `mpRemaining`/`mpMax` are R05-c's gauge (out of scope here) and are not read.
+   * `mpRemaining`/`mpMax` land on the MP gauge the same way (roadmap R05-c) — this message is the
+   * only one that carries MP outside a cast of our own, so it is what a join, a room hop and a
+   * fresh pick all reconcile the gauge from. The skill slots are rebuilt off the same event, since
+   * which skills exist is a function of the class and of nothing else.
    */
   private applyClassChanged(event: ClassChanged): void {
     this.classPicker?.applyClassChanged(event);
     this.characterMenu?.applyClass(
       event.classKey === null ? null : CLASS_DEFINITIONS[event.classKey].label,
     );
+    this.vitals?.applyHit({
+      monsterId: "",
+      damage: 0,
+      hpRemaining: event.hpRemaining,
+      hpMax: event.hpMax,
+    });
+    this.vitals?.setMp(event.mpRemaining, event.mpMax);
+    this.skillBar?.applyClass(event.classKey);
+  }
+
+  /**
+   * One cast leaving this client, if the world is in a state to take one — {@link swing}'s own two
+   * gates, for its own reasons.
+   *
+   * An ally-target skill names *ourselves* as the target. That is the whole of R05-c's targeting:
+   * picking someone else needs a way to point at them, and the party frame that would provide it
+   * is R08's — so 치유 heals the caster today, which is both a legitimate use of the skill and the
+   * only one the interface can currently express. The server accepts any ally in range, so no
+   * contract is narrowed here, only the UI's reach.
+   */
+  private cast(skillKey: SkillKey, nonce: string): boolean {
+    if (this.transitioning || !this.localPlayer) {
+      return false;
+    }
+    const targetSessionId =
+      SKILL_DEFINITIONS[skillKey].target === "ally" ? this.connection.sessionId : undefined;
+    this.connection.sendUseSkill(skillKey, nonce, targetSessionId);
+    // No optimistic cooldown or ring here, unlike {@link swing}'s arc: a swing gets no reply when
+    // it hits nothing, but every `skill:use` is answered — `skill:used` or `skill:denied` — so
+    // drawing on the answer costs nothing and never shows a cast the server refused.
+    return true;
+  }
+
+  /**
+   * A cast resolved, ours or a bystander's (design §2 D8 — broadcast to everyone within view).
+   *
+   * The ring is drawn for every caster, so a companion's 방어 태세 is visible. Everything else is
+   * ours alone: the cooldown mirror, and the MP reading, which **is absent from an onlooker's copy
+   * of this message entirely** (design §3 D3) — hence the sessionId comparison rather than an
+   * `?? 0`, which would zero the gauge every time somebody nearby cast anything.
+   */
+  private applySkillUsed(event: SkillUsed): void {
+    const sprite = this.players.get(event.casterSessionId);
+    if (sprite && isSkillKey(event.skillKey)) {
+      this.effects.cast(sprite, castToneOf(event.skillKey));
+    }
+    if (event.casterSessionId !== this.connection.sessionId) {
+      return;
+    }
+    this.skillBar?.beginCooldown(event.skillKey);
+    if (event.mpRemaining !== undefined && event.mpMax !== undefined) {
+      this.vitals?.setMp(event.mpRemaining, event.mpMax);
+    }
+  }
+
+  /**
+   * A cast of ours was refused. Only ever sent to the client that asked, so there is no audience
+   * check to make here — the reason goes straight to the bar that sent it.
+   */
+  private applySkillDenied(event: SkillDenied): void {
+    this.skillBar?.applyDenied(event);
+  }
+
+  /**
+   * An ally-heal landed. Sent to the caster *and* the target, which for today's self-cast are the
+   * same client and therefore exactly one message (`metaverseRoom.ts:1203` skips the second send
+   * when they match) — so this applies the HP once and never twice.
+   *
+   * The bar is only ours to move when we are the target; a heal on somebody else still draws its
+   * number over them, which is what tells a healer the cast landed.
+   */
+  private applyPlayerHealed(event: PlayerHealed): void {
+    const sprite = this.players.get(event.targetSessionId);
+    if (sprite) {
+      this.effects.damage(sprite, event.healAmount, "healed");
+    }
+    if (event.targetSessionId !== this.connection.sessionId) {
+      return;
+    }
+    // The same out-of-band HP path `onItemRemoved`'s consume-heal branch already uses — a heal is
+    // not a hit, but it is the same two fields landing on the same bar.
     this.vitals?.applyHit({
       monsterId: "",
       damage: 0,

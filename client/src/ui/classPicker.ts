@@ -55,6 +55,14 @@ function objectParticle(label: string): "을" | "를" {
  * over the canvas only stops mouse clicks reaching the world, and this game has no click-to-move
  * for it to block.
  */
+/**
+ * Whether the self-open has already fired in this page's lifetime. Module scope rather than an
+ * instance field on purpose: a room hop destroys this panel and builds a successor, so an
+ * instance field would reset at exactly the moment this flag exists to survive. A real page
+ * reload is a new session and gets one more prompt, which is the intent.
+ */
+let autoOpenedThisSession = false;
+
 export class ClassPicker {
   private readonly root = document.querySelector<HTMLElement>("#class-picker")!;
   private readonly dialog = document.querySelector<HTMLElement>("#class-picker-dialog")!;
@@ -111,15 +119,25 @@ export class ClassPicker {
   }
 
   /**
-   * The account's class, or the lack of one. `classKey: null` is always the join-time sync — a
-   * real class never reverts to it (D1) — so this is the one signal that opens the panel on its
-   * own. A real `classKey` is the settle-and-close signal design D1 requires: whatever this panel
+   * The account's class, or the lack of one. `classKey: null` is always a join-time sync — a real
+   * class never reverts to it (D1) — so this is the one signal that opens the panel on its own.
+   * A real `classKey` is the settle-and-close signal design D1 requires: whatever this panel
    * currently shows, the server's stored value wins, whether that is this attempt landing or
    * another tab's pick racing ahead of it (`chooseOnce`'s "first commit wins").
+   *
+   * **The self-open happens once per session, not once per room** (사용자 결정 2026-09-21). Every
+   * room sends its own join sync, so the unqualified version put a modal in front of the player
+   * at every doorway — for a choice that is made once per account and never again (D1). Design D9
+   * asks for "입장 후 직업 선택 패널이 뜨고"; a session is the reading of "입장" that matches what
+   * the choice actually is. Declining is still declining: the character menu reopens this panel
+   * whenever the player wants it, and {@link open} is deliberately not gated.
    */
   applyClassChanged(event: ClassChanged): void {
     if (event.classKey === null) {
-      this.open();
+      if (!autoOpenedThisSession) {
+        autoOpenedThisSession = true;
+        this.open();
+      }
       return;
     }
     if (this.isOpen) {

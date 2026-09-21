@@ -424,6 +424,35 @@ body {
   background: var(--danger);
 }
 
+/*
+ * MP (roadmap R05-c). Its own head row rather than a second number on the HP row: the server
+ * recovers the two on different rules, so they move independently and a shared row would imply
+ * otherwise. Tighter top margin than a fresh block, because it reads as the second half of the
+ * same readout.
+ */
+.vitals__head--mp {
+  margin-top: var(--space-1);
+}
+
+.vitals__mp-track {
+  overflow: hidden;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(236, 234, 244, 0.14);
+}
+
+/* Blue rather than the interface accent: "this is the other pool", said by hue alone. */
+.vitals__mp-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 3px;
+  background: #6ea8dc;
+  transform-origin: left center;
+  transform: scaleX(1);
+  transition: transform 160ms ease;
+}
+
 /* Thinner and slower to fill than the HP track above it — this rises once per kill, not per hit. */
 .vitals__exp-track {
   overflow: hidden;
@@ -514,6 +543,95 @@ body {
   transform: scaleX(1);
   transition-property: transform;
   transition-timing-function: linear;
+}
+
+/*
+ * Skill slots (roadmap R05-c). Inside .vitals, under the attack hint it rhymes with: both rows
+ * say "this key spends that bar", and keeping them together means neither skin needs a second
+ * placement rule.
+ */
+.skills {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.skills__slot {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-1);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  background: rgba(236, 234, 244, 0.06);
+  font-size: 11px;
+  transition: opacity 120ms ease;
+}
+
+/*
+ * One dimming rule for both unavailable states. They are told apart by the cooldown bar below,
+ * which only moves for one of them — a second opacity would make "cooling" and "too expensive"
+ * look like two degrees of the same thing rather than two different reasons.
+ */
+.skills__slot[data-state="cooling"],
+.skills__slot[data-state="unaffordable"] {
+  opacity: 0.45;
+}
+
+.skills__key {
+  padding: 1px 5px;
+  border: 1px solid rgba(236, 234, 244, 0.24);
+  border-radius: 4px;
+  background: rgba(236, 234, 244, 0.08);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.skills__name {
+  font-weight: 600;
+}
+
+/* Pushed to the far edge, and tabular so a two- and a three-digit cost line up. */
+.skills__cost {
+  margin-left: auto;
+  color: rgba(236, 234, 244, 0.62);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The slot's own refill, .vitals__cooldown's shape at the bottom edge of the row it describes. */
+.skills__cooldown {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  overflow: hidden;
+  height: 2px;
+  background: rgba(236, 234, 244, 0.12);
+}
+
+.skills__cooldown-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #6ea8dc;
+  transform-origin: left center;
+  transform: scaleX(1);
+  transition-property: transform;
+  transition-timing-function: linear;
+}
+
+/* A refusal, under the slots it refers to. Danger hue: nothing happened, and that is the message. */
+.skills__denial {
+  margin: var(--space-1) 0 0;
+  color: var(--danger);
+  font-size: 11px;
 }
 
 /*
@@ -2411,16 +2529,18 @@ body {
   .picker__start,
   .toast[data-state="leaving"],
   .transition,
+  .skills__slot,
   .vitals__exp-fill,
   .vitals__fill,
-  .vitals__hint {
+  .vitals__hint,
+  .vitals__mp-fill {
     transition: none;
   }
 
   /*
    * The toast still appears and still leaves; only the rise is dropped. The cooldown bar is not
    * listed because its duration is an inline style — playerVitals.ts reads the same media query
-   * and snaps the bar instead.
+   * and snaps the bar instead. `.skills__cooldown-fill` is the same arrangement in skillBar.ts.
    */
   .toast,
   .boss-vitals,

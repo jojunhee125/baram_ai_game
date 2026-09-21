@@ -8,7 +8,7 @@ import {
 import { waitForCanvasReady } from "../helpers/canvas";
 import { captureWebSocketFrames } from "../helpers/network";
 import { holdKey, tapKey } from "../helpers/input";
-import { completeAvatarPicker, joinRoom } from "../helpers/flows";
+import { completeAvatarPicker, dismissClassPicker, joinRoom } from "../helpers/flows";
 
 /**
  * Independent tester coverage for docs/design-phase-h-skin-skip-menu.md (items a-j) and
@@ -54,6 +54,9 @@ test.describe("Phase H (a)(b) — 부팅 시 피커 생략", () => {
     // timeout instead of ever reaching "ready" — a clear, unambiguous failure for this bug.
     await waitForCanvasReady(client.page);
     await expect(client.page.locator("#avatar-picker")).toBeHidden();
+    // 이 테스트는 아바타 피커를 건너뛰는 경로라 joinRoom()을 쓰지 않으므로, 그 헬퍼가 해 주는
+    // 직업 선택 패널 정리를 직접 한다 — 안 하면 아래 캐릭터 메뉴 클릭을 이 모달이 가로챈다.
+    await dismissClassPicker(client.page);
 
     // Confirms the join actually used skin 3 (not just that the picker was skipped): reopening
     // the picker from the character menu pre-selects whatever the server has on file for us.

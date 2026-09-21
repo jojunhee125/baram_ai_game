@@ -348,3 +348,64 @@ $ npm --prefix server test
 - **밸런스 수치는 전부 provisional**이다(위 표) — R06 성장 CLI 이전에는 근거 자료가 없다는 사실 자체가 설계 의도(D7).
 - **`nonce`는 원장에 남지 않는다**(설계 §2 D8) — 재전송 방어는 쿨다운이 담당하고, `nonce`는 오직 `SkillDenied` 상관용이다. 멱등 키가 아니므로 같은 `nonce`로 두 번 보내도 두 번째 요청은 쿨다운에 걸려 거절될 뿐, 별도의 멱등 처리는 없다(의도된 것).
 - **R05-c(클라이언트 — MP 게이지·단축키·시전 표현)는 이번 범위가 아니다.** 스킬을 실제로 쓰는 호출자가 아직 없다 — R05-a 종료 시점과 같은 구조.
+
+## 8. R05-c 구현 기록 (2026-09-21)
+
+승인: `docs/decisions.md` 2026-09-21. 기준 소스 `d081b25`. **클라이언트 전용** — 서버 코드 0줄, 프로토콜 변경 0건.
+R05-b가 만든 계약에 처음으로 화면 호출자가 붙었다.
+
+### 실제 변경
+
+| 파일 | 변경 |
+|---|---|
+| `shared/src/skills.ts` | `SkillDefinition.label` 추가(방어 태세·급습·화염구·치유). **표시 문자열일 뿐 어떤 wire 메시지에도 실리지 않는다** — `ClassDefinition.label`과 같은 이유로 shared에 둔다(클라이언트 사본을 두면 두 곳이 어긋날 수 있다) |
+| `client/index.html` | `#vitals` 안에 마력 head·track, 스킬 슬롯 `<ul>`·거절 문구 |
+| `client/src/ui/playerVitals.ts` | `setMp`/`currentMp`, MP 로컬 회복 미러, 사망 시 MP 리필, `renderMp` |
+| `client/src/ui/skillBar.ts` (신규) | 슬롯 생성·쿨다운 미러·마력 부족 표시·거절 문구, `skill:use` 발신 지점 |
+| `client/src/input/skillKeys.ts` (신규) | `Digit1`~`Digit4`, **keydown 전용** |
+| `client/src/net/roomConnection.ts` | `sendUseSkill`, `onSkillUsed`/`onSkillDenied`/`onPlayerHealed` |
+| `client/src/scenes/WorldScene.ts` | 배선, `applyClassChanged`가 MP·슬롯까지 반영, 시전/치유 처리 |
+| `client/src/world/combatEffects.ts` | fallback 시전 링 `cast()`, `healed` 숫자 톤 |
+| `client/src/style.css` · `heritage.css` | 두 스킨 모두. 클래식 스킨을 빠뜨리면 사이드바 배치가 깨진다(2026-09-17 실사고) |
+
+### 구현이 틀리기 쉬웠던 네 지점 (착수 전 실측으로 확정)
+
+1. **MP 곡선은 HP 곡선과 게이트를 공유할 수 없다.** `recoverOutOfCombat`에서 HP는 `COMBAT_EXIT_MS` 경과 후에만, MP는 **전투 중에도** `MP_COMBAT_RECOVERY_FRACTION_PER_TICK`(0.005) vs 평시 0.02로 계속 찬다. 공유했으면 전투 내내 게이지가 멈춰 — 캐스터가 실제로 보는 유일한 구간에서 — 서버와 어긋났을 것이다. `nextMpRecoveryAt`·`lastDamagedAt`을 따로 둔 이유다.
+2. **`SkillUsed.cooldownUntil`은 서버의 `Date.now()`다**(`metaverseRoom.ts:1132`). 클라이언트에서 빼면 시계 오차가 그대로 게이지에 들어온다. `beginAttackCooldown`이 서버 시각이 아니라 `ATTACK_COOLDOWN_MS` **기간**을 쓰는 것과 같은 이유로 `SKILL_DEFINITIONS[key].cooldownMs`만 쓴다 — `SkillBar.beginCooldown`의 인자가 `skillKey` 하나뿐인 것이 그 계약이다.
+3. **방관자 사본에는 `mpRemaining`/`mpMax` 키가 아예 없다**(설계 §3 D3). 핸들러는 시야 내 모든 시전에 불리므로 `casterSessionId` 비교 후에만 게이지를 만진다. `?? 0`으로 받았으면 옆 사람이 스킬 쏠 때마다 내 마력이 0이 됐다.
+4. **자기 치유는 `player:healed`가 1통뿐이다**(`metaverseRoom.ts:1203`의 `targetClient !== client` 가드). 2통 전제로 누적했으면 HP가 두 배로 들어왔다.
+
+### 설계에서 좁힌 것 · 넓힌 것
+
+- **좁힘 — 아군 대상 스킬은 자기 자신만 지정한다.** 남을 가리키려면 파티 프레임이 필요하고 그건 R08이다. 서버는 사거리 내 아군 누구든 받으므로 **계약은 그대로이고 UI의 사정거리만 좁다**. 도사의 치유는 오늘 자힐로만 쓰인다.
+- **넓히지 않았다 — `#vitals` 패널은 이미 무조건 열려 있었다.** `setMp`가 `reveal()`을 부르지만 `WorldScene`은 Pass F(2026-09-02) 이후 이 패널을 조건 없이 열고 있다. `PlayerVitals.reveal()`의 doc comment가 아직 "첫 몬스터"라고 말하는 것은 그때 갱신되지 않은 것이고, 이번에 그 규칙을 바꾼 것이 아니다. 호출은 남겨 뒀다 — 마력은 광장에서도 차고 쓰이므로(`decisions.md` 2026-09-18 R05-b 미결 4), 저 무조건 reveal이 나중에 다시 좁혀져도 게이지가 함께 사라지지 않게 하기 위해서다.
+- **단축키는 hold가 아니다.** `AttackKey`는 600ms 간격 연타를 전제한 hold 입력이지만 스킬 쿨다운은 1.5~12초다. `event.repeat`도 거절한다. IME·레이아웃·포커스 가드는 `attackKey.ts`에서 그대로 가져왔다 — 같은 계열 버그를 이 프로젝트가 두 번 냈다(`homeButton.ts:63`, `inventoryPanel.ts:126`).
+
+### 착수 뒤 발견해 고친 결함 1건 (attach() 순서)
+
+`RoomConnection`은 join 직후 서버가 스스로 보내는 `ClassChanged`를 `attach()` 전까지 `pendingClassChanges`에 모아 두고 `attach()`에서 흘려보낸다. 그런데 `WorldScene`에서 `attach()`는 310행, 클래스/스킬 UI 생성은 432행이었다 — **버퍼가 비워지는 시점에 `skillBar`가 아직 `null`이라 join 동기화가 통째로 버려진다.** `ClassChanged`는 그 뒤로 *직업을 고를 때만* 다시 오므로, 이미 직업이 있는 계정은 그 세션 내내 마력 게이지도 스킬 슬롯도 못 본다.
+
+`questTracker`가 바로 같은 이유로 이미 `attach()` 앞에 있었다(`pendingQuestUpdates`). 같은 자리로 옮겼다. **`classPicker`도 R05-a 때부터 같은 구멍이 있었고** 함께 옮겼다 — R05-a가 남긴 "선택 패널 육안 확인"이 아직 안 된 항목이라 아무도 눈치채지 못한 상태였다.
+
+이 결함은 신규 e2e 7케이스가 **구조적으로 못 잡는다**: 전부 room 접속 없이 모듈을 직접 만드는 화이트박스라 `WorldScene`의 배선을 지나지 않는다. 실제 플레이(§ 남은 한계의 육안 확인)가 이것을 확인하는 유일한 경로다.
+
+**이 수정이 드러낸 두 번째 것 — 자동 오픈 빈도.** 고치고 나니 D9의 패널이 실제로 뜨기 시작했고, 서버가 방마다 join 동기화를 보내므로 문을 지날 때마다 모달이 떴다. 사용자 결정으로 **자동 오픈은 세션당 1회**가 됐다(`decisions.md` 2026-09-21). 기존 e2e 6개 spec이 이 모달에 가려 실패했고 — 원인은 메모리가 아니라 이 변경이다 — `joinRoom` 헬퍼의 `dismissClassPicker` 한 곳과 헬퍼를 쓰지 않는 spec 1개의 직접 호출로 닫았다. 직업을 고르지 않고 닫는 이유는 골라 버리면 기존 spec들이 직업 배율이 걸린 다른 전투를 재게 되기 때문이다.
+
+### 검증
+
+게이트: shared·client·server typecheck 에러 0, client build 성공(`✓ built in 14.59s`), 서버 **1,130 pass / 0 fail**(R05-b 종료 시점과 동일 — 서버는 건드리지 않았다).
+
+신규 `client/e2e/tests/r05c-skill-client.spec.ts` **7케이스 전부 통과**(21.3s). room 접속 없이 실제 `index.html` 마크업에 모듈을 직접 물리는 화이트박스로, `phase-w2-level-client.spec.ts`·`pass-i-boss-hp-bar.spec.ts`의 선례다.
+
+**회귀 확인(되돌려서 실패까지 확인, 2건):**
+
+1. 직업 동기화 오탐 — `applyHit`의 `if (event.damage > 0)` 가드를 떼어 피해 0짜리 동기화도 피격으로 세게 하자 "마력은 전투 중에도 회복하되 더 느리고…"가 정확히 그 1건만 실패했다. 되돌리자 복귀.
+2. 쿨다운 길이 — `beginCooldown`의 `SKILL_DEFINITIONS[skillKey].cooldownMs`를 `0`으로 바꾸자 "the cooldown must still be running halfway through it"이 실패했다. **첫 작성본은 이것을 못 잡았다** — 동기 검사만 있어서 `cooldownMs: 0`에도 통과했다. 절반 지점 검사를 추가해서야 판별력이 생겼다. 되돌리자 복귀.
+
+### 실행하지 않은 검증과 남은 한계
+
+- **전체 e2e는 4배치로 나눠 전부 돌렸다(RAM 부족으로 한 번에 못 돌린다 — 사용자 지시).** 16개 spec 전부 최종 트리에서 통과를 확인했다. 단 두 개는 **단독 실행에서만** 초록이었다: `heritage-first-play`(배치 안에서 teardown 타임아웃, 단독 24.4초 통과)와 `phase-x2-death-notice`(같은 트리에서 2실패·2통과 — `decisions.md`에 이미 기록된 기존 플래키). **후자가 직업 패널 때문에 더 불안정해졌는지는 확증하지 못했다** — 자동 오픈을 끄고 한 번 통과한 것이 전부고, 원래 플래키한 spec에 n=1은 근거가 못 된다. 남은 의심으로 기록한다.
+- **fresh context tester 재검증은 하지 않았다.** 설계 §4가 R05-c에 대해 "구현자 + 호출자 확인"으로 정한 강도이고, R05-b 기록이 남긴 판별자(비동기 왕복 경합이 있는가)에도 해당하지 않는다 — 이 단계에 `await`가 있는 새 경로는 없다.
+- **육안 확인은 남아 있다.** 마력 게이지·슬롯이 두 스킨에서 실제로 어떻게 보이는지, 특히 클래식 스킨 사이드바 안에서의 배치는 사용자가 봐야 닫힌다. headless 자동 확인으로 대체하지 않는다(알려진 오탐).
+- **R05-a가 남긴 직업 선택 패널 육안 확인도 그대로 남아 있다.**
+- 아군 대상 지정은 위 "좁힘" 항목대로 R08까지 자기 자신뿐이다.

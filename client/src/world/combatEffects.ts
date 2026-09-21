@@ -50,13 +50,18 @@ const SWING_ANGLES: Readonly<Record<Direction, number>> = {
  * Who a damage number belongs to. The colours are the only place `MonsterHit.bySessionId` shows
  * up on screen: your own hits read bright, someone else's stay muted, and damage you took is the
  * danger hue — so a busy spawn point still tells you which numbers are yours.
+ *
+ * `healed` is the one row that is not damage at all (roadmap R05-c): a restored number rides the
+ * same floating label because it answers the same question in the same place, and it carries the
+ * HP bar's own "healthy" green so it cannot be misread as a hit.
  */
-export type DamageTone = "dealt" | "dealt-by-other" | "taken";
+export type DamageTone = "dealt" | "dealt-by-other" | "taken" | "healed";
 
 const DAMAGE_COLORS: Readonly<Record<DamageTone, string>> = {
   dealt: "#fdf7ea",
   "dealt-by-other": "#b9b5c6",
   taken: "#e0806f",
+  healed: "#8ec97f",
 };
 
 /**
@@ -73,6 +78,26 @@ const IMPACT_SHAKE_MS = 80;
  * fine, legible on every ATTACK_COOLDOWN_MS (600ms) through a real fight is nauseating.
  */
 const IMPACT_SHAKE_INTENSITY = 0.006;
+
+/**
+ * The fallback cast ring (roadmap R05-c). A ring expanding off the caster rather than a per-class
+ * cast animation, because the class-specific artwork is R02's and does not exist yet — the same
+ * "approved fallback until the art lands" rule R01 already applies to the unmade attack/cast poses
+ * (`docs/roadmap.md` §5 R01).
+ *
+ * One hue per effect family rather than one per skill: the three `SkillEffect.kind` rows are what
+ * a bystander can actually tell apart at this size, and a fourth colour per skill would be four
+ * shades nobody could name. Gold matches the swing arc's own reasoning (far from both terrain hues
+ * and from the damage accent).
+ */
+const CAST_RING_RADIUS_PX = 30;
+const CAST_MS = 320;
+export type CastTone = "offensive" | "defensive" | "restorative";
+const CAST_COLORS: Readonly<Record<CastTone, number>> = {
+  offensive: 0xff8844,
+  defensive: 0xffcc33,
+  restorative: 0x8ec97f,
+};
 
 /**
  * Transient combat visuals: the swing, the flash on a hit, the number that floats off it, and the
@@ -220,6 +245,35 @@ export class CombatEffects {
     if (tone !== "dealt-by-other") {
       this.scene.cameras.main.shake(IMPACT_SHAKE_MS, IMPACT_SHAKE_INTENSITY);
     }
+  }
+
+  /**
+   * A cast, drawn on whoever cast it — our own and other players' alike, since `skill:used` is
+   * broadcast to everyone in view (design §2 D8) and a cast nobody else can see would make a
+   * companion's 방어 태세 or 치유 invisible.
+   *
+   * Deliberately says nothing about what the cast *hit*: skill damage rides the existing
+   * `MonsterHit` and draws through `impact()`/`damage()` exactly as a swing's does, so adding a
+   * second damage visual here would double-report one hit.
+   */
+  cast(sprite: Phaser.GameObjects.Sprite, tone: CastTone): void {
+    const ring = this.scene.add.circle(sprite.x, sprite.y - TILE_SIZE_PX / 2, CAST_RING_RADIUS_PX);
+    ring.setStrokeStyle(2, CAST_COLORS[tone]);
+    ring.setFillStyle();
+    ring.setDepth(sprite.depth + 1);
+    // Scaled rather than tweened on `radius`: the ring is built at full size once and the
+    // transform grows it, which keeps the geometry out of the per-frame path entirely — the same
+    // reason `.vitals__fill` moves on scaleX instead of width.
+    ring.setScale(0.15);
+    this.scene.tweens.add({
+      targets: ring,
+      scaleX: 1,
+      scaleY: 1,
+      alpha: 0,
+      duration: CAST_MS,
+      ease: "Quad.easeOut",
+      onComplete: () => ring.destroy(),
+    });
   }
 
   /** Whitens a sprite for a moment. Which sprite took the hit is the whole message. */

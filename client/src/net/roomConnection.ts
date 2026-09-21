@@ -28,6 +28,7 @@ import {
   type MoveRequest,
   type Player,
   type PlayerClassKey,
+  type PlayerHealed,
   type PlayerHit,
   type PortalDenied,
   type PortalEntered,
@@ -37,10 +38,14 @@ import {
   type QuizResult,
   type SellItemRequest,
   type ShopDenied,
+  type SkillDenied,
+  type SkillKey,
+  type SkillUsed,
   type Teleported,
   type TilePosition,
   type UnequipItemRequest,
   type UseItemRequest,
+  type UseSkillRequest,
   type WarpToLandmarkRequest,
 } from "@zep-test/shared";
 import { resolveJoinOptions } from "./identity";
@@ -166,6 +171,20 @@ export interface RoomEvents {
   onClassChanged?(event: ClassChanged): void;
   /** One `class:choose` this client sent was refused (design D9) — {@link onShopDenied}'s own pairing. */
   onClassDenied?(event: ClassDenied): void;
+  /**
+   * A skill cast resolved (roadmap R05-b/-c) — fires for *every* cast within view, not only ours,
+   * so the cast animation plays for the caster the same way a swing does. Only the caster's own
+   * copy carries `mpRemaining`/`mpMax`: an onlooker's copy omits those two keys entirely (design
+   * §3 D3), so a consumer must compare `casterSessionId` before reading them.
+   */
+  onSkillUsed?(event: SkillUsed): void;
+  /** One `skill:use` this client sent was refused (design §2 D8) — {@link onShopDenied}'s own pairing. */
+  onSkillDenied?(event: SkillDenied): void;
+  /**
+   * An ally-heal landed (design §2 D8). Arrives at both the caster and the target, so a self-heal
+   * produces exactly one message rather than two (`metaverseRoom.ts:1203`).
+   */
+  onPlayerHealed?(event: PlayerHealed): void;
   /** The server warped the local player. Apply as an absolute position, never as a step. */
   onTeleported?(event: Teleported): void;
   /** Connection closed after a successful join — includes kick, server restart, network drop. */
@@ -371,6 +390,21 @@ export class RoomConnection {
     this.room.send(ClientMessage.Attack);
   }
 
+  /**
+   * Casts one skill (roadmap R05-c). Names no target for a monster or self skill — the server
+   * picks it, {@link sendAttack}'s own reason — so `targetSessionId` is filled only for an
+   * ally-target skill. `nonce` correlates a possible `skill:denied` to this attempt and is not an
+   * idempotency key: a skill is never settled to a ledger (`ChooseClass`'s own doc comment
+   * distinguishes the two cases).
+   */
+  sendUseSkill(skillKey: SkillKey, nonce: string, targetSessionId?: string): void {
+    this.room.send(ClientMessage.UseSkill, {
+      skillKey,
+      nonce,
+      ...(targetSessionId === undefined ? {} : { targetSessionId }),
+    } satisfies UseSkillRequest);
+  }
+
   /** Requests the named item as the account's equipped item in `slot`. */
   sendEquipItem(itemKey: string, slot: EquipmentSlot): void {
     this.room.send(ClientMessage.EquipItem, { itemKey, slot } satisfies EquipItemRequest);
@@ -521,6 +555,15 @@ export class RoomConnection {
     });
     this.room.onMessage(ServerMessage.ClassDenied, (event: ClassDenied) => {
       this.events.onClassDenied?.(event);
+    });
+    this.room.onMessage(ServerMessage.SkillUsed, (event: SkillUsed) => {
+      this.events.onSkillUsed?.(event);
+    });
+    this.room.onMessage(ServerMessage.SkillDenied, (event: SkillDenied) => {
+      this.events.onSkillDenied?.(event);
+    });
+    this.room.onMessage(ServerMessage.PlayerHealed, (event: PlayerHealed) => {
+      this.events.onPlayerHealed?.(event);
     });
   }
 

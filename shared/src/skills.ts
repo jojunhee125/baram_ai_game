@@ -59,6 +59,13 @@ export type SkillEffect =
 /** One skill's tunables — the single place every axis of D5/D7/D8 is read from. */
 export interface SkillDefinition {
   key: SkillKey;
+  /**
+   * Display label, {@link ClassDefinition.label}'s own role and its own reason for living in
+   * `shared` rather than the client (roadmap R05-c): the skill bar and any later readout name the
+   * same skill, and a client-side copy of this table would be the one place the two could drift.
+   * Not part of any wire message — the protocol carries {@link SkillKey}, never this.
+   */
+  label: string;
   /** Who a `skill:use` for this key can land on — the same three rows D6's table describes. */
   target: "self" | "monster" | "ally";
   /**
@@ -92,6 +99,7 @@ export const SKILL_DEFINITIONS: Readonly<Record<SkillKey, SkillDefinition>> = {
    */
   [SkillKey.GuardStance]: {
     key: SkillKey.GuardStance,
+    label: "방어 태세",
     target: "self",
     rangeInTiles: 0,
     mpCost: 8,
@@ -107,6 +115,7 @@ export const SKILL_DEFINITIONS: Readonly<Record<SkillKey, SkillDefinition>> = {
    */
   [SkillKey.Ambush]: {
     key: SkillKey.Ambush,
+    label: "급습",
     target: "monster",
     rangeInTiles: 1,
     mpCost: 10,
@@ -123,6 +132,7 @@ export const SKILL_DEFINITIONS: Readonly<Record<SkillKey, SkillDefinition>> = {
    */
   [SkillKey.Fireball]: {
     key: SkillKey.Fireball,
+    label: "화염구",
     target: "monster",
     rangeInTiles: 4,
     mpCost: 18,
@@ -137,6 +147,7 @@ export const SKILL_DEFINITIONS: Readonly<Record<SkillKey, SkillDefinition>> = {
    */
   [SkillKey.Heal]: {
     key: SkillKey.Heal,
+    label: "치유",
     target: "ally",
     rangeInTiles: 3,
     mpCost: 20,

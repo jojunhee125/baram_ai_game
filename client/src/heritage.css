@@ -125,6 +125,30 @@ body { background: #18130f; }
 .vitals[data-attack="cooling"] .vitals__attack-status { color: #c7b797; }
 .vitals__cooldown { height: 6px; border: 1px solid #756044; border-radius: 0; }
 .vitals__cooldown-fill { background: #e3c782; }
+/* 마력(R05-c). 체력바와 같은 각진 테두리, 색만 청색 계열로 구분한다 — 이 스킨에서 vitals 패널은
+   사이드바 안에 들어가므로 기본 시트의 둥근 모서리를 그대로 두면 옆 항목들과 어긋난다. */
+.vitals__mp-track { height: 6px; border: 1px solid #756044; border-radius: 0; background: #17120d; }
+.vitals__mp-fill { border-radius: 0; background: #7fa8d8; }
+/* 스킬 슬롯(R05-c)도 사이드바 목록 항목과 같은 목재 패널 계열로 맞춘다. .hud__button 과 같은
+   입체 테두리를 쓰되, 누르는 버튼이 아니라 읽는 칸이므로 배경은 한 단계 어둡게 둔다. */
+.skills__slot {
+  border: 2px solid;
+  border-color: #92794f #4a3925 #4a3925 #92794f;
+  border-radius: 0;
+  background: #332619;
+  color: #f4e9cd;
+}
+.skills__key {
+  border: 1px solid #92794f;
+  border-radius: 0;
+  background: #59452e;
+  color: #ffe4a3;
+}
+.skills__name { color: #f4e9cd; }
+.skills__cost { color: #c7b797; }
+.skills__cooldown { background: #17120d; }
+.skills__cooldown-fill { background: #e3c782; }
+.skills__denial { color: #e8a07a; }
 /* 퀘스트 트래커(R03)는 사이드바 안에 들어가므로 같은 목재 패널 계열로 맞춘다. 진행바는
    .vitals__cooldown과 같은 처리 — 각진 테두리에 황색 채움. */
 .quests__head, .quests__objective { color: #c7b797; }
