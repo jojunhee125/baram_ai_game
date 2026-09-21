@@ -38,7 +38,10 @@ export class RegionGuide {
     hint.textContent = region.hint;
     const controls = document.createElement("p");
     controls.textContent = "방향키 / WASD 이동 · Space 공격 · Enter 채팅 · I 가방 · L 드랍 정보 · C 캐릭터 · T 지역 이동 · H 귀환";
-    details.append(summary, hint, controls);
+    const body = document.createElement("div");
+    body.className = "region-guide__body";
+    body.append(hint, controls);
+    details.append(summary, body);
     this.root.append(label, title, this.coordinates, details);
     document.querySelector(".stage")?.append(this.root);
   }
