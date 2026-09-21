@@ -12,14 +12,14 @@
 - 각 clip에 named frame·재생 시간·반복 여부를 기록한다. 미제작 동작은 명시적 fallback을 사용한다.
 - 현재 layer는 합성된 `composite` 하나다. 손 anchor와 장비 layer 제작은 후속 R02 범위다.
 
-## 기존 asset 호환
+## 기존 asset 호환 (legacy fallback)
 
 | 대상 | 원화/셀 | 표시 | 발 기준점 |
 |---|---|---|---|
 | skin 1–23 | native 16×16 → atlas cell 32×32 | 32×32 | (16, 32) |
 | skin 0 | 고해상도 source cell 362×362 | 48×48 | (181, 347.52) |
 
-skin 0의 `nativeSize`는 현재 source cell 크기를 기록한 호환값이며, 검증된 pixel 제작 격자가 아니다.
+legacy skin 0의 `nativeSize`는 source cell 크기를 기록한 호환값이며, 검증된 pixel 제작 격자가 아니다.
 소수점 foot은 기존 origin `(0.5, 0.96)`을 보존한 값이다. 새 master의 정수 anchor 승인과 구분한다.
 skin 0의 좌우 교차 frame 보정은 legacy에만 남긴다. 새 asset에는 이 보정을 적용하지 않는다.
 
@@ -36,22 +36,22 @@ JSON이 필요하면 `npx tsx tools/avatar-manifest.ts --output avatar-manifests
 ## Client runtime 연결
 
 [avatarArt.ts](../client/src/world/avatarArt.ts)의 `AVATAR_REPLACEMENTS`가 새 manifest 등록 위치다.
-현재 배열은 비어 있으며 24개 ID 모두 legacy manifest를 사용한다. 승인된 manifest를 등록하면 해당 ID의 primary로 사용하고 같은 ID의 legacy를 보관한다.
+현재 배열에는 `MASTER_AVATAR_MANIFEST`가 등록되어 skin 0의 primary로 사용되며 같은 ID의 legacy를 보관한다. skin 1–23은 legacy를 사용한다. 현재 skin 0은 `/sprites/baram-adventurer.png`(1254×1254px), 4×4의 313px frame, 48px 표시와 프레임별 foot을 사용한다. 적용은 시각 승인 완료를 뜻하지 않는다. [현재 계약·검증](master-adventurer.md)
 `createAvatarCatalog`로 catalog를 만들고 `createAvatarArt`로 Phaser loader·named frame·animation을 준비한다.
 
 - `WorldScene`이 texture를 preload하고 실제 이미지 크기·frame 범위를 확인한 뒤 clip을 cache한다. 업데이트마다 manifest를 다시 검증하지 않는다.
 - `PlayerSprites`가 manifest의 방향·clip 시간·표시 크기·프레임별 발 anchor를 사용한다. 이동·회전·skin 변경·warp·제거·scene 종료 시 공격 상태를 정리한다.
 - 전용 공격 clip이 없거나 명시적으로 idle로 fallback하면 기존 일반 공격 효과를 사용한다. 대기·걷기 표시도 해결되지 않으면 기존 boot error 경로로 중단한다.
-- NPC와 선택기는 플레이어와 같은 catalog의 Down idle을 사용한다. NPC skin 0은 이제 플레이어·선택기와 같은 heritage 외형과 발 기준점으로 표시된다.
+- NPC와 선택기는 플레이어와 같은 catalog의 Down idle을 사용한다. NPC skin 0도 현재 primary의 외형과 발 기준점을 사용하며 이미지 실패 시 동일 ID legacy로 fallback한다.
 - 선택기는 manifest의 실제 frame 영역을 64px preview 안에 표시한다. 이미지 실패 시 동일 ID legacy를 조회하며, 닫힌 선택기의 비동기 callback은 화면을 수정하지 않는다.
 
 새 texture 실패 시 다른 ID로 바꾸지 않는다. 기존 24개 선택 번호·키보드 조작·저장된 skin ID를 유지한다.
-runtime은 native60 fixture를 처리하지만 실제 새 atlas는 등록하지 않았다. 시전·피격·사망의 게임 이벤트 연결과 장비 layer는 후속 범위다.
+runtime은 native60 fixture와 등록된 기본 atlas를 처리한다. 현재 기본 atlas의 attack·cast·hit·death는 idle fallback이며 전용 원화와 장비 layer는 후속 범위다.
 
 ## 다음 단계
 
 새 60프레임 규격은 방향당 대기 1·걷기 4·공격 3·시전 3·피격 1·사망 3을 계획한다.
-테스트용 frame 데이터는 실제 제작된 PNG가 아니다. 다음 실행 항목에서 reference·master를 확정하고 승인된 idle/walk atlas와 manifest를 registry에 등록한다.
+테스트용 60프레임 데이터는 실제 제작된 PNG가 아니다. 현재 등록된 idle/walk 이미지의 적용과 별도로 reference·master 제작 규격 및 시각 승인을 확정해야 한다.
 R01은 master 비례·발 기준점·native 규격 승인을 기다리는 IN PROGRESS다. R06의 24종 통일도 완료 처리하지 않는다.
 
 ## 2026-09-15 검증 기록: shared/offline 단계

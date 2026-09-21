@@ -1,6 +1,6 @@
 # 캐릭터·스킨 픽셀 제작 규격
 
-상위 계획: [MMORPG 로드맵](roadmap.md). 기준일: 2026-09-14.
+상위 계획: [MMORPG 로드맵](roadmap.md). 기준일: 2026-09-22.
 사용자가 확정한 시각 기준은 **2009–2010년 PC 바람의나라**다.
 R01/R02/R06의 규격안이며 asset 제작·Higgsfield 인증·유료 생성 완료 기록이 아니다.
 모든 UI·시각 적용과 화면 확인은 **현재 PC**에서 수행한다.
@@ -9,9 +9,9 @@ R01/R02/R06의 규격안이며 asset 제작·Higgsfield 인증·유료 생성 �
 
 기존 avatar는 16px CC0 원화를 2배 확대한 32px 셀이다. 24종 × 4방향 × 3포즈이며 atlas는 96×3072다.
 단순 48px 표시로 native 도트 정보가 생기지는 않는다. [import-avatar.mjs](../tools/import-avatar.mjs)
-skin 0은 362×362 source cell을 48px로 표시하며 origin `(0.5, 0.96)`을 쓴다. 나머지는 32px, `(0.5, 1)`이다.
-제작 격자·발 기준점·비례부터 통일한다. [heritageArt.ts](../client/src/world/heritageArt.ts)
-이동은 3개 고유 포즈의 4프레임 루프, skin 0 공격은 방향당 3프레임이다. 새 계약은 이 경로와 공존한다. [playerSprites.ts](../client/src/world/playerSprites.ts)
+현재 skin 0은 AI 생성 `baram-adventurer.png`(1254×1254px)의 4×4, 313px frame을 48px로 표시하며 프레임별 foot을 쓴다. 이동은 `[1, 2, 3, 2]` 루프이고 attack·cast·hit·death는 idle fallback이다. [masterAvatar.ts](../client/src/world/masterAvatar.ts)
+362px heritage 셀·origin `(0.5, 0.96)`은 동일 ID legacy fallback 계약이다. 이전 48px `pixels.json`·compiler·`master-adventurer.png`도 제작 자료로 남아 있으나 현재 기본 이미지는 아니다. [제작·적용 기록](master-adventurer.md)
+바람의나라 원본 사용 허가는 확보하지 않았고 허가된 대체 원화도 반입하지 않았다. 현재 이미지는 원본 또는 동일 품질의 재현물이 아니며 두 번째 생성 후보는 미적용이다. 아래 native pixel 규격과 품질 승인 조건은 남은 제작 목표다.
 
 ## 2. 시대 reference pack
 
@@ -48,7 +48,7 @@ R01 reference 비교 후 확정한다. 미결정 수치는 `[needs verification]
 
 방향은 기존 `Down, Left, Right, Up`을 유지한다. atlas 배치와 재생 배열은 manifest에 명시한다.
 단순 mirror는 무기 손과 의상 비대칭을 바꿀 수 있으므로 방향별 승인 프레임을 사용한다.
-현재 skin 0의 좌우 포즈 교차 index 보정을 복제하지 않고 source 방향을 정상화한다. [heritageArt.ts](../client/src/world/heritageArt.ts)
+legacy skin 0의 좌우 포즈 교차 index 보정을 복제하지 않고 source 방향을 정상화한다. [heritageArt.ts](../client/src/world/heritageArt.ts)
 
 | 동작 | 방향당 계획 프레임 | 순서/판정 |
 |---|---:|---|
@@ -63,7 +63,7 @@ R01 reference 비교 후 확정한다. 미결정 수치는 `[needs verification]
 packer 배치가 달라도 named frame·foot/hand anchor를 보존한다.
 idle/walk부터 완성하고 나머지 동작을 추가한다. 미제작 동작에는 명시된 legacy/fallback을 사용한다.
 재생 시간은 manifest/config에 두고 서버 cooldown·발동과 연결한다. 생성 영상 길이가 전투 시간을 결정하지 않는다.
-현행 공격 10fps/300ms·이동 16fps는 새 최적값으로 확정한 것이 아니다. [playerSprites.ts](../client/src/world/playerSprites.ts)
+legacy 공격 10fps/300ms와 현재 기본 걷기 16fps는 새 최적값으로 확정한 것이 아니다. 현재 기본 이미지는 전용 공격 clip이 없다.
 
 ## 5. Layer와 24종
 

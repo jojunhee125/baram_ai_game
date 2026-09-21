@@ -134,7 +134,7 @@ const test = base.extend<{ harness: Harness; native: boolean; missingNative: boo
     await page.route(`**${NATIVE_PATH}`, route => route.fulfill(missingNative
       ? { status: 404, body: "missing test asset" }
       : { contentType: "image/png", body: syntheticPng() }));
-    if (missingMaster) await page.route("**/sprites/master-adventurer.png", route => route.fulfill({ status: 404, body: "missing master asset" }));
+    if (missingMaster) await page.route("**/sprites/baram-adventurer.png", route => route.fulfill({ status: 404, body: "missing master asset" }));
     const harness = await createHarness(page, master ? undefined : native ? [syntheticAvatar()] : []);
     try { await use(harness); } finally {
       await harness.evaluate(async h => {
@@ -450,13 +450,17 @@ test.describe("default master avatar", () => {
         const animation = sprite.anims.currentAnim!;
         const walk = { frames: animation.frames.map(entry => [entry.frame.cutX, entry.frame.cutY]),
           durations: animation.frames.map(entry => entry.duration || animation.msPerFrame), repeat: animation.repeat };
+        const anchors = animation.frames.map(entry => {
+          sprite.anims.setCurrentFrame(entry);
+          return h.read(sprite);
+        });
         await h.waitFor(() => !sprite.anims.isPlaying);
         const stopped = h.read(sprite);
         const attacked = h.players.attack("master", facing);
         effects.swing(sprite, facing, undefined, attacked);
         const swingVisible = h.scene.children.list.some(child => child.type === "Graphics");
         await h.waitFor(() => !h.scene.children.list.some(child => child.type === "Graphics"));
-        states.push({ facing, idle, walk, stopped, attacked, swingVisible, finalAngle: sprite.angle,
+        states.push({ facing, idle, walk, anchors, stopped, attacked, swingVisible, finalAngle: sprite.angle,
           fallbacks: (["attack", "cast", "hit", "death"] as const).map(action => h.art.resolve(0, action, facing)?.action) });
         h.players.remove("master");
       }
@@ -467,18 +471,32 @@ test.describe("default master avatar", () => {
       if (!npc) throw new Error("Master NPC did not render");
       const preview = h.api.resolveAvatarPreview(0)!;
       return { errors: h.loadErrors, states, player: h.read(player), npc: h.read(npc),
+        manifest: h.catalog.get(0)!.primary,
         preview: { path: preview.path, rect: preview.frame.rect }, count: h.catalog.size };
     });
     expect(result.errors).toEqual([]);
     expect(result.count).toBe(24);
     expect(result.npc).toEqual(result.player);
-    expect(result.preview).toEqual({ path: "/sprites/master-adventurer.png", rect: { x: 0, y: 0, width: 48, height: 48 } });
+    expect(result.preview).toEqual({ path: "/sprites/baram-adventurer.png", rect: { x: 0, y: 0, width: 313, height: 313 } });
     for (const state of result.states) {
-      expect(state.idle.texture).toContain("/sprites/master-adventurer.png");
-      expect(state.idle.rect).toEqual([0, state.facing * 48, 48, 48]);
-      expect(state.idle).toMatchObject({ width: 48, height: 48, originX: 0.5, originY: 46 / 48 });
-      expect(state.walk).toEqual({ frames: [1, 2, 3, 2].map(column => [column * 48, state.facing * 48]), durations: [62.5, 62.5, 62.5, 62.5], repeat: -1 });
+      const idleFrame = result.manifest.frames[`${state.facing}:0`]!;
+      expect(state.idle.texture).toContain("/sprites/baram-adventurer.png");
+      expect(state.idle.rect).toEqual([0, state.facing * 313, 313, 313]);
+      expect(state.idle).toMatchObject({ width: 48, height: 48 });
+      expect(state.idle.originX).toBeCloseTo(idleFrame.foot.x / idleFrame.rect.width);
+      expect(state.idle.originY).toBeCloseTo(idleFrame.foot.y / idleFrame.rect.height);
+      expect(state.walk).toEqual({ frames: [1, 2, 3, 2].map(column => [column * 313, state.facing * 313]), durations: [62.5, 62.5, 62.5, 62.5], repeat: -1 });
+      for (const [index, column] of [1, 2, 3, 2].entries()) {
+        const frame = result.manifest.frames[`${state.facing}:${column}`]!;
+        const sample = state.anchors[index]!;
+        expect(sample.rect).toEqual([frame.rect.x, frame.rect.y, 313, 313]);
+        expect(sample).toMatchObject({ width: 48, height: 48 });
+        expect(sample.originX).toBeCloseTo(frame.foot.x / frame.rect.width);
+        expect(sample.originY).toBeCloseTo(frame.foot.y / frame.rect.height);
+      }
       expect(state.stopped.rect).toEqual(state.idle.rect);
+      expect(state.stopped.originX).toBeCloseTo(state.idle.originX);
+      expect(state.stopped.originY).toBeCloseTo(state.idle.originY);
       expect(state.stopped).toMatchObject({ x: 112, y: 96, playing: false });
       expect(state.attacked).toBe(false);
       expect(state.swingVisible).toBe(true);
@@ -502,7 +520,7 @@ test.describe("default master avatar", () => {
       expect(result.attacked).toBe(true);
       const picker = await page.context().newPage();
       try {
-        await picker.route("**/sprites/master-adventurer.png", route => route.fulfill({ status: 404, body: "missing master asset" }));
+        await picker.route("**/sprites/baram-adventurer.png", route => route.fulfill({ status: 404, body: "missing master asset" }));
         await picker.goto("/");
         await expect(picker.locator(".picker__preview").first()).toHaveCSS("background-image", /heritage-adventurer\.png/);
         await expect(picker.locator("#avatar-picker-grid [role=radio]")).toHaveCount(24);
