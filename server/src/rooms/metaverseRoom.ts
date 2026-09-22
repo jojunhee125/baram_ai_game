@@ -126,7 +126,7 @@ import type {
 } from "./contracts";
 import { slotFamily } from "./contracts";
 import { INTERACTABLE_DEFINITIONS } from "./interactableDefinitions";
-import { ITEM_DEFINITIONS, MAX_REQUEST_QUANTITY } from "./itemDefinitions";
+import { ITEM_DEFINITIONS, MAX_REQUEST_QUANTITY, equipmentMetadata } from "./itemDefinitions";
 import { LANDMARK_DEFINITIONS } from "./landmarkDefinitions";
 import {
   BOSS_RESPAWN_MS,
@@ -2038,6 +2038,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       quantity,
       total,
       damageReductionRatio: itemDefinition.equipment?.stats.damageReduction,
+      ...(itemDefinition.equipment === undefined ? {} : { equipment: equipmentMetadata(itemDefinition) }),
       sellValue: itemDefinition.sellValue,
       consumable: itemDefinition.consumable !== undefined ? true : undefined,
     } satisfies ItemGranted);
@@ -2731,6 +2732,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         // this grant builds (`InventoryPanel.buildRow`) has no equip button until the bag is
         // closed and reopened, since that button is gated on this field being defined.
         damageReductionRatio: definition.equipment?.stats.damageReduction,
+        ...(definition.equipment === undefined ? {} : { equipment: equipmentMetadata(definition) }),
         sellValue: definition.sellValue,
         consumable: definition.consumable !== undefined ? true : undefined,
       } satisfies ItemGranted);

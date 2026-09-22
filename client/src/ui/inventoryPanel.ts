@@ -7,8 +7,9 @@ import {
   type ItemRemoved,
   type ShopDenied,
 } from "@zep-test/shared";
-import { loadInventory, type InventoryItem } from "../net/inventory";
+import { loadInventory, readEquipmentMetadata, type InventoryItem } from "../net/inventory";
 import { isTextEntry } from "../input/textEntry";
+import { describeEquipmentComparison } from "./equipmentComparison";
 
 /**
  * Column order of `assets/sprites/items.png`, and therefore the set of `ItemDefinition.icon`
@@ -52,6 +53,17 @@ const EQUIPMENT_ITEM_SLOTS: Partial<Record<string, EquipmentSlot>> = {
   "golden-helmet": EquipmentSlot.Helmet,
   "forest-cloak": EquipmentSlot.Cloak,
 };
+
+function itemSlot(item: InventoryItem): EquipmentSlot | undefined {
+  return item.equipment?.slot === "ring" ? undefined : item.equipment?.slot ?? EQUIPMENT_ITEM_SLOTS[item.itemKey];
+}
+
+type InventoryChange =
+  | { kind: "grant"; event: ItemGranted }
+  | { kind: "remove"; event: ItemRemoved }
+  | { kind: "equipment"; event: EquipmentChanged };
+
+const MAX_PENDING_CHANGES = 128;
 
 /**
  * Paints one column of `items.png` onto `node`, or leaves a visibly empty slot for an icon key
@@ -129,6 +141,14 @@ export class InventoryPanel {
   private request = 0;
   /** Which block is on screen, so a live grant knows whether there is a list to patch. */
   private view: PanelView = "loading";
+  private readonly items = new Map<string, InventoryItem>();
+  private readonly observedSlots = new Map<string, EquipmentSlot>();
+  private readonly unknownSlots = new Set<EquipmentSlot>();
+  private readonly pendingChanges: InventoryChange[] = [];
+  private pendingChangesOverflowed = false;
+  private replayingChanges = false;
+  private resolvingUnknownEquipment = false;
+  private destroyed = false;
   /**
    * In-flight sale/use nonces by item key (design §9 D8) — `objectPanel.ts`'s own `pendingBuys`
    * shape, split into two maps rather than one keyed by `"sell:key"`/`"use:key"` because an item can
@@ -172,36 +192,38 @@ export class InventoryPanel {
    * Folds one drop into an open bag, so a pickup shows up without a second `GET /api/inventory`.
    * `ItemGranted.total` is the amount held afterwards, which is exactly what a row displays.
    *
-   * A grant that lands while the window is loading or showing a failure is dropped: the read in
-   * flight will carry it, and the retry button covers the other case. That leaves the bag at most
-   * one pickup behind for the length of one request, which reopening resolves.
+   * Events arriving during a read are replayed in arrival order after the snapshot. The bounded
+   * queue requests a fresh snapshot on overflow instead of showing a partially replayed bag.
    */
   applyGrant(event: ItemGranted): void {
-    if (!panelOpen || this.view === "loading" || this.view === "error") {
+    if (this.deferChange({ kind: "grant", event })) {
       return;
     }
+    const previous = this.items.get(event.itemKey);
+    const item: InventoryItem = {
+      itemKey: event.itemKey,
+      name: event.name,
+      icon: event.icon,
+      quantity: event.total,
+      equipped: previous?.equipped ?? false,
+      damageReductionRatio: event.damageReductionRatio,
+      equipment: readEquipmentMetadata(event.equipment) ?? previous?.equipment,
+      sellValue: event.sellValue,
+      consumable: event.consumable,
+    };
+    this.items.set(event.itemKey, item);
     const count = this.findCount(event.itemKey);
     if (count) {
       count.textContent = String(event.total);
+      this.ensureEquipAction(this.findRow(item.itemKey)!, item);
+      this.renderComparisons();
       return;
     }
-    this.list.append(
-      this.buildRow({
-        itemKey: event.itemKey,
-        name: event.name,
-        icon: event.icon,
-        quantity: event.total,
-        // A grant only ever adds to a stack or introduces a new row; it never arrives already
-        // equipped, since equipping is its own request the player makes afterwards.
-        equipped: false,
-        damageReductionRatio: event.damageReductionRatio,
-        sellValue: event.sellValue,
-        consumable: event.consumable,
-      }),
-    );
+    this.list.append(this.buildRow(item));
     this.list.hidden = false;
     this.status.hidden = true;
     this.view = "items";
+    this.renderComparisons();
   }
 
   /**
@@ -213,8 +235,17 @@ export class InventoryPanel {
    * independently now (design §4.2), so an armor equip must not flip a weapon row's label.
    */
   applyEquipmentChange(event: EquipmentChanged): void {
-    if (!event.applied || !panelOpen || this.view !== "items") {
+    if (!event.applied || this.deferChange({ kind: "equipment", event })) {
       return;
+    }
+    if (event.itemKey !== null) this.observedSlots.set(event.itemKey, event.slot);
+    for (const item of this.items.values()) {
+      if (this.resolveSlot(item) === event.slot) item.equipped = item.itemKey === event.itemKey;
+    }
+    if (event.itemKey !== null && !this.items.has(event.itemKey)) {
+      this.unknownSlots.add(event.slot);
+    } else {
+      this.unknownSlots.delete(event.slot);
     }
     for (const row of this.list.children) {
       if (!(row instanceof HTMLElement) || row.dataset.slot !== event.slot) {
@@ -228,7 +259,14 @@ export class InventoryPanel {
       row.dataset.equipped = String(equipped);
       equip.textContent = equipped ? "해제" : "장착";
     }
-    this.applySlot(event.slot, this.resolveEquippedItem(event.itemKey));
+    this.applySlot(event.slot, this.unknownSlots.has(event.slot)
+      ? { name: "장비 정보 확인 필요", icon: "" }
+      : this.resolveEquippedItem(event.itemKey));
+    this.renderComparisons();
+    if (this.unknownSlots.has(event.slot) && !this.replayingChanges && !this.resolvingUnknownEquipment) {
+      this.resolvingUnknownEquipment = true;
+      this.refresh();
+    }
   }
 
   /**
@@ -240,6 +278,7 @@ export class InventoryPanel {
    * number from the room just left is still the right number until this fires again.
    */
   applyCurrencyChange(event: CurrencyChanged): void {
+    if (this.destroyed) return;
     this.currencyBalance.textContent = `${event.balance.toLocaleString("ko-KR")}전`;
   }
 
@@ -254,8 +293,9 @@ export class InventoryPanel {
    * pending map is still cleared regardless; so is a reopen the other way to resync it.
    */
   applyItemRemoved(event: ItemRemoved): void {
+    if (this.destroyed) return;
     this.resolvePending(event.reason === "consume" ? this.pendingUse : this.pendingSell, event.itemKey);
-    if (!panelOpen || this.view === "loading" || this.view === "error") {
+    if (this.deferChange({ kind: "remove", event })) {
       return;
     }
     const row = this.findRow(event.itemKey);
@@ -263,15 +303,43 @@ export class InventoryPanel {
       return;
     }
     if (event.total <= 0) {
+      this.items.delete(event.itemKey);
       row.remove();
+      this.renderSlots([...this.items.values()]);
+      this.renderComparisons();
       if (this.list.children.length === 0) {
         this.showItems([]);
       }
       return;
     }
+    const item = this.items.get(event.itemKey);
+    if (item) item.quantity = event.total;
     const count = row.querySelector<HTMLElement>(".bag__count");
     if (count) {
       count.textContent = String(event.total);
+    }
+  }
+
+  private deferChange(change: InventoryChange): boolean {
+    if (this.destroyed || !panelOpen || this.view === "error") return true;
+    if (this.view !== "loading") return false;
+    if (this.pendingChanges.length < MAX_PENDING_CHANGES) this.pendingChanges.push(change);
+    else this.pendingChangesOverflowed = true;
+    return true;
+  }
+
+  private replayChanges(): void {
+    const changes = this.pendingChanges.splice(0);
+    this.replayingChanges = true;
+    for (const change of changes) {
+      if (change.kind === "grant") this.applyGrant(change.event);
+      else if (change.kind === "remove") this.applyItemRemoved(change.event);
+      else this.applyEquipmentChange(change.event);
+    }
+    this.replayingChanges = false;
+    if (this.unknownSlots.size > 0 && !this.resolvingUnknownEquipment) {
+      this.resolvingUnknownEquipment = true;
+      this.refresh();
     }
   }
 
@@ -282,6 +350,7 @@ export class InventoryPanel {
    * which pending map answers it.
    */
   applyShopDenied(event: ShopDenied): void {
+    if (this.destroyed) return;
     if (event.action === "sell") {
       this.resolvePending(this.pendingSell, event.itemKey);
     } else if (event.action === "use") {
@@ -296,6 +365,8 @@ export class InventoryPanel {
    * panel with the departed room's request.
    */
   destroy(): void {
+    this.destroyed = true;
+    this.pendingChanges.length = 0;
     this.button.removeEventListener("click", this.handleToggleClick);
     this.closeButton.removeEventListener("click", this.handleCloseClick);
     this.retryButton.removeEventListener("click", this.handleRetryClick);
@@ -404,6 +475,12 @@ export class InventoryPanel {
       // Dropped rather than left on screen: the next open re-reads anyway, and a stale bag
       // flashing before the new one arrives reads as an item vanishing.
       this.list.replaceChildren();
+      this.items.clear();
+      this.observedSlots.clear();
+      this.pendingChanges.length = 0;
+      this.pendingChangesOverflowed = false;
+      this.unknownSlots.clear();
+      this.resolvingUnknownEquipment = false;
       this.request += 1;
       return;
     }
@@ -418,7 +495,16 @@ export class InventoryPanel {
     void loadInventory().then(
       (items) => {
         if (request === this.request) {
+          if (this.pendingChangesOverflowed) {
+            this.pendingChangesOverflowed = false;
+            this.pendingChanges.length = 0;
+            this.refresh();
+            return;
+          }
+          this.unknownSlots.clear();
           this.showItems(items);
+          this.replayChanges();
+          if (this.unknownSlots.size === 0) this.resolvingUnknownEquipment = false;
         }
       },
       (error: unknown) => {
@@ -444,6 +530,8 @@ export class InventoryPanel {
   }
 
   private showItems(items: readonly InventoryItem[]): void {
+    this.items.clear();
+    for (const item of items) this.items.set(item.itemKey, { ...item });
     this.list.setAttribute("aria-busy", "false");
     this.renderSlots(items);
     if (items.length === 0) {
@@ -462,10 +550,13 @@ export class InventoryPanel {
     this.list.replaceChildren(...items.map((item) => this.buildRow(item)));
     this.list.hidden = false;
     this.status.hidden = true;
+    this.renderComparisons();
   }
 
   private showError(): void {
     this.view = "error";
+    this.pendingChanges.length = 0;
+    this.pendingChangesOverflowed = false;
     this.list.replaceChildren();
     this.list.hidden = true;
     this.list.setAttribute("aria-busy", "false");
@@ -486,13 +577,14 @@ export class InventoryPanel {
   private renderSlots(items: readonly InventoryItem[]): void {
     const equippedBySlot = new Map<EquipmentSlot, InventoryItem>();
     for (const item of items) {
-      const slot = item.equipped ? EQUIPMENT_ITEM_SLOTS[item.itemKey] : undefined;
+      const slot = item.equipped ? this.resolveSlot(item) : undefined;
       if (slot !== undefined) {
         equippedBySlot.set(slot, item);
+        this.unknownSlots.delete(slot);
       }
     }
     for (const slot of EQUIPMENT_SLOTS) {
-      this.applySlot(slot, equippedBySlot.get(slot) ?? null);
+      this.applySlot(slot, this.unknownSlots.has(slot) ? { name: "장비 정보 확인 필요", icon: "" } : equippedBySlot.get(slot) ?? null);
     }
   }
 
@@ -545,6 +637,66 @@ export class InventoryPanel {
     return this.findRow(itemKey)?.querySelector<HTMLElement>(".bag__count") ?? null;
   }
 
+  private renderComparisons(): void {
+    const items = [...this.items.values()];
+    const unknownEquipped = items.some((item) => item.equipped && this.resolveSlot(item) === undefined);
+    for (const item of items) {
+      const slot = this.resolveSlot(item);
+      if (slot === undefined && !item.equipment) continue;
+      const row = this.findRow(item.itemKey);
+      if (!row) continue;
+      let details = row.querySelector<HTMLElement>(".bag__comparison");
+      if (!details) {
+        details = document.createElement("div");
+        details.className = "bag__comparison";
+        for (const name of ["stats", "baseline", "difference"]) {
+          const line = document.createElement("span");
+          line.className = `bag__comparison-${name}`;
+          details.append(line);
+        }
+        row.append(details);
+      }
+      const equipped = items.filter((entry) => entry.equipped && this.resolveSlot(entry) === slot);
+      const current = slot === undefined || this.unknownSlots.has(slot) || unknownEquipped || equipped.length > 1
+        ? undefined : equipped[0] ?? null;
+      const description = describeEquipmentComparison(item, current);
+      for (const [name, text] of Object.entries(description)) {
+        const line = details.querySelector<HTMLElement>(`.bag__comparison-${name}`)!;
+        line.textContent = text;
+        line.hidden = text.length === 0;
+      }
+    }
+  }
+
+  private resolveSlot(item: InventoryItem): EquipmentSlot | undefined {
+    return this.observedSlots.get(item.itemKey) ?? itemSlot(item);
+  }
+
+  private ensureEquipAction(row: HTMLElement, item: InventoryItem): void {
+    const slot = this.resolveSlot(item);
+    if (slot === undefined) return;
+    row.dataset.slot = slot;
+    row.dataset.equipped = String(item.equipped);
+    if (row.querySelector(".bag__equip")) return;
+    let actions = row.querySelector<HTMLElement>(".bag__actions");
+    if (!actions) {
+      actions = document.createElement("div");
+      actions.className = "bag__actions";
+      row.append(actions);
+    }
+    const equip = document.createElement("button");
+    equip.type = "button";
+    equip.className = "bag__equip";
+    equip.textContent = item.equipped ? "해제" : "장착";
+    equip.addEventListener("click", (event) => {
+      const currentSlot = row.dataset.slot as EquipmentSlot;
+      if (row.dataset.equipped === "true") this.onUnequipItem(currentSlot);
+      else this.onEquipItem(item.itemKey, currentSlot);
+      if (event.detail > 0) equip.blur();
+    });
+    actions.prepend(equip);
+  }
+
   private buildRow(item: InventoryItem): HTMLLIElement {
     const row = document.createElement("li");
     row.className = "bag__row";
@@ -570,28 +722,8 @@ export class InventoryPanel {
 
     row.append(icon, name, count, unit);
 
-    // Only a row whose item maps to a concrete slot gets a toggle; a possession like entry-pass
-    // has no slot to occupy, and neither does an equipment item this Phase never gave a slot to.
-    const slot = EQUIPMENT_ITEM_SLOTS[item.itemKey];
-    if (slot !== undefined) {
-      row.dataset.slot = slot;
-      row.dataset.equipped = String(item.equipped);
-      const equip = document.createElement("button");
-      equip.type = "button";
-      equip.className = "bag__equip";
-      equip.textContent = item.equipped ? "해제" : "장착";
-      equip.addEventListener("click", (event) => {
-        if (row.dataset.equipped === "true") {
-          this.onUnequipItem(slot);
-        } else {
-          this.onEquipItem(item.itemKey, slot);
-        }
-        if (event.detail > 0) {
-          equip.blur();
-        }
-      });
-      row.append(equip);
-    }
+    const actions = document.createElement("div");
+    actions.className = "bag__actions";
 
     // 판매 — only a row whose item carries a sell price at all (design §9 D11); absent for a
     // quest-bound possession like entry-pass. Restores the "in flight" reading across a reopen
@@ -610,7 +742,7 @@ export class InventoryPanel {
           sell.blur();
         }
       });
-      row.append(sell);
+      actions.append(sell);
     }
 
     // 사용 — only a consumable row (design §9 D11), {@link sellValue}'s own shape and reopen rule.
@@ -627,9 +759,11 @@ export class InventoryPanel {
           use.blur();
         }
       });
-      row.append(use);
+      actions.append(use);
     }
 
+    if (actions.childElementCount > 0) row.append(actions);
+    this.ensureEquipAction(row, item);
     return row;
   }
 

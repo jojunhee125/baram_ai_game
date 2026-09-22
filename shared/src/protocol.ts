@@ -147,6 +147,12 @@ export const EquipmentSlot = {
 } as const;
 export type EquipmentSlot = (typeof EquipmentSlot)[keyof typeof EquipmentSlot];
 
+export interface EquipmentMetadata {
+  slot: Exclude<EquipmentSlot, "ring1" | "ring2"> | "ring";
+  attackDamage: number;
+  damageReduction: number;
+}
+
 /** Every concrete slot, in the order `EquipmentSlot` declares them. */
 export const EQUIPMENT_SLOTS: readonly EquipmentSlot[] = Object.values(EquipmentSlot);
 
@@ -643,6 +649,7 @@ export interface ItemGranted {
   quantity: number;
   /** Total held afterwards, so an open bag window updates without a re-read. */
   total: number;
+  equipment?: EquipmentMetadata;
   /**
    * Fraction of incoming monster damage this item removes while equipped, present only for an
    * equipment item. Sent so the bag's toast can show the stat without the client holding a

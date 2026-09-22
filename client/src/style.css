@@ -948,8 +948,7 @@ body {
   /*
    * Bounded by the stage, because the column can hold the controls, the minimap and the bag at
    * once — on a short window that stack is taller than the stage, and the bag would hang off the
-   * bottom edge. The bag's list is the part that gives (see .bag__list), so what shrinks is the
-   * scrollable region rather than the header a player needs to close it with.
+   * bottom edge. The bag scrolls when its slot grid and item comparisons exceed this cap.
    */
   max-height: calc(100% - var(--space-6));
   pointer-events: none;
@@ -1043,8 +1042,9 @@ body {
   flex-direction: column;
   gap: var(--space-2);
   width: 100%;
-  /* Lets .hud's cap reach the list below instead of stopping at this box's content height. */
+  /* Lets .hud's cap constrain this scroll container. */
   min-height: 0;
+  overflow-y: auto;
   padding: var(--space-2) var(--space-3) var(--space-3);
   border: 1px solid rgba(236, 234, 244, 0.16);
   border-radius: var(--radius);
@@ -1054,6 +1054,7 @@ body {
 
 .bag__header {
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
@@ -1117,7 +1118,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  flex: 0 1 auto;
+  flex: none;
   min-height: 0;
   max-height: 200px;
   overflow-y: auto;
@@ -1127,11 +1128,46 @@ body {
 }
 
 .bag__row {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--space-8) minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-1) var(--space-1) 0;
   border-radius: 6px;
+}
+
+.bag__actions {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.bag__actions > button {
+  height: var(--space-8);
+  transition: none;
+}
+
+.bag__comparison {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid rgba(236, 234, 244, 0.16);
+  border-radius: var(--radius);
+  color: #c7c4d4;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.bag__comparison-stats {
+  color: #eceaf4;
+}
+
+.bag__comparison-difference {
+  font-weight: 600;
 }
 
 /*
@@ -1234,8 +1270,7 @@ body {
 }
 
 /*
- * The eight equipment slots. Unlike .bag__list this never scrolls or shrinks — on a short window
- * the item list below gives back space first (.bag__list's own comment documents that order).
+ * The eight equipment slots retain their full height inside the bag's scroll container.
  */
 .bag__slots {
   display: flex;

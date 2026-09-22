@@ -1,4 +1,14 @@
+import type { EquipmentMetadata } from "@zep-test/shared";
 import type { ItemDefinition } from "./contracts";
+
+export function equipmentMetadata(definition: ItemDefinition): EquipmentMetadata | undefined {
+  const equipment = definition.equipment;
+  return equipment === undefined ? undefined : {
+    slot: equipment.slot,
+    attackDamage: equipment.stats.attackDamage ?? 0,
+    damageReduction: equipment.stats.damageReduction ?? 0,
+  };
+}
 
 /**
  * How many *different* items one bag holds. Quantity is not capped — a stack of a thousand hides

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import type { IncomingHttpHeaders } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AVATAR_SKIN_COUNT } from "@zep-test/shared";
+import { AVATAR_SKIN_COUNT, type EquipmentMetadata } from "@zep-test/shared";
 import express, {
   type Application,
   type Request,
@@ -17,7 +17,7 @@ import {
 import { InMemoryProfileStore, type ProfileStore } from "../db/profileStore";
 import { getDatabaseStatus } from "../db/status";
 import { ROOM_DEFINITIONS } from "../rooms/definitions";
-import { ITEM_DEFINITIONS } from "../rooms/itemDefinitions";
+import { ITEM_DEFINITIONS, equipmentMetadata } from "../rooms/itemDefinitions";
 import { buildLootTableView } from "../rooms/lootTableView";
 import { deriveSsoUserId } from "../rooms/ssoIdentity";
 import { inspectForwardAuth } from "./forwardAuth";
@@ -253,6 +253,7 @@ function presentInventory(rows: readonly InventoryRow[]): readonly {
   quantity: number;
   equipped: boolean;
   damageReductionRatio?: number;
+  equipment?: EquipmentMetadata;
   sellValue?: number;
   consumable?: boolean;
 }[] {
@@ -269,6 +270,7 @@ function presentInventory(rows: readonly InventoryRow[]): readonly {
       icon: definition.icon,
       quantity: row.quantity,
       equipped: row.equipped,
+      ...(definition.equipment === undefined ? {} : { equipment: equipmentMetadata(definition) }),
       damageReductionRatio: definition.equipment?.stats.damageReduction,
       // roadmap R04-c (design `docs/r04-settlement.md` §9 D11): `sellValue` travels as-is
       // (`client/src/net/inventory.ts` parses the same name and type), and `consumable` collapses

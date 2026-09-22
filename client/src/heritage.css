@@ -125,6 +125,8 @@ body { background: #18130f; }
 }
 .bag__slot { border-radius: 0; }
 .bag__slot-label { color: #c7b797; }
+.bag__comparison { border-color: var(--border-subtle); color: var(--text-muted); }
+.bag__comparison-stats { color: var(--text-primary); }
 .vitals__attack-status { margin-left: auto; color: #e3c782; white-space: nowrap; }
 .vitals[data-attack="cooling"] .vitals__hint { opacity: 1; }
 .vitals[data-attack="cooling"] .vitals__attack-status { color: #c7b797; }

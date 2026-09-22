@@ -1,3 +1,5 @@
+import { EQUIPMENT_SLOTS, type EquipmentMetadata } from "@zep-test/shared";
+
 /**
  * Same-origin like `profile.ts`, and for the same reason: in production the game server serves
  * this bundle, so the request carries the SSO cookies the KAD gateway checks.
@@ -20,6 +22,7 @@ export interface InventoryItem {
   icon: string;
   quantity: number;
   equipped: boolean;
+  equipment?: EquipmentMetadata;
   /** Present only on equipment rows; its absence is what tells a row apart from a possession. */
   damageReductionRatio?: number;
   /**
@@ -75,7 +78,25 @@ function readItems(body: unknown): readonly InventoryItem[] {
   if (!Array.isArray(items)) {
     throw new Error("response had no items array");
   }
-  return items.filter(isInventoryItem);
+  return items.filter(isInventoryItem).map((item) => ({
+    ...item,
+    equipment: readEquipmentMetadata(item.equipment),
+  }));
+}
+
+export function readEquipmentMetadata(value: unknown): EquipmentMetadata | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const equipment = value as Partial<EquipmentMetadata>;
+  if (
+    (equipment.slot !== "ring" &&
+      !EQUIPMENT_SLOTS.some((slot) => slot !== "ring1" && slot !== "ring2" && slot === equipment.slot)) ||
+    typeof equipment.attackDamage !== "number" ||
+    !Number.isFinite(equipment.attackDamage) || equipment.attackDamage < 0 ||
+    typeof equipment.damageReduction !== "number" ||
+    !Number.isFinite(equipment.damageReduction) ||
+    equipment.damageReduction < 0 || equipment.damageReduction > 1
+  ) return undefined;
+  return { slot: equipment.slot!, attackDamage: equipment.attackDamage, damageReduction: equipment.damageReduction };
 }
 
 function isInventoryItem(row: unknown): row is InventoryItem {
