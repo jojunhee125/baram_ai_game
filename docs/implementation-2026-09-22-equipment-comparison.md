@@ -10,7 +10,7 @@
 
 ## 상태
 
-구현·독립 검토 완료. 전체 테스트1185개와 browser15개, typecheck/build를 통과했다. main으로 커밋·push하며 배포는 수행하지 않았다.
+구현·독립 검토 완료. 전체 테스트1185개와 browser15개, 추가 layout2개, typecheck/build를 통과했다. 구현 커밋 `e7b01d5`를 `origin/main`에 push 완료했다. 운영 배포는 수행하지 않았다.
 
 ## 구현 중간 기록
 
@@ -58,3 +58,7 @@
 - Browser 검증은 실제 HTML/CSS/parser/panel을 사용하는 component fixture이며 실제 계정의 장시간 플레이 검증과 구분한다.
 - 실제 PostgreSQL 재검증은 미실행: DB schema/query/정산 로직을 변경하지 않았고 이전 작업의 실DB 검증을 유지한다.
 - 상점 구매 전 비교, 최종 직업 공격력/합산 방어율 예측, 신규 장비/HP bonus는 구현 범위 밖이다. 운영 배포·사용자 시각 승인은 수행하지 않았다.
+
+## 문서 최종 정리
+
+2026-09-22 사용자 요청으로 이 기록과 `roadmap.md`·`decisions.md`의 구현 및 Git 반영 상태를 확정했다. `git fetch origin` 후 main과 origin/main이 `e7b01d5`로 일치하고 선행 `ac70d3f`가 포함됨을 확인했다. 코드 변경이 없어 테스트/build는 재실행하지 않으며 위 결과를 유지한다. 문서 diff와 링크를 확인한 뒤 main에 커밋·push한다.

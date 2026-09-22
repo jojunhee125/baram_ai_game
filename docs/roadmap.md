@@ -1,10 +1,12 @@
 # 2009–2010 PC 감성 MMORPG 로드맵
 
+> **최종 반영 상태 — 2026-09-22:** 장비 비교 `e7b01d5`와 선행 병렬 구현 `ac70d3f`는 `origin/main`에 push 완료했다. 최신 검증은 전체1185개·browser15개·추가 layout2개 및 typecheck/build 통과다. 아래 이전 branch·미푸시·미구현 표기는 각 구현 당시 이력이며 최신 상태는 이 요약과 구현 기록을 따른다. 운영 배포·장시간 플레이·시각 승인은 별도다.
+
 > **가방 장비 비교 구현 — 2026-09-22:** 같은 슬롯의 현재 장비와 후보 장비의 공격력·피해 감소 차이를 표시한다. 서버 metadata를 사용하며 정보가 없으면 숫자를 추정하지 않는다. 상점 구매 전 비교·전체 캐릭터 능력치 예측은 포함하지 않는다. [구현·검증 기록](implementation-2026-09-22-equipment-comparison.md).
 
 > **후속 병렬 작업 완료 — 2026-09-22:** 첫 성장 루프 E2E·세 번째 위험한 숲·실제 PostgreSQL 거래 경합 검증을 구현했다. 전체1182개·실DB 관련187개·browser10개, typecheck/build 통과. 기존 남문 구현 두 커밋은 main에 fast-forward하여 push했으며 이후 모든 작업·커밋·push는 **main만** 사용한다. [설계](design-2026-09-22-parallel-progression.md) · [구현·검증·남은 제한](implementation-2026-09-22-parallel-progression.md). 아래 기존 branch·미병합·세 번째 숲 미구현 표기는 당시 이력이다. 실제 플레이 시간·시각 승인·배포는 별도다.
 
-> **Git 반영 상태 — 2026-09-22:** 구현 커밋 `5eb0f33`을 `origin/feat/south-gate-progression`에 push 완료했다. 아래 미커밋·미푸시 언급은 반영 이전 시점의 기록이다. main 병합·배포는 수행하지 않았다.
+> **과거 Git 반영 이력 — 2026-09-22, main 통합 이전:** 당시 구현 커밋 `5eb0f33`을 `origin/feat/south-gate-progression`에 push했다. 이후 main 통합과 후속 구현 push를 완료했으며 현재 상태는 위 최종 반영 요약을 따른다. 운영 배포는 수행하지 않았다.
 
 기준일: 2026-09-22. 사용자 확정 시각 기준: **2009–2010년 PC 바람의나라**.
 캐릭터 비례·도트 밀도·장비 실루엣과 마을에서 준비하고 사냥한 뒤 돌아오는 MMORPG 경험을 함께 만든다.
@@ -15,7 +17,7 @@
 R01의 현재 skin 0은 AI 생성 `baram-adventurer.png`를 사용하는 4방향 대기·걷기 후보다(`cd8af86`). UI compact layout은 `6cc6b56`에 반영됐다. 바람의나라 원본 사용 허가는 미확보이며 현재 이미지는 원본 또는 동일 품질의 재현물이 아니다. 허가된 대체 원화 반입·두 번째 생성 후보 적용은 없었다. native pixel 제작 규격·시대 reference 대조·사용자 시각 승인·운영 배포는 남아 있다.
 R04는 정산 코어·퀘스트 보상·상점/되팔기/소모품까지 구현했지만 완료 조건인 "20–30분 루프 완주"는 실제 플레이로만 확인할 수 있어 아직 닫지 않았다.
 
-**2026-09-22 최신 구현 상태:** 사용자 묶음 착수 승인에 따라 **남문 홈·장비 구매/판매·들판과 굴의 지형/행동/보상 차별화**를 구현했다. 전체 테스트1172개, 관련 browser3개, workspace/E2E typecheck와 build가 통과했다. 세 번째 숲·시각 승인·장시간 성장 밸런스·실PostgreSQL 동시성 검증은 남아 있으며 commit·push·배포는 미수행이다. [구현 기록](implementation-2026-09-22-south-gate-progression.md) · [결정 기록](decisions.md) · [인계 메모리](../PROJECT_MEMORY.md)
+**2026-09-22 남문 구현 당시 이력:** 사용자 묶음 착수 승인에 따라 **남문 홈·장비 구매/판매·들판과 굴의 지형/행동/보상 차별화**를 구현했다. 당시 전체 테스트1172개, 관련 browser3개, workspace/E2E typecheck와 build가 통과했다. 당시 후속 과제였던 세 번째 숲·실PostgreSQL 동시성 검증과 main 반영은 이후 완료했다. 시각 승인·장시간 성장 밸런스·운영 배포는 남아 있다. [구현 기록](implementation-2026-09-22-south-gate-progression.md) · [결정 기록](decisions.md) · [인계 메모리](../PROJECT_MEMORY.md)
 
 ## 1. 도달할 게임 경험
 
