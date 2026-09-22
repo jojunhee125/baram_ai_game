@@ -262,7 +262,7 @@ test.describe("skillBar.ts 화이트박스 (R05-c)", () => {
       const bar = new mod.SkillBar(() => true);
       const denial = document.querySelector<HTMLElement>("#skills-denial")!;
       const texts: Record<string, string | null> = {};
-      for (const reason of ["no-class", "on-cooldown", "no-target", "out-of-range", "target-dead"]) {
+      for (const reason of ["no-class", "on-cooldown", "no-target", "out-of-range", "target-dead"] as const) {
         bar.applyDenied({ skillKey: "fireball", reason, nonce: "n" });
         texts[reason] = denial.textContent;
       }

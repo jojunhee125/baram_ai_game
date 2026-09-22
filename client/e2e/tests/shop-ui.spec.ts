@@ -1,3 +1,4 @@
+import { ok } from "node:assert/strict";
 import { expect, test } from "@playwright/test";
 import { launchSharedBrowser, openFreshClient, type Client } from "../helpers/browser";
 
@@ -113,9 +114,11 @@ test.describe("ObjectPanel 상점 블록 — 구매 nonce와 재오픈 (white-bo
 
     expect(result.offered).toEqual({ name: "약초", price: "15전", label: "구매", disabled: false });
     expect(result.firstClick.sent).toHaveLength(1);
-    expect(result.firstClick.sent[0]).toMatchObject({ npcObjectId: "plaza-shop-npc", itemKey: "herb", quantity: 1 });
-    expect(typeof result.firstClick.sent[0].nonce).toBe("string");
-    expect(result.firstClick.sent[0].nonce.length).toBeGreaterThan(0);
+    const firstPurchase = result.firstClick.sent[0];
+    ok(firstPurchase, "the first buy click must send a request");
+    expect(firstPurchase).toMatchObject({ npcObjectId: "plaza-shop-npc", itemKey: "herb", quantity: 1 });
+    expect(typeof firstPurchase.nonce).toBe("string");
+    expect(firstPurchase.nonce.length).toBeGreaterThan(0);
     expect(result.firstClick).toMatchObject({ disabled: true, label: "구매하는 중…" });
     expect(result.secondClickIgnored, "a disabled button must not send twice").toBe(1);
     expect(result.afterForeignDenial, "a denial for another item must not reset this row").toEqual({
@@ -127,9 +130,11 @@ test.describe("ObjectPanel 상점 블록 — 구매 nonce와 재오픈 (white-bo
       label: "구매",
     });
 
-    const firstNonce = result.firstClick.sent[0].nonce;
+    const firstNonce = firstPurchase.nonce;
     expect(result.freshPurchase.sent).toHaveLength(2);
-    expect(result.freshPurchase.sent[1].nonce, "a purchase after resolution is a fresh attempt").not.toBe(
+    const secondPurchase = result.freshPurchase.sent[1];
+    ok(secondPurchase, "buying after a denial must send a second request");
+    expect(secondPurchase.nonce, "a purchase after resolution is a fresh attempt").not.toBe(
       firstNonce,
     );
 
@@ -279,9 +284,13 @@ test.describe("InventoryPanel 판매/사용 버튼 — nonce, 재오픈, 0개 �
       label: "판매",
     });
 
-    const firstNonce = result.firstSell.sent[0].nonce;
+    const firstSale = result.firstSell.sent[0];
+    ok(firstSale, "the first sell click must send a request");
+    const firstNonce = firstSale.nonce;
     expect(result.secondSell.sent).toHaveLength(2);
-    expect(result.secondSell.sent[1].nonce, "a sale after resolution is a fresh attempt").not.toBe(firstNonce);
+    const secondSale = result.secondSell.sent[1];
+    ok(secondSale, "selling after a denial must send a second request");
+    expect(secondSale.nonce, "a sale after resolution is a fresh attempt").not.toBe(firstNonce);
 
     expect(result.afterSaleSettled, "a settled sale resolves the button and patches the count").toEqual({
       disabled: false,
