@@ -23,7 +23,7 @@ export const PORTAL_DEFINITIONS: readonly PortalDefinition[] = [
         { tileX: 32, tileY: 25 },
       ],
     },
-    to: { room: "grand-plaza", arrival: { tileX: 22, tileY: 9, spreadRadiusInTiles: 0 } },
+    to: { room: "hunting-ground", arrival: { tileX: 35, tileY: 30, spreadRadiusInTiles: 0 } },
   },
   {
     id: "grand-plaza-north-door",
@@ -34,7 +34,7 @@ export const PORTAL_DEFINITIONS: readonly PortalDefinition[] = [
         { tileX: 23, tileY: 8 },
       ],
     },
-    to: { room: "plaza", arrival: { tileX: 31, tileY: 24, spreadRadiusInTiles: 0 } },
+    to: { room: "plaza", arrival: { tileX: 31, tileY: 10, spreadRadiusInTiles: 0 } },
   },
   {
     id: "plaza-north-door",
@@ -45,7 +45,7 @@ export const PORTAL_DEFINITIONS: readonly PortalDefinition[] = [
         { tileX: 32, tileY: 8 },
       ],
     },
-    to: { room: "hunting-ground", arrival: { tileX: 35, tileY: 30, spreadRadiusInTiles: 0 } },
+    to: { room: "grand-plaza", arrival: { tileX: 22, tileY: 9, spreadRadiusInTiles: 0 } },
   },
   {
     id: "hunting-ground-south-door",
@@ -56,7 +56,7 @@ export const PORTAL_DEFINITIONS: readonly PortalDefinition[] = [
         { tileX: 36, tileY: 31 },
       ],
     },
-    to: { room: "plaza", arrival: { tileX: 31, tileY: 9, spreadRadiusInTiles: 0 } },
+    to: { room: "plaza", arrival: { tileX: 31, tileY: 23, spreadRadiusInTiles: 0 } },
   },
   {
     id: "hunting-ground-north-door",

@@ -90,6 +90,7 @@ import type { ProgressStore } from "../db/progressStore";
 import type { QuestRow, QuestStore } from "../db/questStore";
 import type {
   SettlementBagFull,
+  SettlementEquippedItem,
   SettlementInsufficientBalance,
   SettlementInsufficientItem,
   SettlementOutcome,
@@ -130,7 +131,7 @@ import { LANDMARK_DEFINITIONS } from "./landmarkDefinitions";
 import {
   BOSS_RESPAWN_MS,
   MONSTER_SPAWN_DEFINITIONS,
-  MONSTER_TYPES,
+  monsterTypesForRoom,
   type MonsterKind,
   type MonsterSpawnDefinition,
   type MonsterType,
@@ -247,6 +248,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
    * inside a neighbour loop multiplies the per-move cost by the room population again.
    */
   private readonly clientsBySession = new Map<string, RoomClient>();
+  private readonly equipmentSubscriptions = new Map<string, () => void>();
   /** Sessions already told about the current throttled burst, so one burst yields one notice. */
   private readonly moveThrottleNotified = new Set<string>();
   /**
@@ -490,7 +492,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
 
   /** Overridable seam, paired with {@link monsterSpawns} so a fixture can bring its own kinds. */
   protected monsterTypes(): ReadonlyMap<MonsterKind, MonsterType> {
-    return MONSTER_TYPES;
+    return monsterTypesForRoom(this.roomName);
   }
 
   /**
@@ -685,6 +687,22 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // with it — awardLoot's own rule (design-phase-i-boss-monster.md §2.5). A lost hydration only
     // costs this session its catch-up read; `holdsItem` asks the store directly anyway.
     const ownerKey = client.userData.ownerKey ?? client.sessionId;
+    const unsubscribeEquipment = this.inventoryStore?.subscribeEquipment?.(ownerKey, (slot, itemKey) => {
+      const current = this.clientsBySession.get(client.sessionId)?.userData;
+      if (!current) {
+        return;
+      }
+      if (itemKey === null) {
+        delete current.equippedItemKeys[slot];
+      } else {
+        current.equippedItemKeys[slot] = itemKey;
+      }
+      current.equipCacheVersions[slot] += 1;
+      client.send(ServerMessage.EquipmentChanged, { slot, itemKey, applied: true } satisfies EquipmentChanged);
+    });
+    if (unsubscribeEquipment !== undefined) {
+      this.equipmentSubscriptions.set(client.sessionId, unsubscribeEquipment);
+    }
     if (this.gatedItemKeys.size > 0 && this.inventoryStore !== null) {
       void this.hydratePossessionCache(client.sessionId, ownerKey).catch((cause) => {
         console.warn(`[zep-test] could not hydrate possessions for ${ownerKey}`, cause);
@@ -1334,6 +1352,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   }
 
   onLeave(client: RoomClient): void {
+    this.equipmentSubscriptions.get(client.sessionId)?.();
+    this.equipmentSubscriptions.delete(client.sessionId);
     this.progressSubscriptions.get(client.sessionId)?.unsubscribe?.();
     this.progressSubscriptions.delete(client.sessionId);
     const player = this.state.players.get(client.sessionId);
@@ -1359,6 +1379,10 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   }
 
   onDispose(): void {
+    for (const unsubscribe of this.equipmentSubscriptions.values()) {
+      unsubscribe();
+    }
+    this.equipmentSubscriptions.clear();
     for (const binding of this.progressSubscriptions.values()) {
       binding.unsubscribe?.();
     }
@@ -1888,6 +1912,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
           name: definition.name,
           icon: definition.icon,
           price: listing.price,
+          ...(definition.equipment?.stats.attackDamage === undefined ? {} : { attackBonus: definition.equipment.stats.attackDamage }),
+          ...(definition.equipment?.stats.damageReduction === undefined ? {} : { damageReductionRatio: definition.equipment.stats.damageReduction }),
         };
       }),
     };
@@ -2012,6 +2038,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       quantity,
       total,
       damageReductionRatio: itemDefinition.equipment?.stats.damageReduction,
+      sellValue: itemDefinition.sellValue,
+      consumable: itemDefinition.consumable !== undefined ? true : undefined,
     } satisfies ItemGranted);
   }
 
@@ -2056,9 +2084,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // Selling what is worn is refused rather than handled, because handling it means unequipping
     // inside the settlement transaction — `session.equippedItemKeys` is a room-session cache that
     // `settleSell` does not touch, so a sold-while-worn row would leave its stat bonus applied to a
-    // player who no longer owns the item. Unreachable today (the only row with a `sellValue` is a
-    // consumable, not equipment) and written anyway: the day equipment becomes sellable, the bug
-    // it prevents is silent and shows up as wrong damage numbers, not as an error.
+    // player who no longer owns the item. This cache check gives an immediate refusal; the
+    // settlement also checks the stored slot atomically to cover another session's equip.
     if (Object.values(session.equippedItemKeys).includes(itemKey)) {
       client.send(
         ServerMessage.ShopDenied,
@@ -2215,12 +2242,12 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     client: RoomClient,
     action: "buy" | "sell" | "use",
     itemKey: string,
-    outcome: SettlementInsufficientBalance | SettlementBagFull | SettlementInsufficientItem,
+    outcome: SettlementInsufficientBalance | SettlementBagFull | SettlementInsufficientItem | SettlementEquippedItem,
   ): void {
     client.send(ServerMessage.ShopDenied, {
       action,
       itemKey: outcome.reason === "insufficient-balance" ? itemKey : outcome.itemKey,
-      reason: outcome.reason,
+      reason: outcome.reason === "equipped-item" ? "not-sellable" : outcome.reason,
     } satisfies ShopDenied);
   }
 
@@ -2704,6 +2731,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         // this grant builds (`InventoryPanel.buildRow`) has no equip button until the bag is
         // closed and reopened, since that button is gated on this field being defined.
         damageReductionRatio: definition.equipment?.stats.damageReduction,
+        sellValue: definition.sellValue,
+        consumable: definition.consumable !== undefined ? true : undefined,
       } satisfies ItemGranted);
     }
   }

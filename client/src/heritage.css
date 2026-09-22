@@ -11,6 +11,7 @@
   --radius: 0px;
 }
 body { background: #18130f; }
+.object__shop-stats { display: block; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
 .app { padding: 8px; }
 .stage {
   --sidebar-width: 260px;

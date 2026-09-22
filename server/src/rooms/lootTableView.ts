@@ -1,4 +1,4 @@
-import { MONSTER_SPAWN_DEFINITIONS, MONSTER_TYPES, type MonsterKind } from "./monsterDefinitions";
+import { MONSTER_SPAWN_DEFINITIONS, monsterTypesForRoom, type MonsterKind } from "./monsterDefinitions";
 import { ITEM_DEFINITIONS } from "./itemDefinitions";
 
 /**
@@ -19,11 +19,14 @@ export interface LootTableDropView {
   icon: string;
   /** entry.chance * 100, rounded to one decimal — every current value lands on a whole number. */
   chancePercent: number;
+  quantity: number;
+  sellValue?: number;
 }
 
 export interface LootTableMonsterView {
   kind: string;
   name: string;
+  expReward: number;
   drops: readonly LootTableDropView[];
 }
 
@@ -52,13 +55,14 @@ export function buildLootTableView(roomName: string): readonly LootTableMonsterV
 
   const itemsByKey = new Map(ITEM_DEFINITIONS.map((item) => [item.key, item]));
   const views: LootTableMonsterView[] = [];
-  for (const [kind, type] of MONSTER_TYPES) {
+  for (const [kind, type] of monsterTypesForRoom(roomName)) {
     if (!kindsInRoom.has(kind)) {
       continue;
     }
     views.push({
       kind,
       name: MONSTER_DISPLAY_NAMES[kind],
+      expReward: type.expReward,
       drops: type.loot.map((entry) => {
         const item = itemsByKey.get(entry.itemKey)!;
         return {
@@ -66,6 +70,8 @@ export function buildLootTableView(roomName: string): readonly LootTableMonsterV
           name: item.name,
           icon: item.icon,
           chancePercent: Math.round(entry.chance * 1000) / 10,
+          quantity: entry.quantity,
+          ...(item.sellValue === undefined ? {} : { sellValue: item.sellValue }),
         };
       }),
     });

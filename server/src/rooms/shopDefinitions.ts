@@ -38,15 +38,20 @@ export interface ShopDefinition {
 
 /**
  * The authored table. `plaza-shop-npc` is the placeholder NPC roadmap R03 already placed
- * (`interactableDefinitions.ts`), promoted here rather than replaced — no new NPC, no map change.
- * One listing: `herb` (`itemDefinitions.ts`), the recovery consumable §9 D11 asked for, at 12전
- * against first-hunt's 50전 reward (`docs/decisions.md` 2026-09-18's 10~15전 band — a first-hunt
- * payout buys 4 of these).
+ * (`interactableDefinitions.ts`). The 50전 first-hunt reward buys a 40전 dagger; selling field
+ * and den loot funds the subsequent weapon and armor upgrades.
  */
 export const SHOP_DEFINITIONS: readonly ShopDefinition[] = [
   {
     npcObjectId: "plaza-shop-npc",
-    listings: [{ itemKey: "herb", price: 12 }],
+    listings: [
+      { itemKey: "herb", price: 12 },
+      { itemKey: "old-dagger", price: 40 },
+      { itemKey: "padded-armor", price: 100 },
+      { itemKey: "hunting-blade", price: 180 },
+      { itemKey: "reinforced-armor", price: 300 },
+      { itemKey: "iron-blade", price: 480 },
+    ],
   },
 ];
 
@@ -101,11 +106,15 @@ export function validateShopDefinitions(
       }
       seenItemKeys.add(listing.itemKey);
 
-      if (!itemsByKey.has(listing.itemKey)) {
+      const item = itemsByKey.get(listing.itemKey);
+      if (item === undefined) {
         errors.push(`${label} lists "${listing.itemKey}", which is not in the item table`);
       }
-      if (!Number.isInteger(listing.price) || listing.price < 1) {
+      if (!Number.isSafeInteger(listing.price) || listing.price < 1) {
         errors.push(`${label}'s listing for "${listing.itemKey}" prices it at ${listing.price}, not a positive integer`);
+      }
+      if (item?.sellValue !== undefined && item.sellValue >= listing.price) {
+        errors.push(`${label}'s listing for "${listing.itemKey}" must cost more than its sellValue`);
       }
     }
   }

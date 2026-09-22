@@ -134,6 +134,11 @@ function fakePool(db: FakeDatabase): { pool: Pool; queries: RecordedQuery[] } {
         bag.set(itemKey, total);
         return Promise.resolve({ rows: [{ quantity: total }] });
       }
+      if (sql.includes("SELECT equipped_slot FROM inventory_item")) {
+        assert.match(sql, /FOR UPDATE/, "equipment check must retain the item lock until settlement commits");
+        const [ownerKey, itemKey] = values as [string, string];
+        return Promise.resolve({ rows: db.bagsByOwner.get(ownerKey)?.has(itemKey) ? [{ equipped_slot: null }] : [] });
+      }
       if (sql.includes("DELETE FROM inventory_item")) {
         // `InventoryStore.remove`'s single-statement DELETE-or-UPDATE (design §9 D10).
         const [ownerKey, itemKey, quantity] = values as [string, string, number];

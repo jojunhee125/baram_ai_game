@@ -232,7 +232,7 @@ export class LootTablePanel {
 
     const name = document.createElement("h3");
     name.className = "loot-table__monster-name";
-    name.textContent = monster.name;
+    name.textContent = `${monster.name} · 경험치 ${monster.expReward}`;
 
     const drops = document.createElement("ul");
     drops.className = "loot-table__drops";
@@ -245,7 +245,7 @@ export class LootTablePanel {
 
       const dropName = document.createElement("span");
       dropName.className = "loot-table__drop-name";
-      dropName.textContent = drop.name;
+      dropName.textContent = `${drop.name} ×${drop.quantity}${drop.sellValue === undefined ? "" : ` · 개당 ${drop.sellValue}전`}`;
 
       const chance = document.createElement("span");
       chance.className = "loot-table__drop-chance";

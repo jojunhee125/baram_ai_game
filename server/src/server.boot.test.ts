@@ -29,9 +29,9 @@ function restoreTable(): void {
   table.push(...REAL_ROWS);
 }
 
-/** Walkable in plaza.json / grand-plaza.json; (30,15) is the plaza fountain's top-left tile. */
+/** Walkable in plaza.json / grand-plaza.json; (28,24) is the south wall. */
 const PLAZA_WALKABLE = { tileX: 20, tileY: 13 };
-const PLAZA_BLOCKED = { tileX: 30, tileY: 15 };
+const PLAZA_BLOCKED = { tileX: 28, tileY: 24 };
 const GRAND_WALKABLE = { tileX: 24, tileY: 9 };
 const VALID_TARGET = {
   room: "grand-plaza",
@@ -120,8 +120,8 @@ describe("boot-time portal validation is wired into listen()", () => {
       /"bad-doorless" has no trigger tiles/,
       /"bad-from-room" leaves from "nowhere", which is not a registered room/,
       /"bad-to-room" points at "elsewhere", which is not a registered room/,
-      /"bad-trigger" triggers at \(30,15\), which is not a walkable tile of room "plaza"/,
-      /"bad-arrival" arrives at \(30,15\), which is not a walkable tile of room "plaza"/,
+      /"bad-trigger" triggers at \(28,24\), which is not a walkable tile of room "plaza"/,
+      /"bad-arrival" arrives at \(28,24\), which is not a walkable tile of room "plaza"/,
       /"bad-spread" has a negative arrival spreadRadiusInTiles \(-1\)/,
     ]) {
       assert.match(message, expected);

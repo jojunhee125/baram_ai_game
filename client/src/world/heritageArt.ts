@@ -20,7 +20,8 @@ const ENVIRONMENT_RECTS = [
 /** Normalize the authored 4x4 atlas into the existing Tiled 8x2 layout at load time.
  * Tile IDs and collides properties stay untouched; no server/map migration is needed. */
 export function registerHeritageTerrain(scene: Phaser.Scene, mapKey = ""): string {
-  const textureKey = usesClassicTerrain(mapKey) ? "classic-village-tiles" : HERITAGE_TILESET;
+  const cave = mapKey === "hunting-den";
+  const textureKey = cave ? "rock-cave-tiles" : usesClassicTerrain(mapKey) ? "classic-village-tiles" : HERITAGE_TILESET;
   if (scene.textures.exists(textureKey)) return textureKey;
   const source = scene.textures.get(HERITAGE_TERRAIN_SOURCE).getSourceImage() as HTMLImageElement;
   const village = usesClassicTerrain(mapKey)
@@ -33,6 +34,11 @@ export function registerHeritageTerrain(scene: Phaser.Scene, mapKey = ""): strin
   const context = texture.getContext();
   context.imageSmoothingEnabled = false;
   for (let i = 0; i < 16; i++) {
+    if (cave) {
+      paintCaveTile(context, i);
+      texture.add(i, 0, (i % 8) * 32, Math.floor(i / 8) * 32, 32, 32);
+      continue;
+    }
     const x = Math.round((i % 4) * source.width / 4);
     const y = Math.round(Math.floor(i / 4) * source.height / 4);
     const right = Math.round(((i % 4) + 1) * source.width / 4);
@@ -46,7 +52,7 @@ export function registerHeritageTerrain(scene: Phaser.Scene, mapKey = ""): strin
     } else {
       context.drawImage(source, x, y, right - x, bottom - y, (i % 8) * 32, Math.floor(i / 8) * 32, 32, 32);
     }
-    if (village && (i === 10 || i === 14 || i === 15)) {
+    if (village && (i === 10 || i === 14)) {
       context.drawImage(village, village.width / 2, 0, village.width / 2, village.height / 2,
         (i % 8) * 32, Math.floor(i / 8) * 32, 32, 32);
       const rect = ENVIRONMENT_RECTS[i === 14 ? 2 : 1];
@@ -66,7 +72,6 @@ interface Decoration { frame: number; x: number; y: number; size: number }
 
 const DECORATIONS: Readonly<Record<string, readonly Decoration[]>> = {
   plaza: [
-    { frame: 0, x: 30, y: 15, size: 4 },
     { frame: 0, x: 19, y: 3, size: 5 },
     { frame: 3, x: 39, y: 3, size: 5 },
     { frame: 1, x: 14, y: 4, size: 2 },
@@ -127,4 +132,115 @@ export function drawHeritageEnvironment(
       (item.y + item.size) * TILE_SIZE_PX, HERITAGE_ENVIRONMENT, item.frame);
     prop.setOrigin(0.5, 1).setScale(item.size * TILE_SIZE_PX / Math.max(prop.width, prop.height)).setDepth(1);
   }
+  if (mapKey === "plaza") drawSouthGateTown(scene, collision);
+  if (mapKey === "hunting-ground") {
+    drawWayfinding(scene, 35.5, 8.5, "바위 사냥굴 ↑");
+    drawWayfinding(scene, 35.5, 31.5, "남문 마을 ↓");
+  }
+  if (mapKey === "hunting-den") drawWayfinding(scene, 31.5, 27.5, "초보 들판 ↓");
+}
+
+function paintCaveTile(context: CanvasRenderingContext2D, tile: number): void {
+  const x = (tile % 8) * TILE_SIZE_PX;
+  const y = Math.floor(tile / 8) * TILE_SIZE_PX;
+  const rock = tile >= 8;
+  context.fillStyle = rock ? "#373b40" : tile === 4 || tile === 3 ? "#777367" : "#686a65";
+  context.fillRect(x, y, TILE_SIZE_PX, TILE_SIZE_PX);
+  if (rock) {
+    const facet = (color: string, points: readonly (readonly [number, number])[]): void => {
+      context.fillStyle = color;
+      context.beginPath();
+      points.forEach(([px, py], index) => index === 0 ? context.moveTo(x + px, y + py) : context.lineTo(x + px, y + py));
+      context.closePath(); context.fill();
+    };
+    facet(tile === 9 ? "#626b6b" : "#596365", [[1, 10], [8, 2], [24, 1], [31, 9], [29, 25], [21, 31], [7, 28], [1, 21]]);
+    facet("#7b8480", [[1, 10], [8, 2], [24, 1], [19, 7], [8, 8], [4, 16]]);
+    facet("#454f56", [[19, 7], [24, 1], [31, 9], [29, 25], [21, 31], [20, 21], [25, 14]]);
+    facet("#29363e", [[1, 21], [7, 28], [21, 31], [20, 26], [9, 24], [5, 19]]);
+    context.fillStyle = "#85908a";
+    context.fillRect(x + 10, y + 12, 5, 2);
+  } else {
+    for (let i = 0; i < 12; i++) {
+      context.fillStyle = i % 2 === 0 ? "#777b72" : "#595e5b";
+      context.fillRect(x + (i * 13 + tile * 7) % 30, y + (i * 7 + tile * 11) % 30, 2, 2);
+    }
+    if (tile === 1 || tile === 4) {
+      context.fillStyle = "#505650";
+      context.fillRect(x + 6, y + 8, 12, 2);
+      context.fillRect(x + 16, y + 10, 2, 9);
+      context.fillRect(x + 18, y + 17, 7, 2);
+    }
+    if (tile === 3) {
+      context.fillStyle = "#c5b28a";
+      context.fillRect(x, y + 4, 32, 3);
+      context.fillRect(x, y + 25, 32, 3);
+    }
+  }
+}
+
+function drawSouthGateTown(scene: Phaser.Scene, collision: Phaser.Tilemaps.TilemapLayer): void {
+  const art = scene.add.graphics().setDepth(1);
+  const tile = TILE_SIZE_PX;
+  for (const left of [18, 40]) {
+    if (!blockedRectangle(collision, left, 10, 6, 3)) continue;
+    const x = left * tile, y = 10 * tile, width = 6 * tile;
+    art.fillStyle(0x705239).fillRect(x, y, width, 3 * tile);
+    art.fillStyle(0xc4ab7b).fillRect(x + 8, y + tile, width - 16, 2 * tile - 8);
+    art.fillStyle(0x393e42).fillRect(x, y, width, tile + 8);
+    art.fillStyle(0x64685f).fillRect(x + 8, y + 4, width - 16, 8);
+    art.fillStyle(0x272d33).fillRect(x, y + tile, width, 8);
+    for (let offset = 16; offset < width; offset += 16) {
+      art.fillStyle(0x85867a).fillRect(x + offset, y + 12, 3, 20);
+    }
+    for (const offset of [24, width - 56]) {
+      art.fillStyle(0x59452f).fillRect(x + offset, y + 48, 32, 24);
+      art.fillStyle(0xe0c891).fillRect(x + offset + 4, y + 52, 24, 16);
+      art.fillStyle(0x59452f).fillRect(x + offset + 14, y + 52, 4, 16);
+    }
+    art.fillStyle(0x59452f).fillRect(x + width / 2 - 16, y + 48, 32, 48);
+  }
+  for (const [left, width] of [[17, 12], [35, 12]] as const) {
+    if (!blockedRectangle(collision, left, 24, width, 1)) continue;
+    const x = left * tile, y = 24 * tile;
+    art.fillStyle(0x4a4840).fillRect(x, y, width * tile, tile);
+    art.fillStyle(0xaaa28c).fillRect(x, y + 5, width * tile, 20);
+    art.fillStyle(0xd0c7ab).fillRect(x, y, width * tile, 5);
+    for (let offset = 0; offset < width * tile; offset += 16) {
+      art.fillStyle(0x696454).fillRect(x + offset, y + 5, 2, 9);
+      art.fillRect(x + offset + 8, y + 16, 2, 9);
+      art.fillRect(x + offset, y + 14, 16, 2);
+    }
+  }
+  for (const left of [26, 35]) {
+    if (!blockedRectangle(collision, left, 22, 3, 3)) continue;
+    const x = left * tile, y = 22 * tile;
+    art.fillStyle(0x756b55).fillRect(x + 8, y + 24, 80, 72);
+    art.fillStyle(0xc3b492).fillRect(x + 16, y + 32, 64, 56);
+    art.fillStyle(0x3a4548).fillRect(x, y + 8, 96, 24);
+    art.fillStyle(0x6c7976).fillRect(x + 8, y, 80, 12);
+    art.fillStyle(0x263337).fillRect(x, y + 28, 96, 8);
+    for (const offset of [24, 56]) {
+      art.fillStyle(0x514333).fillRect(x + offset, y + 48, 16, 28);
+      art.fillStyle(0xe1c67e).fillRect(x + offset + 4, y + 52, 8, 20);
+    }
+  }
+  drawWayfinding(scene, 31.5, 8.5, "대광장 ↑");
+  drawWayfinding(scene, 31.5, 24.4, "남문 · 초보 들판 ↓");
+  drawWayfinding(scene, 35.5, 19.6, "상점");
+}
+
+function blockedRectangle(collision: Phaser.Tilemaps.TilemapLayer, x: number, y: number, width: number, height: number): boolean {
+  for (let row = y; row < y + height; row++) {
+    for (let col = x; col < x + width; col++) {
+      if (collision.getTileAt(col, row)?.collides !== true) return false;
+    }
+  }
+  return true;
+}
+
+function drawWayfinding(scene: Phaser.Scene, tileX: number, tileY: number, label: string): void {
+  scene.add.text(tileX * TILE_SIZE_PX, tileY * TILE_SIZE_PX, label, {
+    fontFamily: 'Dotum, "Malgun Gothic", sans-serif', fontSize: "12px",
+    color: "#f4e9cd", backgroundColor: "#352a1e", padding: { x: 8, y: 4 },
+  }).setOrigin(0.5, 1).setDepth(2);
 }

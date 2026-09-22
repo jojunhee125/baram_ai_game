@@ -23,7 +23,7 @@ manifest의 `format: "native60"`은 기존 계약 식별자다. 이 asset의 해
 
 `avatar-manifest.spec.ts`는 현재 경로·313px crop·404 mock·프레임별 foot 검증에 맞춰 갱신되었다. 2026-09-22 로컬 재실행 결과: `npm test -- avatar-manifest.spec.ts` **13 passed (25.2s)**, client typecheck·build 통과.
 
-이전 `heritage-first-play` 2개 테스트 중 KeyH 귀환 단계에서 1개가 실패했다. 원인은 `[needs verification]`이며 해결 또는 전체 회귀 통과로 처리하지 않는다.
+이전 `heritage-first-play` 2개 테스트 중 KeyH 귀환 단계에서 1개가 실패했다. 2026-09-22 후속 조사(`297e7ba`)에서는 원본 2개와 귀환 시나리오 반복 10회가 모두 통과했다. 과거 실패 trace가 없고 원인은 `[needs verification]`이므로 코드 수정·해결 또는 전체 회귀 통과로 처리하지 않는다. [재현 조사 기록](implementation-2026-09-22-keyh-investigation.md)
 
 ## Legacy 제작 원본과 재생성
 

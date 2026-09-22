@@ -43,7 +43,7 @@ describe("TiledMapLoader.load — the real plaza map", () => {
     }
   });
 
-  it("counts 539 walkable tiles out of 2240", () => {
+  it("counts 498 walkable tiles out of 2240 in the south-gate village", () => {
     let walkable = 0;
     for (let tileY = 0; tileY < map.heightInTiles; tileY++) {
       for (let tileX = 0; tileX < map.widthInTiles; tileX++) {
@@ -52,7 +52,7 @@ describe("TiledMapLoader.load — the real plaza map", () => {
         }
       }
     }
-    assert.equal(walkable, 539);
+    assert.equal(walkable, 498);
   });
 
   it("walls off the entire perimeter", () => {

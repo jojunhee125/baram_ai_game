@@ -481,13 +481,20 @@ describe("MetaverseRoom — entering an object", () => {
         objectId: SHOP_NPC.id,
         title: SHOP_NPC.title,
         body: SHOP_NPC.body,
-        blocksMovement: true,
+        blocksMovement: SHOP_NPC.blocksMovement !== false,
         quests: undefined,
         shop: {
           listings: SHOP.listings.map((listing) => {
             const item = ITEM_DEFINITIONS.find((candidate) => candidate.key === listing.itemKey);
             assert.ok(item, `"${listing.itemKey}" is not in ITEM_DEFINITIONS`);
-            return { itemKey: listing.itemKey, name: item.name, icon: item.icon, price: listing.price };
+            return {
+              itemKey: listing.itemKey,
+              name: item.name,
+              icon: item.icon,
+              price: listing.price,
+              ...(item.equipment?.stats.attackDamage === undefined ? {} : { attackBonus: item.equipment.stats.attackDamage }),
+              ...(item.equipment?.stats.damageReduction === undefined ? {} : { damageReductionRatio: item.equipment.stats.damageReduction }),
+            };
           }),
         },
       },

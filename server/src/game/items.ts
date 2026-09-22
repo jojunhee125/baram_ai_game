@@ -48,6 +48,20 @@ export function validateItemDefinitions(
     if (item.icon.trim().length === 0) {
       errors.push(`${label} has an empty icon key`);
     }
+    if (item.sellValue !== undefined && (!Number.isSafeInteger(item.sellValue) || item.sellValue < 1)) {
+      errors.push(`${label} has a sellValue that is not a positive safe integer`);
+    }
+    if (item.equipment !== undefined) {
+      for (const [stat, value] of Object.entries(item.equipment.stats)) {
+        if (stat === "damageReduction") {
+          if (!Number.isFinite(value) || value <= 0 || value >= 1) {
+            errors.push(`${label} has a damageReduction outside (0, 1)`);
+          }
+        } else if ((stat !== "attackDamage" && stat !== "maxHp") || !Number.isSafeInteger(value) || value < 1) {
+          errors.push(`${label} has an invalid equipment stat "${stat}"`);
+        }
+      }
+    }
   }
 
   if (!Number.isInteger(maxDistinctItems) || maxDistinctItems < 1) {

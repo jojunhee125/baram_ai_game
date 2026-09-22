@@ -26,6 +26,7 @@ import { MetaverseRoom } from "./rooms/metaverseRoom";
 import {
   MONSTER_SPAWN_DEFINITIONS,
   MONSTER_TYPES,
+  monsterTypesForRoom,
   validateMonsterSpawnDefinitions,
 } from "./rooms/monsterDefinitions";
 import { PORTAL_DEFINITIONS } from "./rooms/portalDefinitions";
@@ -263,6 +264,7 @@ async function validateRoomMaps(): Promise<void> {
     mapsByRoom,
     PORTAL_DEFINITIONS,
     INTERACTABLE_DEFINITIONS,
+    monsterTypesForRoom,
   );
   for (const warning of monsters.warnings) {
     console.warn(`[zep-test] ${warning}`);

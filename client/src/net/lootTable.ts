@@ -14,12 +14,15 @@ export interface LootTableDrop {
   name: string;
   icon: string;
   chancePercent: number;
+  quantity: number;
+  sellValue?: number;
 }
 
 /** One monster kind and its full loot table. */
 export interface LootTableMonster {
   kind: string;
   name: string;
+  expReward: number;
   drops: readonly LootTableDrop[];
 }
 
@@ -59,6 +62,7 @@ function isLootTableMonster(row: unknown): row is LootTableMonster {
   return (
     typeof monster?.kind === "string" &&
     typeof monster.name === "string" &&
+    Number.isInteger(monster.expReward) && monster.expReward! > 0 &&
     Array.isArray(monster.drops) &&
     monster.drops.every(isLootTableDrop)
   );
@@ -71,6 +75,8 @@ function isLootTableDrop(row: unknown): row is LootTableDrop {
     typeof drop.name === "string" &&
     typeof drop.icon === "string" &&
     typeof drop.chancePercent === "number" &&
-    Number.isFinite(drop.chancePercent)
+    Number.isFinite(drop.chancePercent) &&
+    Number.isInteger(drop.quantity) && drop.quantity! > 0 &&
+    (drop.sellValue === undefined || (Number.isInteger(drop.sellValue) && drop.sellValue >= 0))
   );
 }

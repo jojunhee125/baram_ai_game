@@ -106,22 +106,23 @@ describe("ITEM_DEFINITIONS", () => {
     assert.ok(ITEM_DEFINITIONS.length > 0);
   });
 
-  it("holds exactly the keys of design appendix D-4 plus Phase I's golden-helmet, in that order", () => {
+  it("preserves original catalogue keys and appends progression equipment and saleable loot", () => {
     // Pinned rather than merely spot-checked, because two other things are indexed by it: Pass D
     // refuses to boot on a `MONSTER_TYPES.loot` key that is not here, and the client picks an
     // `items.png` frame by position in `ITEM_ICON_ORDER`. A key edited here without those is a
     // boot refusal; a row reordered here without those is every icon drawn as the wrong item.
     assert.deepEqual(
       ITEM_DEFINITIONS.map((definition) => definition.key),
-      ["acorn", "carrot", "copper-coin", "herb", "old-dagger", "entry-pass", "leather-armor", "golden-helmet"],
+      ["acorn", "carrot", "copper-coin", "herb", "old-dagger", "entry-pass", "leather-armor", "golden-helmet",
+        "den-fur", "antler", "hunting-blade", "iron-blade", "padded-armor", "reinforced-armor"],
     );
   });
 
-  it("names every item, and gives each icon the same string as its key", () => {
-    // The equality is today's arrangement rather than a rule — the fields stay separate so art
-    // can be shared later (design D-3) — but while it holds, a mismatch is a typo.
+  it("names every item and keeps explicit icon aliases for progression items", () => {
+    const aliases: Record<string, string> = { "hunting-blade": "old-dagger", "iron-blade": "old-dagger",
+      "padded-armor": "leather-armor", "reinforced-armor": "leather-armor", "den-fur": "acorn", antler: "carrot" };
     for (const definition of ITEM_DEFINITIONS) {
-      assert.equal(definition.icon, definition.key, definition.key);
+      assert.equal(definition.icon, aliases[definition.key] ?? definition.key, definition.key);
       assert.ok(definition.name.trim().length > 0, definition.key);
     }
   });

@@ -51,8 +51,13 @@ export interface LootEntry {
  * (`hpMax`) rides along on every `MonsterHit`, so the client never holds a stat table that can
  * fall behind the server's.
  */
+export type MonsterBehavior = "aggressive" | "timid";
+
 export interface MonsterType {
   kind: MonsterKind;
+  /** Absent keeps the original aggressive behavior for fixtures and unconfigured rooms. */
+  behavior?: MonsterBehavior;
+  fleeStepIntervalMs?: number;
   maxHp: number;
   damage: number;
   attackCooldownMs: number;
@@ -244,6 +249,68 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
   ],
 ]);
 
+const FIELD_MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map(
+  [...MONSTER_TYPES].map(([kind, type]) => [
+    kind,
+    kind === MonsterKind.Squirrel ? { ...type, behavior: "timid", fleeStepIntervalMs: 1000 } : type,
+  ]),
+);
+
+const DEN_MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map(
+  [...MONSTER_TYPES].map(([kind, type]) => {
+    switch (kind) {
+      case MonsterKind.Rabbit:
+        return [kind, {
+          ...type,
+          maxHp: 48,
+          damage: 9,
+          expReward: 20,
+          behavior: "aggressive",
+          aggroRadiusTiles: 3,
+          loot: [
+            { itemKey: "den-fur", chance: 0.75, quantity: 1 },
+            { itemKey: "copper-coin", chance: 0.25, quantity: 1 },
+            { itemKey: "herb", chance: 0.1, quantity: 1 },
+            { itemKey: "hunting-blade", chance: 0.03, quantity: 1 },
+          ],
+        }];
+      case MonsterKind.Deer:
+        return [kind, {
+          ...type,
+          maxHp: 80,
+          damage: 13,
+          expReward: 32,
+          behavior: "aggressive",
+          aggroRadiusTiles: 3,
+          loot: [
+            { itemKey: "antler", chance: 0.7, quantity: 1 },
+            { itemKey: "copper-coin", chance: 0.35, quantity: 1 },
+            { itemKey: "herb", chance: 0.15, quantity: 1 },
+            { itemKey: "reinforced-armor", chance: 0.03, quantity: 1 },
+            { itemKey: "iron-blade", chance: 0.02, quantity: 1 },
+          ],
+        }];
+      case MonsterKind.Boss:
+        return [kind, {
+          ...type,
+          loot: [
+            { itemKey: "golden-helmet", chance: 0.25, quantity: 1 },
+            { itemKey: "iron-blade", chance: 0.5, quantity: 1 },
+          ],
+        }];
+      default:
+        return [kind, type];
+    }
+  }),
+);
+
+export function monsterTypesForRoom(roomName: string | undefined): ReadonlyMap<MonsterKind, MonsterType> {
+  if (roomName === "hunting-ground") {
+    return FIELD_MONSTER_TYPES;
+  }
+  return roomName === "hunting-den" ? DEN_MONSTER_TYPES : MONSTER_TYPES;
+}
+
 /**
  * One spawn point, which owns at most one living monster. Population is therefore the length of
  * the table below and not a runtime value: there is no spawner period and no per-area cap, so
@@ -324,8 +391,8 @@ export const MONSTER_SPAWN_DEFINITIONS: readonly MonsterSpawnDefinition[] = [
   // -- hunting-den, Phase E's second room. Launched rabbits-only (`docs/design-phase-e-second-hunting-ground.md`
   // §4); Phase S (`docs/roadmap.md` row S) swapped in deer at every other spawn point — interleaved
   // 5:5, not clustered, so the room doesn't read as having a "harder" corner. 20 + 10 = 30, the
-  // PoC #3 population cap, reached exactly. Positions and wanderRadiusTiles are unchanged from
-  // launch; only kind and id were touched (ids renumbered so the rabbit sequence stays contiguous).
+  // PoC #3 population cap, reached exactly. The regional aggro-3 variant narrows ordinary wander
+  // to 1 and moves hd-rabbit-04 to (25,19), keeping the complete arrival spread outside aggro.
   //
   // Nothing spawns at y >= 24, for hunting-ground's own reason: a player arriving through the
   // south door must not land in a fight already in progress. Coordinates were checked against
@@ -334,16 +401,16 @@ export const MONSTER_SPAWN_DEFINITIONS: readonly MonsterSpawnDefinition[] = [
   // placeholder (32, 18) to (35, 18): the placeholder sat on the trail (map x 31-32, the
   // full-height dirt path connecting both doors), which the design flagged as a coder judgement
   // call rather than something the boot validator would catch.
-  { id: "hd-rabbit-01", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 21, tileY: 12 }, wanderRadiusTiles: 3 },
-  { id: "hd-deer-01", room: "hunting-den", kind: MonsterKind.Deer, at: { tileX: 27, tileY: 11 }, wanderRadiusTiles: 3 },
-  { id: "hd-rabbit-02", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 33, tileY: 13 }, wanderRadiusTiles: 3 },
-  { id: "hd-deer-02", room: "hunting-den", kind: MonsterKind.Deer, at: { tileX: 39, tileY: 11 }, wanderRadiusTiles: 3 },
-  { id: "hd-rabbit-03", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 44, tileY: 13 }, wanderRadiusTiles: 3 },
-  { id: "hd-deer-03", room: "hunting-den", kind: MonsterKind.Deer, at: { tileX: 20, tileY: 19 }, wanderRadiusTiles: 3 },
-  { id: "hd-rabbit-04", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 26, tileY: 20 }, wanderRadiusTiles: 3 },
-  { id: "hd-deer-04", room: "hunting-den", kind: MonsterKind.Deer, at: { tileX: 35, tileY: 18 }, wanderRadiusTiles: 3 },
-  { id: "hd-rabbit-05", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 38, tileY: 20 }, wanderRadiusTiles: 3 },
-  { id: "hd-deer-05", room: "hunting-den", kind: MonsterKind.Deer, at: { tileX: 43, tileY: 19 }, wanderRadiusTiles: 3 },
+  { id: "hd-rabbit-01", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 21, tileY: 12 }, wanderRadiusTiles: 1 },
+  { id: "hd-deer-01", room: "hunting-den", kind: MonsterKind.Deer, at: { tileX: 27, tileY: 11 }, wanderRadiusTiles: 1 },
+  { id: "hd-rabbit-02", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 33, tileY: 13 }, wanderRadiusTiles: 1 },
+  { id: "hd-deer-02", room: "hunting-den", kind: MonsterKind.Deer, at: { tileX: 39, tileY: 11 }, wanderRadiusTiles: 1 },
+  { id: "hd-rabbit-03", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 44, tileY: 13 }, wanderRadiusTiles: 1 },
+  { id: "hd-deer-03", room: "hunting-den", kind: MonsterKind.Deer, at: { tileX: 20, tileY: 19 }, wanderRadiusTiles: 1 },
+  { id: "hd-rabbit-04", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 25, tileY: 19 }, wanderRadiusTiles: 1 },
+  { id: "hd-deer-04", room: "hunting-den", kind: MonsterKind.Deer, at: { tileX: 35, tileY: 18 }, wanderRadiusTiles: 1 },
+  { id: "hd-rabbit-05", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 38, tileY: 20 }, wanderRadiusTiles: 1 },
+  { id: "hd-deer-05", room: "hunting-den", kind: MonsterKind.Deer, at: { tileX: 43, tileY: 19 }, wanderRadiusTiles: 1 },
   // -- Bosses (Phase I, design-phase-i-boss-monster.md §3, §11.2). One per room, `wanderRadiusTiles`
   // matched to rabbit/deer's own 3. Coordinates were checked against the actual map files
   // (`assets/maps/hunting-ground.json` / `assets/maps/hunting-den.json`): each sits at least 6
@@ -392,12 +459,14 @@ export function validateMonsterSpawnDefinitions(
   mapsByRoom: ReadonlyMap<string, CollisionMap>,
   portals: readonly PortalDefinition[],
   interactables: readonly InteractableDefinition[],
+  typesForRoom: (roomName: string) => ReadonlyMap<MonsterKind, MonsterType> = () => types,
 ): MonsterValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
 
   const itemsByKey = new Map(items.map((item) => [item.key, item]));
-  for (const [kind, type] of types) {
+  const regionalTypes = new Set([types, ...[...mapsByRoom.keys()].map(typesForRoom)]);
+  for (const [kind, type] of [...regionalTypes].flatMap((table) => [...table])) {
     const label = `monster type "${kind}"`;
     if (type.kind !== kind) {
       // The map key is what a spawn row names and `type.kind` is what the wire carries, so a
@@ -409,8 +478,19 @@ export function validateMonsterSpawnDefinitions(
       // 0, a negative amount or a fraction is a typo that boot should catch, not `awardExp`.
       errors.push(`${label} has an expReward of ${type.expReward}, which is not a positive integer`);
     }
+    if (type.behavior !== undefined && type.behavior !== "aggressive" && type.behavior !== "timid") {
+      errors.push(`${label} has an unknown behavior "${type.behavior}"`);
+    }
+    if (type.behavior === "timid" && (!Number.isInteger(type.fleeStepIntervalMs) || (type.fleeStepIntervalMs ?? 0) <= 0)) {
+      errors.push(`${label} needs a positive integer fleeStepIntervalMs for timid behavior`);
+    }
+    const seenLootKeys = new Set<string>();
     for (const [index, entry] of type.loot.entries()) {
       const line = `${label} loot row ${index}`;
+      if (seenLootKeys.has(entry.itemKey)) {
+        errors.push(`${line} duplicates item "${entry.itemKey}"`);
+      }
+      seenLootKeys.add(entry.itemKey);
       const item = itemsByKey.get(entry.itemKey);
       if (item === undefined) {
         errors.push(`${line} drops "${entry.itemKey}", which is not in the item catalogue`);
@@ -460,7 +540,7 @@ export function validateMonsterSpawnDefinitions(
       seenIds.add(spawn.id);
     }
 
-    const type = types.get(spawn.kind);
+    const type = typesForRoom(spawn.room).get(spawn.kind);
     if (type === undefined) {
       errors.push(`${label} is of kind "${spawn.kind}", which has no entry in MONSTER_TYPES`);
     } else {

@@ -73,12 +73,6 @@ const CLIENT_STEP_INTERVAL_MS = PATCH_RATE_MS + 20;
 const CORRIDOR_ROW = 20;
 const CORRIDOR_MIN_X = 16;
 const CORRIDOR_MAX_X = 47;
-/**
- * The 4x4 fountain block in plaza.json spans x=30..33, y=15..18. This is its *bottom* left
- * tile — the edge a player walking up from the spawn row runs into — so `tileY + 1` is the
- * last walkable tile of that approach.
- */
-const FOUNTAIN_BOTTOM_LEFT = { tileX: 30, tileY: 18 };
 
 /**
  * 17 UTF-16 code units, so truncating at MAX_NICKNAME_LENGTH (16) cuts the last emoji in
@@ -723,29 +717,17 @@ describe("MetaverseRoom — movement authority", () => {
     assertEmpty(bobInbox.rejects, "MoveRejected goes only to the refused mover");
   });
 
-  it("rejects a step into the fountain", async () => {
+  it("rejects a step into the building beside the open south gate", async () => {
     const room = await createPlaza();
     const alice = await join(room, "alice");
     const inbox = collect(alice);
-
-    const stepsToFountain = plaza.spawn.tileY - FOUNTAIN_BOTTOM_LEFT.tileY - 1;
-    await stepMany(alice, Direction.Up, stepsToFountain);
-    await expectServerAt(
-      room,
-      alice,
-      plaza.spawn.tileX,
-      FOUNTAIN_BOTTOM_LEFT.tileY + 1,
-      "alice walks up to the fountain edge",
-    );
-
-    alice.send(ClientMessage.Move, { dir: Direction.Up });
-    await waitUntil(() => inbox.rejects.length === 1, "the fountain refusal");
-    assert.deepEqual(inbox.rejects[0], {
-      tileX: plaza.spawn.tileX,
-      tileY: FOUNTAIN_BOTTOM_LEFT.tileY + 1,
-      facing: Direction.Up,
-    });
-    assert.equal(serverPlayer(room, alice.sessionId).tileY, FOUNTAIN_BOTTOM_LEFT.tileY + 1);
+    await stepMany(alice, Direction.Down, 3);
+    await stepMany(alice, Direction.Left, 2);
+    await expectServerAt(room, alice, 29, 23, "beside the south gate building");
+    alice.send(ClientMessage.Move, { dir: Direction.Left });
+    await waitUntil(() => inbox.rejects.length === 1, "the wall refusal");
+    assert.deepEqual(inbox.rejects[0], { tileX: 29, tileY: 23, facing: Direction.Left });
+    assert.equal(serverPlayer(room, alice.sessionId).tileY, 23);
   });
 
   it("ignores malformed move payloads without moving, turning or answering", async () => {

@@ -427,6 +427,8 @@ describe("VERIFY handleAttack", () => {
         quantity: 2,
         total: 2,
         damageReductionRatio: undefined,
+        sellValue: 4,
+        consumable: undefined,
       });
       assert.deepEqual(await store.list("sso-user-1"), [{ itemKey: "acorn", quantity: 2, equipped: false }]);
       assert.deepEqual(await store.list("attacker"), [], "credited to the account, not the session");

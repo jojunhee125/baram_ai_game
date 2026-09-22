@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ITEM_DEFINITIONS } from "./itemDefinitions";
 import { buildLootTableView, MONSTER_DISPLAY_NAMES } from "./lootTableView";
-import { MONSTER_SPAWN_DEFINITIONS, MONSTER_TYPES, type MonsterKind } from "./monsterDefinitions";
+import { MONSTER_SPAWN_DEFINITIONS, MONSTER_TYPES, monsterTypesForRoom, type MonsterKind } from "./monsterDefinitions";
 
 /** hunting-ground is the one room with spawn rows of both kinds (see monsterDefinitions.ts). */
 const HUNTING_GROUND = "hunting-ground";
@@ -31,6 +31,7 @@ describe("buildLootTableView", () => {
     for (const view of views) {
       const type = MONSTER_TYPES.get(view.kind as MonsterKind)!;
       assert.equal(view.name, MONSTER_DISPLAY_NAMES[view.kind as MonsterKind]);
+      assert.equal(view.expReward, type.expReward);
       assert.equal(view.drops.length, type.loot.length);
       // Drop order follows the monster type's own loot array, not ITEM_DEFINITIONS' order —
       // those two orderings differ today (acorn, carrot, copper-coin, herb, old-dagger).
@@ -43,6 +44,8 @@ describe("buildLootTableView", () => {
         const item = itemsByKey.get(entry.itemKey)!;
         assert.equal(drop.name, item.name);
         assert.equal(drop.icon, item.icon);
+        assert.equal(drop.quantity, entry.quantity);
+        assert.equal(drop.sellValue, item.sellValue);
       }
     }
   });
@@ -64,6 +67,22 @@ describe("buildLootTableView", () => {
   it("returns an empty array for a room with no monster spawns", async () => {
     assert.deepEqual(buildLootTableView("grand-plaza"), []);
     assert.deepEqual(buildLootTableView("plaza"), []);
+  });
+
+  it("uses each room's effective loot and EXP without merging starter drops into the den", () => {
+    const denViews = buildLootTableView("hunting-den");
+    for (const view of denViews) {
+      const type = monsterTypesForRoom("hunting-den").get(view.kind as MonsterKind)!;
+      assert.equal(view.expReward, type.expReward);
+      assert.deepEqual(view.drops.map((drop) => drop.itemKey), type.loot.map((entry) => entry.itemKey));
+    }
+    const rabbit = denViews.find((view) => view.kind === "rabbit")!;
+    assert.equal(rabbit.expReward, 20);
+    assert.deepEqual(rabbit.drops.map((drop) => drop.itemKey), ["den-fur", "copper-coin", "herb", "hunting-blade"]);
+    const fieldRabbit = buildLootTableView(HUNTING_GROUND).find((view) => view.kind === "rabbit")!;
+    assert.equal(fieldRabbit.expReward, 2);
+    assert.ok(fieldRabbit.drops.some((drop) => drop.itemKey === "carrot"));
+    assert.ok(!fieldRabbit.drops.some((drop) => drop.itemKey === "den-fur"));
   });
 
   it("returns an empty array for a room name that does not exist at all", async () => {

@@ -44,8 +44,8 @@ export const INTERACTABLE_DEFINITIONS: readonly InteractableDefinition[] = [
         { tileX: 45, tileY: 23 },
       ],
     },
-    title: "공지사항 (자리표시)",
-    body: "여기에 공지 내용이 들어갑니다.\n\n줄바꿈은 그대로 유지되며, 관리자가 코드 테이블에서 작성합니다.",
+    title: "남문 길 안내",
+    body: "남쪽: 초보 들판\n북쪽: 대광장\n\n성문 앞 길잡이에게 임무를 받고 동쪽 상점에서 준비하세요. T 키로 지역 이동 목록을 확인할 수 있습니다.",
   },
   {
     id: "plaza-quiz-stand",
@@ -63,34 +63,21 @@ export const INTERACTABLE_DEFINITIONS: readonly InteractableDefinition[] = [
   {
     id: "plaza-hunting-ground-npc",
     kind: InteractableKind.Npc,
-    // One tile west of the north door's west trigger tile (31,8) — right beside the gate. Row 8
-    // has no shrub decorations (unlike rows 9/11), so this is open ground, not a boxed dead end;
-    // deliberate, since a guide NPC should be seen, not tucked away — see "좌표 확정 근거" above.
-    at: { room: "plaza", tiles: [{ tileX: 30, tileY: 8 }] },
-    title: "사냥터 안내",
-    body: "여기는 사냥터입니다. 몬스터가 서식하니 전투를 준비하세요.\n\n공격은 스페이스바, 가방은 I 키로 엽니다.",
+    // Guide beside the south gate, outside the main street.
+    at: { room: "plaza", tiles: [{ tileX: 29, tileY: 22 }] },
+    title: "남문 길잡이",
+    body: "남쪽 성문을 지나면 초보 들판입니다. 들판에서 입장권을 얻으면 북쪽 바위 사냥굴로 들어갈 수 있습니다.\n\n동쪽 상점에서 약초와 장비를 준비하세요. 공격은 Space, 가방은 I입니다.",
     avatarSkin: 21, // 백발 / 파랑 고글 / 주황 코트 (assets/README.md 스킨표) — 안내인 인상, 교체 쉬움
-    // On the north-door through-route, not a dead end (Phase T's own placement reasoning) — the
-    // BFS'd walk pattern client/e2e uses (pass-g/h/j specs) crosses this tile on every west-side
-    // detour around the fountain. Blocking movement here froze real travel, not just tests; this
-    // NPC is read-and-close only (no quiz-style follow-up state), so nothing is lost by letting a
-    // step carry straight through. docs/design-npc-movement-block-fix.md.
     blocksMovement: false,
   },
   {
     id: "plaza-shop-npc",
     kind: InteractableKind.Npc,
-    // South-east corner of the interior (x=47 is the last interior column, y=25 the last interior
-    // row) — bounded by the border band on both S and E, the same "corner against two walls" dead
-    // end plaza-quiz-stand already uses, just the opposite corner. Clear of the south door
-    // (trigger (31,25)/(32,25), 16 tiles west) and of every avoided band in this file's header
-    // comment (spawn row 20, column 16, the column-31 route to the south door).
-    at: { room: "plaza", tiles: [{ tileX: 47, tileY: 25 }] },
-    title: "상점",
-    // Promoted from the placeholder to real listing copy (roadmap R04-c, `shopDefinitions.ts`'s own
-    // SHOP_DEFINITIONS row for this NPC): the id and tile are unchanged, so no map or object-table
-    // migration is needed, only the words a player reads here.
-    body: "약초를 팔고 있습니다. 다치셨다면 하나 사서 챙겨 두세요.\n\n되팔기도 받습니다.",
+    // East-side shop remains non-blocking on the home street.
+    blocksMovement: false,
+    at: { room: "plaza", tiles: [{ tileX: 35, tileY: 20 }] },
+    title: "남문 상점",
+    body: "약초와 사냥 장비를 팝니다. 첫 임무 보상으로 낡은 단검을 마련하고 더 강한 검과 갑옷을 준비하세요.\n\n전리품은 가방의 판매 버튼으로 바꿀 수 있습니다.",
     avatarSkin: 16, // 갈색 머리 / 빨강 상의 (assets/README.md 스킨표) — 안내 NPC(21)와 겹치지 않는 인상
   },
   {
@@ -113,7 +100,7 @@ export const INTERACTABLE_DEFINITIONS: readonly InteractableDefinition[] = [
     blocksMovement: false,
     at: { room: "hunting-ground", tiles: [{ tileX: 39, tileY: 29 }] },
     title: "마을로 돌아가는 길",
-    body: "남쪽 문을 나가면 마을 광장입니다.\n\n다치셨다면 광장으로 돌아가 회복하세요.",
+    body: "남쪽 문을 나가면 남문 마을입니다.\n\n길잡이에게 임무를 보고하고 상점에서 장비를 준비하세요.",
     avatarSkin: 22, // 어두운 피부 / 갈색 머리 / 파랑 셔츠 (assets/README.md 스킨표) — 안내 NPC(21)·상점 NPC(16)와 겹치지 않는 인상
   },
 ];

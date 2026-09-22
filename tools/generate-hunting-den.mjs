@@ -39,6 +39,7 @@ const BORDER = cameraBorderTiles(VIEWPORT_WIDTH_TILES, VIEWPORT_HEIGHT_TILES);
 /** Tile ids in plaza-tiles.png: 0-7 walkable, 8-15 `collides: true` (assets/README.md). */
 const TILE = {
   stoneFloor: 0,
+  stoneCracked: 1,
   grass: 2,
   woodDeck: 3,
   dirtPath: 4,
@@ -53,9 +54,9 @@ const TILE = {
 };
 
 const GROUND_LEGEND = {
-  g: TILE.grass,
-  f: TILE.flowerGrass,
-  d: TILE.dirtPath,
+  g: TILE.stoneFloor,
+  f: TILE.stoneCracked,
+  d: TILE.stoneCracked,
   s: TILE.sand,
   w: TILE.woodDeck,
 };
@@ -72,10 +73,10 @@ const OPAQUE_BLOCKERS = new Set([TILE.brickWall, TILE.brickCorner, TILE.water]);
 const BOUNDARY_RING_DEPTH = 2;
 
 const COLLISION_LEGEND = {
-  P: TILE.treeStump,
-  H: TILE.bush,
+  P: TILE.mossyRock,
+  H: TILE.mossyRock,
   N: TILE.mossyRock,
-  "~": TILE.water,
+  "~": TILE.mossyRock,
 };
 
 /** In COLLISION_ROWS only: no tile at all (gid 0), i.e. a walkable cell. */
@@ -89,7 +90,7 @@ const BLANK = ".";
  * (`docs/design-phase-e-second-hunting-ground.md` §3.1). Still wider and taller than one
  * screenful (32x18): a hunting ground is walked around rather than surveyed from the entrance.
  *
- * A clearing, not a maze, exactly like hunting-ground: rocks, stumps, bushes and one pond sit in
+ * An open rocky cave: stone ribs sit in
  * isolated 2-tile-deep clumps, with at least two open tiles between any two of them, between a
  * clump and the trail, and between a clump and the enclosing wall. `narrowPassages` below is that
  * spacing rule enforced, not trusted by eye.
@@ -132,9 +133,9 @@ const COLLISION_ROWS = [
   "..NN....PP..........HH....NN....",
   "................................",
   "................................",
+  "..NNNNNN..............NNNNNN....",
+  "..NNNNNN..............NNNNNN....",
   "................................",
-  ".....HH....NN......PP....HH.....",
-  ".....HH....NN......PP....HH.....",
   "................................",
   "................................",
   "................................",
@@ -150,15 +151,6 @@ const COLLISION_ROWS = [
 /* ------------------------------------------------------------ scenery ---- */
 
 /**
- * Fraction of the way out through the band at which each scenery layer ends, so every side shows
- * the same sequence even though the band is 16 tiles deep left and right but only 8 above and 9
- * below. Reading outwards: the rampart that encloses the ground, the forest it was cut out of, a
- * sandy shore and open water - identical to hunting-ground and plaza, since this is the same
- * coastline seen from further inland.
- */
-const BAND = { forest: 0.72, shore: 0.86 };
-
-/**
  * A value hash of one cell, used to break up the natural bands into something that does not read
  * as stripes. Pure integer arithmetic on the coordinates - no RNG state anywhere - so the map
  * stays byte-identical between runs and machines.
@@ -167,19 +159,6 @@ function scatter(x, y, salt) {
   let h = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(salt, 2246822519)) | 0;
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   return (h ^ (h >>> 16)) >>> 0;
-}
-
-function forestCell(x, y) {
-  const roll = scatter(x, y, 2) % 5;
-  return {
-    ground: roll === 4 ? TILE.dirtPath : TILE.grass,
-    collision: roll < 3 ? TILE.treeStump : TILE.bush,
-  };
-}
-
-function shoreCell(x, y) {
-  const roll = scatter(x, y, 3) % 4;
-  return { ground: TILE.sand, collision: roll === 0 ? TILE.mossyRock : TILE.bush };
 }
 
 /* ---------------------------------------------------------- geometry ---- */
@@ -281,14 +260,7 @@ function cellAt(x, y) {
     };
   }
 
-  const depthX = outX / (x < BORDER.left ? BORDER.left : BORDER.right);
-  const depthY = outY / (y < BORDER.top ? BORDER.top : BORDER.bottom);
-  // Mitred like a picture frame: whichever axis is further along its own band picks the layer, so
-  // the four sides meet along the diagonals.
-  const depth = Math.max(depthX, depthY);
-  if (depth <= BAND.forest) return forestCell(x, y);
-  if (depth <= BAND.shore) return shoreCell(x, y);
-  return { ground: TILE.sand, collision: TILE.water };
+  return { ground: TILE.stoneFloor, collision: scatter(x, y, 4) % 3 === 0 ? TILE.brickCorner : TILE.brickWall };
 }
 
 /* ----------------------------------------------------------- template ---- */

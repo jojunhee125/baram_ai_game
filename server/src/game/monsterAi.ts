@@ -152,6 +152,9 @@ export function decideMonsterAction(
   if (target === null) {
     return decideUnaggroed(snapshot, now, type);
   }
+  if (type.behavior === "timid") {
+    return decideFlee(snapshot, target, now, type);
+  }
 
   const distance = chebyshevDistance(snapshot, target);
   if (distance <= MONSTER_ATTACK_RANGE_TILES) {
@@ -185,6 +188,37 @@ export function decideMonsterAction(
     targetSessionId: target.sessionId,
     directions: greedyDirections(snapshot, target),
     nextStepAt: now + type.chaseStepIntervalMs,
+  };
+}
+
+function decideFlee(snapshot: MonsterSnapshot, target: MonsterTarget, now: number, type: MonsterType): MonsterAction {
+  if (now < snapshot.nextStepAt) {
+    return { kind: MonsterActionKind.Hold, state: MonsterAiState.Wander, targetSessionId: null };
+  }
+  const distance = chebyshevDistance(snapshot, target);
+  const axisDistance = Math.abs(snapshot.tileX - target.tileX) + Math.abs(snapshot.tileY - target.tileY);
+  const directions = WANDER_ROTATION.map((direction) => {
+    const delta = STEP_BY_DIRECTION[direction];
+    const destination = { tileX: snapshot.tileX + delta.dx, tileY: snapshot.tileY + delta.dy };
+    return {
+      direction,
+      distance: chebyshevDistance(destination, target),
+      axisDistance: Math.abs(destination.tileX - target.tileX) + Math.abs(destination.tileY - target.tileY),
+      homeDistance: chebyshevDistance(destination, snapshot.spawn),
+    };
+  }).filter((candidate) => candidate.homeDistance <= type.leashRadiusTiles
+    && candidate.distance >= distance && candidate.axisDistance > axisDistance)
+    .sort((left, right) => right.distance - left.distance || right.axisDistance - left.axisDistance)
+    .map((candidate) => candidate.direction);
+  if (directions.length === 0) {
+    return { kind: MonsterActionKind.Hold, state: MonsterAiState.Idle, targetSessionId: null };
+  }
+  return {
+    kind: MonsterActionKind.Step,
+    state: MonsterAiState.Wander,
+    targetSessionId: null,
+    directions,
+    nextStepAt: now + (type.fleeStepIntervalMs ?? type.wanderStepIntervalMs),
   };
 }
 

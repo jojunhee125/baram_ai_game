@@ -654,7 +654,7 @@ describe("INTERACTABLE_DEFINITIONS", () => {
     }
   });
 
-  it("keeps every object clear of the tiles the integration suite walks", () => {
+  it("keeps movement-blocking objects clear of the tiles the integration suite walks", () => {
     // Entering an object gates the client's movement and puts an unexpected message on the wire;
     // metaverseRoom.integration.test.ts asserts relative movement from plaza's spawn tile and
     // walks the whole of row 20 plus the column at x=16, so an object there would rewrite an
@@ -676,7 +676,7 @@ describe("INTERACTABLE_DEFINITIONS", () => {
     }
 
     for (const object of INTERACTABLE_DEFINITIONS) {
-      if (object.at.room !== "plaza") {
+      if (object.at.room !== "plaza" || object.blocksMovement === false) {
         continue;
       }
       for (const tile of object.at.tiles) {

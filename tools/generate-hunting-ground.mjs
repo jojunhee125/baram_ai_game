@@ -1,4 +1,4 @@
-// Builds the hunting ground map - the room behind plaza's north door - into
+// Builds the hunting ground map - the field reached through plaza's south gate - into
 // assets/maps/hunting-ground.json.
 //
 //   node tools/generate-hunting-ground.mjs        (cwd = code/)
@@ -109,8 +109,8 @@ const GROUND_ROWS = [
   "ggggggggggggggfggggddggggggggggggggggfgg",
   "gggggggggggggggggggddggggggggggggggggggg",
   "gfgggggggggggggggggddggggggggggfgggggggg",
-  "gggggggggggggggggggddgggfggggggggggggggg",
-  "gggggggggggfgggggggddggggggggggggggfgggg",
+  "gggggddddddddddddddddddddddddddddddggggg",
+  "gggggddddddddddddddddddddddddddddddfgggg",
   "gggggggggggggggggggddggggggggggggggggggg",
   "gggggfgggggggggggggddgggggggfggggggggggg",
   "gggggggggggggggggfgddggggggggggggfgggggg",
@@ -119,8 +119,8 @@ const GROUND_ROWS = [
   "ggggggggsssssggggggddggggggggggggggggggg",
   "ggggggggsssssggggggddggggggggggggggggggg",
   "ggggggggsssssggggggddgggggggggfggggggggg",
-  "gggfgggggggggggggggddgggggfggggggggggggg",
-  "gggggggggggggggggggddggggggggggggggggggg",
+  "gggfgddddddddddddddddddddddddddddddggggg",
+  "gggggddddddddddddddddddddddddddddddggggg",
   "gggggggggggggggggggddgfgggggggggggggggfg",
   "gggggggggggggggggggddggggggggggggggggggg",
   "gggggggggggggggggddddddggggggggggggggggg",

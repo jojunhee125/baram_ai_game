@@ -14,6 +14,8 @@ import { markDatabaseDegraded, markDatabaseOk } from "./status";
  * (design §6.4).
  */
 export interface InventoryStore {
+  /** Production stores publish committed equipment changes to every live room of this owner. */
+  subscribeEquipment?(ownerKey: string, listener: EquipmentListener): () => void;
   /**
    * Everything held. The order is whatever the backing gives, deliberately: display order is
    * `ITEM_DEFINITIONS` order and the caller applies it, so nothing here can quietly become the
@@ -73,13 +75,41 @@ export interface InventoryStore {
 
   /**
    * Removes `quantity` and answers the total afterwards, or `null` when the account does not hold
-   * that many (roadmap R04-c, design `docs/r04-settlement.md` §9 D10) — `CurrencyStore.debit`'s own
+   * that many or the item is equipped (roadmap R04-c, design `docs/r04-settlement.md` §9 D10) — `CurrencyStore.debit`'s own
    * "insufficient is a result, not a fault" convention. A single statement (a conditional UPDATE),
    * `add`'s own reason: two tabs of one account spending the same consumable must not have their
    * check and their debit come apart. `quantity` must be a positive integer; anything else is a
    * caller bug and rejects.
    */
   remove(ownerKey: string, itemKey: string, quantity: number): Promise<number | null>;
+}
+
+export type EquipmentListener = (slot: EquipmentSlot, itemKey: string | null) => void;
+
+class EquipmentSubscriptions {
+  private readonly listeners = new Map<string, Set<EquipmentListener>>();
+
+  subscribe(ownerKey: string, listener: EquipmentListener): () => void {
+    const group = this.listeners.get(ownerKey) ?? new Set<EquipmentListener>();
+    group.add(listener);
+    this.listeners.set(ownerKey, group);
+    return () => {
+      group.delete(listener);
+      if (group.size === 0) {
+        this.listeners.delete(ownerKey);
+      }
+    };
+  }
+
+  publish(ownerKey: string, slot: EquipmentSlot, itemKey: string | null): void {
+    for (const listener of this.listeners.get(ownerKey) ?? []) {
+      try {
+        listener(slot, itemKey);
+      } catch (cause) {
+        console.warn(`[zep-test] could not publish equipment change for ${ownerKey}`, cause);
+      }
+    }
+  }
 }
 
 export interface InventoryRow {
@@ -146,6 +176,11 @@ function isUniqueViolation(cause: unknown): boolean {
 export class InMemoryInventoryStore implements InventoryStore {
   private readonly bagsByOwner = new Map<string, Map<string, number>>();
   private readonly equippedByOwner = new Map<string, Map<EquipmentSlot, string>>();
+  private readonly equipmentSubscriptions = new EquipmentSubscriptions();
+
+  subscribeEquipment(ownerKey: string, listener: EquipmentListener): () => void {
+    return this.equipmentSubscriptions.subscribe(ownerKey, listener);
+  }
 
   list(ownerKey: string): Promise<readonly InventoryRow[]> {
     const bag = this.bagsByOwner.get(ownerKey);
@@ -210,12 +245,17 @@ export class InMemoryInventoryStore implements InventoryStore {
       this.equippedByOwner.set(ownerKey, slots);
     }
     slots.set(slot, itemKey);
+    this.equipmentSubscriptions.publish(ownerKey, slot, itemKey);
     return Promise.resolve(true);
   }
 
   unequip(ownerKey: string, slot: EquipmentSlot): Promise<boolean> {
     const slots = this.equippedByOwner.get(ownerKey);
-    return Promise.resolve(slots?.delete(slot) ?? false);
+    const applied = slots?.delete(slot) ?? false;
+    if (applied) {
+      this.equipmentSubscriptions.publish(ownerKey, slot, null);
+    }
+    return Promise.resolve(applied);
   }
 
   remove(ownerKey: string, itemKey: string, quantity: number): Promise<number | null> {
@@ -226,7 +266,7 @@ export class InMemoryInventoryStore implements InventoryStore {
     }
     const bag = this.bagsByOwner.get(ownerKey);
     const held = bag?.get(itemKey);
-    if (bag === undefined || held === undefined || held < quantity) {
+    if (bag === undefined || held === undefined || held < quantity || this.isEquipped(ownerKey, itemKey)) {
       return Promise.resolve(null);
     }
     const total = held - quantity;
@@ -249,6 +289,11 @@ export class InMemoryInventoryStore implements InventoryStore {
     return this.bagsByOwner.get(ownerKey) ?? EMPTY_BAG;
   }
 
+  /** Synchronous so settlement cannot yield between checking equipment and committing a debit. */
+  isEquipped(ownerKey: string, itemKey: string): boolean {
+    return [...(this.equippedByOwner.get(ownerKey)?.values() ?? [])].includes(itemKey);
+  }
+
   /** The write half of {@link peekBag} — same caller, same reason. */
   pokeBag(ownerKey: string, bag: ReadonlyMap<string, number>): void {
     this.bagsByOwner.set(ownerKey, new Map(bag));
@@ -258,6 +303,25 @@ export class InMemoryInventoryStore implements InventoryStore {
 const EMPTY_BAG: ReadonlyMap<string, number> = new Map();
 
 export class PostgresInventoryStore implements InventoryStore {
+  private readonly equipmentSubscriptions = new EquipmentSubscriptions();
+  private readonly equipmentQueueByOwner = new Map<string, Promise<unknown>>();
+
+  subscribeEquipment(ownerKey: string, listener: EquipmentListener): () => void {
+    return this.equipmentSubscriptions.subscribe(ownerKey, listener);
+  }
+
+  private queueEquipment(ownerKey: string, run: () => Promise<boolean>): Promise<boolean> {
+    const previous = this.equipmentQueueByOwner.get(ownerKey) ?? Promise.resolve();
+    const next = previous.then(run, run);
+    this.equipmentQueueByOwner.set(ownerKey, next);
+    const cleanup = () => {
+      if (this.equipmentQueueByOwner.get(ownerKey) === next) {
+        this.equipmentQueueByOwner.delete(ownerKey);
+      }
+    };
+    void next.then(cleanup, cleanup);
+    return next;
+  }
   /**
    * `Pick<Pool, "query">` rather than `Pool` itself — `CurrencyStore`'s own reason
    * (`currencyStore.ts`): `SettlementStore.settle` (`settlementStore.ts`, design
@@ -342,6 +406,10 @@ export class PostgresInventoryStore implements InventoryStore {
 
   async equip(ownerKey: string, itemKey: string, slot: EquipmentSlot): Promise<boolean> {
     assertUuidOwnerKey(ownerKey);
+    return this.queueEquipment(ownerKey, () => this.equipWithinQueue(ownerKey, itemKey, slot));
+  }
+
+  private async equipWithinQueue(ownerKey: string, itemKey: string, slot: EquipmentSlot): Promise<boolean> {
     // The `item_key <> $2` guard on `cleared` is required, not cosmetic: without it, equipping an
     // already-equipped item back into the same slot would have `cleared` and the final UPDATE both
     // target the same row in the same statement, which Postgres defines as an error (or, worse, an
@@ -359,7 +427,7 @@ export class PostgresInventoryStore implements InventoryStore {
     try {
       const result = await this.executor.query<{ item_key: string }>(
         `WITH target AS (
-           SELECT 1 FROM inventory_item WHERE owner_key = $1 AND item_key = $2
+           SELECT 1 FROM inventory_item WHERE owner_key = $1 AND item_key = $2 FOR UPDATE
          ),
          cleared AS (
            UPDATE inventory_item SET equipped_slot = NULL
@@ -371,6 +439,9 @@ export class PostgresInventoryStore implements InventoryStore {
         [ownerKey, itemKey, slot],
       );
       markDatabaseOk();
+      if (result.rows.length > 0) {
+        this.equipmentSubscriptions.publish(ownerKey, slot, itemKey);
+      }
       return result.rows.length > 0;
     } catch (cause) {
       if (isUniqueViolation(cause)) {
@@ -384,11 +455,16 @@ export class PostgresInventoryStore implements InventoryStore {
 
   async unequip(ownerKey: string, slot: EquipmentSlot): Promise<boolean> {
     assertUuidOwnerKey(ownerKey);
-    const result = await this.query<{ item_key: string }>(
-      `UPDATE inventory_item SET equipped_slot = NULL WHERE owner_key = $1 AND equipped_slot = $2 RETURNING item_key`,
-      [ownerKey, slot],
-    );
-    return result.rows.length > 0;
+    return this.queueEquipment(ownerKey, async () => {
+      const result = await this.query<{ item_key: string }>(
+        `UPDATE inventory_item SET equipped_slot = NULL WHERE owner_key = $1 AND equipped_slot = $2 RETURNING item_key`,
+        [ownerKey, slot],
+      );
+      if (result.rows.length > 0) {
+        this.equipmentSubscriptions.publish(ownerKey, slot, null);
+      }
+      return result.rows.length > 0;
+    });
   }
 
   async remove(ownerKey: string, itemKey: string, quantity: number): Promise<number | null> {
@@ -404,11 +480,11 @@ export class PostgresInventoryStore implements InventoryStore {
     const result = await this.query<{ quantity: number }>(
       `WITH removed AS (
          DELETE FROM inventory_item
-         WHERE owner_key = $1 AND item_key = $2 AND quantity = $3
+         WHERE owner_key = $1 AND item_key = $2 AND quantity = $3 AND equipped_slot IS NULL
          RETURNING 0 AS quantity
        ), updated AS (
          UPDATE inventory_item SET quantity = quantity - $3
-         WHERE owner_key = $1 AND item_key = $2 AND quantity > $3
+         WHERE owner_key = $1 AND item_key = $2 AND quantity > $3 AND equipped_slot IS NULL
          RETURNING quantity
        )
        SELECT quantity FROM removed

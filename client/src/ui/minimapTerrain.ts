@@ -13,8 +13,12 @@ type Rgb = readonly [number, number, number];
  * Fixed in both colour schemes, like the in-world portal pad and the chat panel: this sits on
  * the game canvas, which is the same pixel art whatever the OS theme says.
  */
-const FLOOR: Rgb = [58, 57, 80];
-const WALL: Rgb = [20, 19, 26];
+const FLOOR: Rgb = [114, 106, 77];
+const WALL: Rgb = [48, 46, 39];
+const GRASS: Rgb = [86, 109, 58];
+const ROAD: Rgb = [158, 136, 92];
+const CAVE_FLOOR: Rgb = [116, 119, 109];
+const CAVE_WALL: Rgb = [48, 57, 65];
 
 /**
  * Bakes the whole map into an offscreen canvas, one pixel per tile. Once per room.
@@ -33,6 +37,7 @@ const WALL: Rgb = [20, 19, 26];
 export function buildMinimapTerrain(
   map: Phaser.Tilemaps.Tilemap,
   collision: Phaser.Tilemaps.TilemapLayer,
+  mapKey = "",
 ): MinimapTerrain {
   const cols = map.width;
   const rows = map.height;
@@ -49,7 +54,11 @@ export function buildMinimapTerrain(
   const image = context.createImageData(cols, rows);
   for (let y = 0; y < rows; y += 1) {
     for (let x = 0; x < cols; x += 1) {
-      paint(image.data, (y * cols + x) * 4, collision.getTileAt(x, y)?.collides ? WALL : FLOOR);
+      const blocked = collision.getTileAt(x, y)?.collides === true;
+      const ground = map.getTileAt(x, y, false, "ground")?.index;
+      const color = mapKey === "hunting-den" ? (blocked ? CAVE_WALL : CAVE_FLOOR)
+        : blocked ? WALL : ground === 3 || ground === 8 ? GRASS : ground === 4 || ground === 5 ? ROAD : FLOOR;
+      paint(image.data, (y * cols + x) * 4, color);
     }
   }
   context.putImageData(image, 0, 0);

@@ -86,11 +86,19 @@ export interface SettlementInsufficientItem {
   readonly itemKey: string;
 }
 
+/** A debit targeted an equipped stack. Nothing in the settlement was applied. */
+export interface SettlementEquippedItem {
+  readonly ok: false;
+  readonly reason: "equipped-item";
+  readonly itemKey: string;
+}
+
 export type SettlementOutcome =
   | SettlementSuccess
   | SettlementInsufficientBalance
   | SettlementBagFull
-  | SettlementInsufficientItem;
+  | SettlementInsufficientItem
+  | SettlementEquippedItem;
 
 /**
  * The reward ledger and its all-or-nothing transaction (design §4 D2/D3). Keyed by a caller-built
@@ -210,6 +218,9 @@ export class InMemorySettlementStore implements SettlementStore {
         nextBag.set(itemKey, total);
         resultItems.push({ itemKey, quantity: total });
       } else {
+        if (this.inventoryStore.isEquipped(ownerKey, itemKey)) {
+          return { ok: false, reason: "equipped-item", itemKey };
+        }
         if (held === undefined || held < quantity) {
           return { ok: false, reason: "insufficient-item", itemKey };
         }
@@ -260,7 +271,7 @@ function compareItemKeyAscending(left: string, right: string): number {
  */
 class SettlementDeclined extends Error {
   constructor(
-    readonly outcome: SettlementInsufficientBalance | SettlementBagFull | SettlementInsufficientItem,
+    readonly outcome: SettlementInsufficientBalance | SettlementBagFull | SettlementInsufficientItem | SettlementEquippedItem,
   ) {
     super(`settlement declined: ${outcome.reason}`);
   }
@@ -399,6 +410,14 @@ export class PostgresSettlementStore implements SettlementStore {
           }
           items.push({ itemKey, quantity: total });
         } else {
+          // Keep this row locked through the debit: a different session can equip it at any time.
+          const held = await client.query<{ equipped_slot: string | null }>(
+            "SELECT equipped_slot FROM inventory_item WHERE owner_key = $1 AND item_key = $2 FOR UPDATE",
+            [ownerKey, itemKey],
+          );
+          if (held.rows[0]?.equipped_slot != null) {
+            throw new SettlementDeclined({ ok: false, reason: "equipped-item", itemKey });
+          }
           const total = await inventoryStore.remove(ownerKey, itemKey, quantity);
           if (total === null) {
             throw new SettlementDeclined({ ok: false, reason: "insufficient-item", itemKey });

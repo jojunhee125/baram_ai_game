@@ -50,21 +50,13 @@ function portalDefinition(id: string) {
 
 const plaza = roomDefinition(PLAZA);
 const huntingGround = roomDefinition(HUNTING_GROUND);
-const outbound = portalDefinition("plaza-north-door");
+const outbound = portalDefinition("plaza-south-door");
 const inbound = portalDefinition("hunting-ground-south-door");
 // Phase E gave hunting-ground a second door, at the opposite end of the same trail
 // (`docs/design-phase-e-second-hunting-ground.md` §2.2). Not exercised by a round trip in this
 // file — `metaverseRoom.huntingDen.test.ts` owns that — but its trigger tiles are still this
 // room's own, so the portal-marker test below has to count them.
 const northDoor = portalDefinition("hunting-ground-north-door");
-
-/**
- * Hand-checked against plaza.json rather than searched: right along the open spawn row to a
- * column the fountain (x30-33, y15-18) does not block, straight up to the top open row, then
- * left into the door. `expectServerAt` between the legs fails loudly if the map moves.
- */
-const NORTH_ROUTE_COLUMN = 35;
-const NORTH_ROUTE_ROW = 8;
 
 type AnyRoom = Awaited<ReturnType<ColyseusTestServer["createRoom"]>> & { state: RoomState };
 
@@ -179,24 +171,13 @@ async function expectServerAt(
   }
 }
 
-/** Spawn -> the first trigger tile of plaza's north door, one accepted step at a time. */
-async function walkToNorthDoor(room: AnyRoom, client: ClientRoom): Promise<void> {
+/** Walk the central street from spawn through the south gate. */
+async function walkToSouthDoor(room: AnyRoom, client: ClientRoom): Promise<void> {
   const [doorTile] = outbound.from.tiles;
   assert.ok(doorTile);
-  assert.equal(doorTile.tileY, NORTH_ROUTE_ROW, "the route's top row is the door's row");
-
-  await stepMany(client, Direction.Right, NORTH_ROUTE_COLUMN - plaza.spawn.tileX);
-  await expectServerAt(room, client, NORTH_ROUTE_COLUMN, plaza.spawn.tileY, "clear of the fountain");
-
-  await stepMany(client, Direction.Up, plaza.spawn.tileY - NORTH_ROUTE_ROW);
-  await expectServerAt(room, client, NORTH_ROUTE_COLUMN, NORTH_ROUTE_ROW, "the top row");
-
-  // Left onto the far trigger tile of the doorway, which is the one the walker meets first.
-  const nearestTrigger = outbound.from.tiles.reduce((left, right) =>
-    Math.abs(right.tileX - NORTH_ROUTE_COLUMN) < Math.abs(left.tileX - NORTH_ROUTE_COLUMN) ? right : left,
-  );
-  await stepMany(client, Direction.Left, NORTH_ROUTE_COLUMN - nearestTrigger.tileX);
-  await expectServerAt(room, client, nearestTrigger.tileX, nearestTrigger.tileY, "onto the north door");
+  assert.equal(doorTile.tileX, plaza.spawn.tileX);
+  await stepMany(client, Direction.Down, doorTile.tileY - plaza.spawn.tileY);
+  await expectServerAt(room, client, doorTile.tileX, doorTile.tileY, "onto the south door");
 }
 
 before(async () => {
@@ -259,27 +240,27 @@ describe("hunting-ground — the room itself", () => {
   });
 });
 
-describe("hunting-ground — the round trip through plaza's north door", () => {
-  it("fires plaza-north-door when a walker reaches the top row", async () => {
+describe("hunting-ground — the round trip through plaza's south door", () => {
+  it("fires plaza-south-door when a walker reaches the south gate", async () => {
     const room = await createRoom(PLAZA);
     const walker = await join(room, "walker");
     const inbox = collect(walker);
 
-    await walkToNorthDoor(room, walker);
+    await walkToSouthDoor(room, walker);
 
-    await waitUntil(() => inbox.portals.length === 1, "PortalEntered for the north door");
+    await waitUntil(() => inbox.portals.length === 1, "PortalEntered for the south door");
     assert.deepEqual(inbox.portals[0], { portalId: outbound.id, toRoom: HUNTING_GROUND });
     assert.equal(inbox.rejects.length, 0, "every step of the route is an accepted move");
   });
 
-  it("does not fire the south door on the way to the north one", async () => {
+  it("does not fire the north door on the way to the south one", async () => {
     // The two plaza doors are mirror images across the spawn row; a route that brushed the
     // wrong one would report a hop to grand-plaza and nothing else would notice.
     const room = await createRoom(PLAZA);
     const walker = await join(room, "walker");
     const inbox = collect(walker);
 
-    await walkToNorthDoor(room, walker);
+    await walkToSouthDoor(room, walker);
     await sleep(SETTLE_MS);
 
     assert.deepEqual(
@@ -315,7 +296,7 @@ describe("hunting-ground — the round trip through plaza's north door", () => {
 
     const walker = await join(plazaRoom, "walker");
     const outboundInbox = collect(walker);
-    await walkToNorthDoor(plazaRoom, walker);
+    await walkToSouthDoor(plazaRoom, walker);
     await waitUntil(() => outboundInbox.portals.length === 1, "the outbound PortalEntered");
     assert.equal(outboundInbox.portals[0]?.toRoom, HUNTING_GROUND);
 
@@ -349,7 +330,7 @@ describe("hunting-ground — the round trip through plaza's north door", () => {
     assert.equal(back.tileY, inbound.to.arrival.tileY);
   });
 
-  it("does not re-fire the north door on the tile a returning player arrives on", async () => {
+  it("does not re-fire the south door on the tile a returning player arrives on", async () => {
     // The arrival is one tile below the trigger. If they were the same tile, a player coming
     // back from the hunting ground would be bounced straight out again — a loop nothing else
     // in the suite would catch, because both rows validate fine on their own.
@@ -363,7 +344,7 @@ describe("hunting-ground — the round trip through plaza's north door", () => {
     assert.notDeepEqual(
       outbound.from.tiles.map((tile) => `${tile.tileX},${tile.tileY}`).includes(`${arrival.tileX},${arrival.tileY}`),
       true,
-      "the plaza arrival sits on the north door's own trigger",
+      "the plaza arrival sits on the south door's own trigger",
     );
   });
 

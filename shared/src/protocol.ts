@@ -513,6 +513,8 @@ export interface ShopListingView {
   icon: string;
   /** 전(錢), per unit. Never trusted back from the client — {@link BuyItemRequest} sends no price. */
   price: number;
+  attackBonus?: number;
+  damageReductionRatio?: number;
 }
 
 /** What one shop NPC offers, in authored (display) order — design §9 D11. */
@@ -647,6 +649,8 @@ export interface ItemGranted {
    * catalogue of its own.
    */
   damageReductionRatio?: number;
+  sellValue?: number;
+  consumable?: boolean;
 }
 
 /**

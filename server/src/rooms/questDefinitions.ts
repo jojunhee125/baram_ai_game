@@ -96,10 +96,10 @@ export const QUEST_DEFINITIONS: readonly QuestDefinition[] = [
     giverObjectId: "plaza-hunting-ground-npc",
     title: "첫 사냥",
     summary:
-      "북쪽 문을 지나면 사냥터입니다. 다람쥐 세 마리만 잡고 돌아오면 사냥이 어떤 것인지 알게 될 겁니다.",
+      "남문 밖 초보 사냥터에서 다람쥐 세 마리를 잡아 보세요. 보상 50전으로 남문 잡화상의 낡은 단검(40전)을 살 수 있습니다.",
     objectiveText: "사냥터에서 다람쥐 3마리 처치",
     objective: { kind: MonsterKind.Squirrel, count: 3 },
-    completionText: "벌써 세 마리를 잡았군요. 이제 사냥터를 혼자 돌아다녀도 되겠습니다.",
+    completionText: "첫 사냥을 마쳤군요! 남문 잡화상에서 낡은 단검을 사고 가방에서 장착하세요. 전리품을 팔아 갑옷을 마련하면 사냥굴에 도전할 수 있습니다.",
     // 화폐만, 소액(`docs/decisions.md` 2026-09-17) — R04-c 상점이 아직 없어 아이템은 쓸 데가 없다.
     reward: { currencyDelta: 50 },
   },

@@ -103,59 +103,47 @@ const BLANK = ".";
 
 /* ------------------------------------------------------------ interior ---- */
 
-/**
- * The walkable area, exactly one screenful (VIEWPORT_WIDTH_TILES x VIEWPORT_HEIGHT_TILES).
- * Same plaza the 20x15 map drew - fountain at the centre, dirt boulevards crossing under it,
- * four lawns in the quadrants, clutter in the corners - re-laid at the new size:
- *
- *   rows 0 / 5-6 / 11-12 / 17   paved promenades, deliberately free of props: rows 6, 11 and 12
- *                               are the open corridors the integration suite walks (MIN_OPEN_RUN)
- *   rows 1-4 / 13-16            lawns, where every prop lives
- *   rows 7-10                   the plaza band: dirt arms, medallion floor, 4x4 fountain
- *   cols 14-17                  the north-south boulevard; the south door opens off its foot
- *
- * The two blocks are read together cell by cell, so a row that drifts out of alignment with the
- * other block moves a prop off its lawn rather than failing - hence the checks further down.
- */
+/** South-gate street. North houses and south walls use the same collision footprint as the art.
+ * Rows 14, 19 and 20 and column 16 stay open for movement and view-filter verification. */
 const GROUND_ROWS = [
-  "..............dddd..............",
-  ".gfgggggfg....dddd....gfgggggfg.",
-  ".ggggfgggg....dddd....ggggfgggg.",
-  ".gggggggfg....dddd....gfggggggg.",
-  ".ggfgggggg....dddd....ggggggfgg.",
-  "............mmmmmmmm............",
-  "..........,.mmmmmmmm.,..........",
-  "ddddddddddddmmmmmmmmdddddddddddd",
-  "ddddddddddddmmmmmmmmdddddddddddd",
-  "ddddddddddddmmmmmmmmdddddddddddd",
-  "ddddddddddddmmmmmmmmdddddddddddd",
-  "..........,.mmmmmmmm.,..........",
-  "............mmmmmmmm............",
-  ".ggfgggggg....dddd....ggggggfgg.",
-  ".gggggggfg....dddd....gfggggggg.",
-  ".ggggfgggg....dddd....ggggfgggg.",
-  ".gfgggggfg....dddd....gfgggggfg.",
-  "..............dwwd..............",
+  ".............ddwwdd.............",
+  "gggggggggggggddddddggggggggggggg",
+  "gg......gggggddddddggggg......gg",
+  "gg......gggggddddddggggg......gg",
+  "gg......gggggddddddggggg......gg",
+  ".............dddddd.............",
+  ".............dddddd.............",
+  "ggggggggggg..dddddd..ggggggggggg",
+  "ggggggggggg..dddddd..ggggggggggg",
+  "ggggggggggg..dddddd..ggggggggggg",
+  "ggggggggggg..dddddd..ggggggggggg",
+  ".............dddddd.............",
+  ".............dddddd.............",
+  "gggggggggggggddddddggggggggggggg",
+  "gggggggggggggddddddggggggggggggg",
+  "gggggggggggggddddddggggggggggggg",
+  "g............dddddd............g",
+  ".............ddwwdd.............",
 ];
 
 const COLLISION_ROWS = [
   "................................",
-  ".H...N...H............H...N...H.",
   "................................",
-  "...P...P................P...P...",
-  "................................",
-  "................................",
-  "................................",
-  "..............~~~~..............",
-  "..............~~~~..............",
-  "..............~~~~..............",
-  "..............~~~~..............",
+  "..WWWWWW................WWWWWW..",
+  "..WWWWWW................WWWWWW..",
+  "..WWWWWW................WWWWWW..",
   "................................",
   "................................",
   "................................",
-  "...P...P................P...P...",
-  "..CC......................T.....",
-  ".H.......H............H.......H.",
+  "...T....T...............T....T..",
+  "................................",
+  "................................",
+  "................................",
+  "................................",
+  "................................",
+  "...T......WWW......WWW...T......",
+  "..........WWW......WWW..........",
+  ".WWWWWWWWWWWW......WWWWWWWWWWWW.",
   "................................",
 ];
 
@@ -277,7 +265,7 @@ const MAP = {
 
 /**
  * Recorded here because the layout is built around them: the room spawn sits on the open
- * promenade row south of the fountain, and the south door opens off the foot of the boulevard
+ * main street, and the south gate leads to the field
  * directly below it. The authoritative copies live in server/src/rooms/definitions.ts and
  * portalDefinitions.ts - the checks below only prove this map can carry them.
  */
@@ -287,7 +275,7 @@ const PORTAL = {
     { tileX: 31, tileY: 25 },
     { tileX: 32, tileY: 25 },
   ],
-  arrival: { tileX: 31, tileY: 24 },
+  arrival: { tileX: 31, tileY: 23 },
 };
 
 /** `collision: null` means an empty cell (gid 0), i.e. walkable. */

@@ -45,6 +45,10 @@ const ICON_SIZE_PX = 32;
 const EQUIPMENT_ITEM_SLOTS: Partial<Record<string, EquipmentSlot>> = {
   "leather-armor": EquipmentSlot.Armor,
   "old-dagger": EquipmentSlot.Weapon,
+  "hunting-blade": EquipmentSlot.Weapon,
+  "iron-blade": EquipmentSlot.Weapon,
+  "padded-armor": EquipmentSlot.Armor,
+  "reinforced-armor": EquipmentSlot.Armor,
   "golden-helmet": EquipmentSlot.Helmet,
 };
 
@@ -190,6 +194,8 @@ export class InventoryPanel {
         // equipped, since equipping is its own request the player makes afterwards.
         equipped: false,
         damageReductionRatio: event.damageReductionRatio,
+        sellValue: event.sellValue,
+        consumable: event.consumable,
       }),
     );
     this.list.hidden = false;

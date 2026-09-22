@@ -1413,7 +1413,8 @@ describe("VERIFY the boss reaches the loot-table panel of both hunting rooms", (
       assert.ok(boss, `${roomName}'s panel is missing the boss`);
       assert.equal(boss.name, "보스");
       assert.deepEqual(boss.drops, [
-        { itemKey: "golden-helmet", name: "황금투구", icon: "golden-helmet", chancePercent: 25 },
+        { itemKey: "golden-helmet", name: "황금투구", icon: "golden-helmet", chancePercent: 25, quantity: 1 },
+        ...(roomName === "hunting-den" ? [{ itemKey: "iron-blade", name: "철검", icon: "old-dagger", chancePercent: 50, quantity: 1, sellValue: 120 }] : []),
       ]);
     }
   });

@@ -307,6 +307,15 @@ export class ObjectPanel {
     const name = document.createElement("span");
     name.className = "object__shop-name";
     name.textContent = listing.name;
+    const benefits: string[] = [];
+    if (listing.attackBonus !== undefined) benefits.push(`공격력 +${listing.attackBonus}`);
+    if (listing.damageReductionRatio !== undefined) benefits.push(`받는 피해 ${Math.round(listing.damageReductionRatio * 100)}% 감소`);
+    if (benefits.length > 0) {
+      const stats = document.createElement("small");
+      stats.className = "object__shop-stats";
+      stats.textContent = benefits.join(" · ");
+      name.append(stats);
+    }
 
     const price = document.createElement("span");
     price.className = "object__shop-price";

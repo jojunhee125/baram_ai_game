@@ -1018,7 +1018,7 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
     try {
-      const terrain = buildMinimapTerrain(this.world.map, this.world.collision);
+      const terrain = buildMinimapTerrain(this.world.map, this.world.collision, this.mapKey);
       this.minimap = new Minimap(terrain, this.connection.portalMarkers, this.mapKey);
     } catch (error) {
       console.error("minimap unavailable", error);

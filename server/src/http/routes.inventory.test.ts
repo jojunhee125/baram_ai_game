@@ -133,7 +133,7 @@ async function readInventory(headers?: OutgoingHttpHeaders): Promise<{
 }
 
 /** The first two rows of the real table; the route's ordering claim is about this table. */
-function definitionAt(index: number): { key: string; name: string; icon: string } {
+function definitionAt(index: number): (typeof ITEM_DEFINITIONS)[number] {
   const definition = ITEM_DEFINITIONS[index];
   assert.ok(definition, `ITEM_DEFINITIONS needs at least ${index + 1} rows for this test`);
   return definition;
@@ -170,7 +170,7 @@ describe("GET /api/inventory", () => {
     const { status, items } = await readInventory(tokenHeader(SUB_A));
     assert.equal(status, 200);
     assert.deepEqual(items, [
-      { itemKey: first.key, name: first.name, icon: first.icon, quantity: 3, equipped: false },
+      { itemKey: first.key, name: first.name, icon: first.icon, quantity: 3, equipped: false, sellValue: first.sellValue },
     ]);
     assert.deepEqual(store.reads, [SUB_A], "the sub claim is the key it looked under");
   });
@@ -220,7 +220,7 @@ describe("GET /api/inventory", () => {
     assert.ok(sellable, "the fixture needs a sellable item in ITEM_DEFINITIONS");
     const consumable = ITEM_DEFINITIONS.find((item) => item.consumable !== undefined);
     assert.ok(consumable, "the fixture needs a consumable item in ITEM_DEFINITIONS");
-    const plainItem = ITEM_DEFINITIONS[0];
+    const plainItem = ITEM_DEFINITIONS.find(item => item.sellValue === undefined && item.consumable === undefined);
     assert.ok(plainItem, "ITEM_DEFINITIONS needs at least 1 row for this test");
     assert.equal(plainItem.sellValue, undefined, "precondition: this row has neither field");
     assert.equal(plainItem.consumable, undefined, "precondition: this row has neither field");

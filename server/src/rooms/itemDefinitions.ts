@@ -54,9 +54,9 @@ export const MAX_REQUEST_QUANTITY = 9_999;
  * being tempted to change a `key` the database is already holding.
  */
 export const ITEM_DEFINITIONS: readonly ItemDefinition[] = [
-  { key: "acorn", name: "도토리", icon: "acorn" },
-  { key: "carrot", name: "당근", icon: "carrot" },
-  { key: "copper-coin", name: "구리 동전", icon: "copper-coin" },
+  { key: "acorn", name: "도토리", icon: "acorn", sellValue: 4 },
+  { key: "carrot", name: "당근", icon: "carrot", sellValue: 6 },
+  { key: "copper-coin", name: "구리 동전", icon: "copper-coin", sellValue: 8 },
   // Promoted to the shop's recovery consumable (roadmap R04-c, design `docs/r04-settlement.md` §9
   // D11, `docs/decisions.md` 2026-09-18) — no new key or icon: a healing herb is exactly what this
   // drop-only row already was, so `plaza-shop-npc` sells the same item a squirrel/rabbit/deer can
@@ -75,6 +75,7 @@ export const ITEM_DEFINITIONS: readonly ItemDefinition[] = [
     key: "old-dagger",
     name: "낡은 단검",
     icon: "old-dagger",
+    sellValue: 10,
     equipment: { slot: "weapon", stats: { attackDamage: 2 } },
   },
   { key: "entry-pass", name: "입장권", icon: "entry-pass", possession: true },
@@ -95,5 +96,35 @@ export const ITEM_DEFINITIONS: readonly ItemDefinition[] = [
     icon: "golden-helmet",
     possession: true,
     equipment: { slot: "helmet", stats: { damageReduction: 0.15 } },
+  },
+  { key: "den-fur", name: "굴짐승 털", icon: "acorn", sellValue: 10 },
+  { key: "antler", name: "단단한 뿔", icon: "carrot", sellValue: 18 },
+  {
+    key: "hunting-blade",
+    name: "사냥꾼 검",
+    icon: "old-dagger",
+    sellValue: 45,
+    equipment: { slot: "weapon", stats: { attackDamage: 6 } },
+  },
+  {
+    key: "iron-blade",
+    name: "철검",
+    icon: "old-dagger",
+    sellValue: 120,
+    equipment: { slot: "weapon", stats: { attackDamage: 10 } },
+  },
+  {
+    key: "padded-armor",
+    name: "누비옷",
+    icon: "leather-armor",
+    sellValue: 25,
+    equipment: { slot: "armor", stats: { damageReduction: 0.15 } },
+  },
+  {
+    key: "reinforced-armor",
+    name: "강화 가죽갑옷",
+    icon: "leather-armor",
+    sellValue: 75,
+    equipment: { slot: "armor", stats: { damageReduction: 0.3 } },
   },
 ];

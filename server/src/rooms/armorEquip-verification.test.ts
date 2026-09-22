@@ -524,13 +524,7 @@ describe("VERIFY an equip/unequip that resolves after the session has left is a 
 });
 
 describe("FIXED: EquipmentChanged.applied for an unequip is derived from what the store actually did, not from the session's stale local cache", () => {
-  it("a session whose cache lags the database reports applied:true because its unequip call really did clear the DB row", async () => {
-    // The realistic route to this state is the cross-session equip race the Postgres-backed
-    // test below proves: this session's join-time hydration ran and correctly cached "nothing
-    // equipped" — accurate *at the time* — and only afterwards did a sibling session (the same
-    // SSO account, a second tab) equip something. This session's cache has no way to learn of
-    // that: nothing re-hydrates it mid-visit. Reproduced here without a second live session, by
-    // driving the shared store directly the way that sibling tab would.
+  it("a session synchronizes a sibling's equip and reports applied:true when its unequip clears the store", async () => {
     const store = new InMemoryInventoryStore();
     const ownerKey = "shared-owner";
 
@@ -544,7 +538,7 @@ describe("FIXED: EquipmentChanged.applied for an unequip is derived from what th
         "precondition: hydration caught up to an empty bag",
       );
 
-      // The sibling tab's action, invisible to this session's cache.
+      // The sibling tab's action now synchronizes the active session through the shared store.
       await store.grantOnce(ownerKey, "leather-armor");
       await store.equip(ownerKey, "leather-armor", "armor");
       assert.deepEqual(
@@ -554,9 +548,10 @@ describe("FIXED: EquipmentChanged.applied for an unequip is derived from what th
       );
       assert.equal(
         client.userData?.equippedItemKeys.armor,
-        undefined,
-        "precondition: this session's cache never learned about the sibling's equip",
+        "leather-armor",
+        "the equipment subscription refreshes this session after a sibling's equip",
       );
+      client.sent.length = 0;
 
       unequipItem(room, client);
       await flush();

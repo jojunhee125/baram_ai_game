@@ -22,8 +22,8 @@ export interface LandmarkDescriptor {
 }
 
 export const LANDMARK_DEFINITIONS: readonly LandmarkDescriptor[] = [
-  { id: "landmark-plaza", name: "마을 광장", room: "plaza" },
-  { id: "landmark-grand-plaza", name: "분수 광장", room: "grand-plaza" },
-  { id: "landmark-hunting-ground", name: "사냥터 입구", room: "hunting-ground" },
-  { id: "landmark-hunting-den", name: "사냥굴 입구", room: "hunting-den" },
+  { id: "landmark-plaza", name: "남문 마을", room: "plaza" },
+  { id: "landmark-grand-plaza", name: "대광장", room: "grand-plaza" },
+  { id: "landmark-hunting-ground", name: "초보 들판 · Lv 1–3", room: "hunting-ground" },
+  { id: "landmark-hunting-den", name: "바위 사냥굴 · Lv 3–10", room: "hunting-den" },
 ];

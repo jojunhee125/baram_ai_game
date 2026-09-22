@@ -1,4 +1,4 @@
-import type { TilePosition } from "@zep-test/shared";
+import { LANDMARK_DEFINITIONS, type TilePosition } from "@zep-test/shared";
 import { isTextEntry } from "../input/textEntry";
 import type { MinimapTerrain } from "./minimapTerrain";
 
@@ -87,7 +87,8 @@ export class Minimap {
     );
     this.canvas.width = Math.round(terrain.cols * this.pxPerTile);
     this.canvas.height = Math.round(terrain.rows * this.pxPerTile);
-    this.canvas.setAttribute("aria-label", `${mapLabel} 미니맵`);
+    const region = LANDMARK_DEFINITIONS.find((landmark) => landmark.room === mapLabel)?.name ?? mapLabel;
+    this.canvas.setAttribute("aria-label", `${region} 미니맵`);
     // A percentage of the HUD column, which is itself a percentage of the stage, so the panel
     // tracks Phaser's Scale.FIT exactly. Never measured: the panel reports zero while hidden.
     this.panel.style.width = `${(this.canvas.width / MAX_WIDTH_PX) * 100}%`;

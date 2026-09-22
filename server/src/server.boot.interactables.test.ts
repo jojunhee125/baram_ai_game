@@ -31,12 +31,12 @@ function restoreTable(): void {
   table.push(...REAL_ROWS);
 }
 
-/** Row 20 of plaza.json is open across x=16..47; (30,15) is the fountain's top-left tile. */
+/** Row 20 of plaza.json is open across x=16..47; (28,24) is the south wall. */
 const free = (tileX: number) => [{ tileX, tileY: 20 }];
-const PLAZA_BLOCKED = { tileX: 30, tileY: 15 };
+const PLAZA_BLOCKED = { tileX: 28, tileY: 24 };
 /** plaza-south-door's trigger and its arrival, per assets/README.md. */
 const PORTAL_TRIGGER = { tileX: 31, tileY: 25 };
-const PORTAL_ARRIVAL = { tileX: 31, tileY: 24 };
+const PORTAL_ARRIVAL = { tileX: 31, tileY: 23 };
 /** The first tile of the real link board, for the overlap rule. */
 const REAL_OBJECT_TILE = { tileX: 17, tileY: 23 };
 
@@ -153,7 +153,7 @@ describe("boot-time interactable validation is wired into listen()", () => {
       /"plaza-link-board" is declared more than once/,
       /"bad-no-tiles" has no tiles/,
       /"bad-room" sits in "nowhere", which is not a registered room/,
-      /"bad-tile" occupies \(30,15\), which is not a walkable tile of room "plaza"/,
+      /"bad-tile" occupies \(28,24\), which is not a walkable tile of room "plaza"/,
       /"bad-overlap" occupies \(17,23\) of room "plaza", which is already occupied by object "plaza-link-board"/,
       /"bad-portal-tile" occupies \(31,25\), which is a portal trigger tile in room "plaza"/,
       /"bad-title" has an empty title/,
@@ -212,7 +212,7 @@ describe("boot-time interactable validation is wired into listen()", () => {
     );
     assert.match(
       warnings.join("\n"),
-      /"sticky-arrival-object" occupies \(31,24\), which is a portal arrival tile in room "plaza"/,
+      /"sticky-arrival-object" occupies \(31,23\), which is a portal arrival tile in room "plaza"/,
     );
   });
 });
