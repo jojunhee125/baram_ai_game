@@ -348,6 +348,7 @@ export class WorldScene extends Phaser.Scene {
         // The bag is the one window that stays open in a fight, so a pickup lands in it live
         // rather than waiting for the next read.
         this.inventoryPanel?.applyGrant(event);
+        this.objectPanel?.applyGrant(event);
         // A successful shop:buy's only signal (design §9 D12 reuses this message verbatim rather
         // than a new "purchase complete" wrapper) — fired on every grant regardless of cause, since
         // ItemGranted carries no marker distinguishing a purchase from a monster drop
@@ -357,6 +358,7 @@ export class WorldScene extends Phaser.Scene {
       onItemRemoved: (event) => {
         this.toasts?.showRemoved(event);
         this.inventoryPanel?.applyItemRemoved(event);
+        this.objectPanel?.applyItemRemoved(event);
         // A consumable's heal (design §9 D12) rides the same hp fields a combat hit would, so the
         // vitals bar takes the same path PlayerHit already uses rather than a second HP setter.
         if (event.reason === "consume" && event.hpRemaining !== undefined && event.hpMax !== undefined) {
@@ -373,6 +375,7 @@ export class WorldScene extends Phaser.Scene {
       },
       onEquipmentChanged: (event) => {
         this.inventoryPanel?.applyEquipmentChange(event);
+        this.objectPanel?.applyEquipmentChange(event);
         this.weapon?.applyEquipmentChange(event);
       },
       onExpGranted: (event) => this.applyExpGranted(event),

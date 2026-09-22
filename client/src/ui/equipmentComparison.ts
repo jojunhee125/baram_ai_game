@@ -10,8 +10,8 @@ const format = (value: number): string => Number(value.toFixed(4)).toLocaleStrin
 const signed = (value: number): string => `${value > 0 ? "+" : ""}${format(value)}`;
 
 export function describeEquipmentComparison(
-  item: InventoryItem,
-  current: InventoryItem | null | undefined,
+  item: Pick<InventoryItem, "name" | "equipped" | "equipment">,
+  current: Pick<InventoryItem, "name" | "equipped" | "equipment"> | null | undefined,
 ): EquipmentComparisonDescription {
   const stats = item.equipment
     ? `장비 공격력 +${format(item.equipment.attackDamage)} · 피해 감소 ${format(item.equipment.damageReduction * 100)}%`

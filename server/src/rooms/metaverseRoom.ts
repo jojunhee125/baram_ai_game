@@ -1914,6 +1914,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
           price: listing.price,
           ...(definition.equipment?.stats.attackDamage === undefined ? {} : { attackBonus: definition.equipment.stats.attackDamage }),
           ...(definition.equipment?.stats.damageReduction === undefined ? {} : { damageReductionRatio: definition.equipment.stats.damageReduction }),
+          ...(definition.equipment === undefined ? {} : { equipment: equipmentMetadata(definition) }),
         };
       }),
     };

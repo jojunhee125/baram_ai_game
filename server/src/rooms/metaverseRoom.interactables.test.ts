@@ -494,6 +494,13 @@ describe("MetaverseRoom — entering an object", () => {
               price: listing.price,
               ...(item.equipment?.stats.attackDamage === undefined ? {} : { attackBonus: item.equipment.stats.attackDamage }),
               ...(item.equipment?.stats.damageReduction === undefined ? {} : { damageReductionRatio: item.equipment.stats.damageReduction }),
+              ...(item.equipment === undefined ? {} : {
+                equipment: {
+                  slot: item.equipment.slot,
+                  attackDamage: item.equipment.stats.attackDamage ?? 0,
+                  damageReduction: item.equipment.stats.damageReduction ?? 0,
+                },
+              }),
             };
           }),
         },

@@ -2,6 +2,9 @@ import {
   InteractableKind,
   QuestStatus,
   type InteractableEntered,
+  type EquipmentChanged,
+  type ItemGranted,
+  type ItemRemoved,
   type LinkInteraction,
   type NpcInteraction,
   type QuestState,
@@ -13,6 +16,8 @@ import {
 } from "@zep-test/shared";
 import { isTextEntry } from "../input/textEntry";
 import { applyItemIcon } from "./inventoryPanel";
+import { loadInventory, readEquipmentMetadata, type InventoryItem } from "../net/inventory";
+import { describeEquipmentComparison } from "./equipmentComparison";
 
 const KIND_LABELS: Record<InteractableKind, string> = {
   [InteractableKind.Link]: "링크",
@@ -41,6 +46,12 @@ interface OpenQuest {
   /** 수락 대기 · 진행 중 n / m · 완료 — the reading the accept button turns into. */
   status: HTMLElement;
   accept: HTMLButtonElement;
+}
+
+interface ShopComparison {
+  listing: ShopListingView;
+  baseline: HTMLElement;
+  difference: HTMLElement;
 }
 
 /**
@@ -83,6 +94,13 @@ export class ObjectPanel {
   /** Which NPC the open shop block belongs to — {@link buyItem} names it back in every request. */
   private currentShopNpcId: string | null = null;
   private currentBlocksMovement = true;
+  private readonly shopComparisons = new Map<string, ShopComparison>();
+  private comparisonStatus: HTMLElement | null = null;
+  private comparisonRetry: HTMLButtonElement | null = null;
+  private comparisonGeneration = 0;
+  private comparisonLoading = false;
+  private comparisonDirty = false;
+  private destroyed = false;
 
   constructor(
     private readonly sendAnswer: (objectId: string, choiceIndex: number) => void,
@@ -121,6 +139,8 @@ export class ObjectPanel {
   }
 
   open(payload: InteractableEntered): void {
+    if (this.destroyed) return;
+    this.resetComparisons();
     this.currentBlocksMovement = payload.blocksMovement;
     this.quiz = null;
     this.quests.clear();
@@ -154,6 +174,7 @@ export class ObjectPanel {
     }
 
     this.root.hidden = false;
+    this.invalidateComparisons();
     // The dialog, not a control inside it: Tab then starts here instead of back at the chat
     // composer, while Enter keeps opening the composer the way it does everywhere else.
     this.dialog.focus();
@@ -207,6 +228,7 @@ export class ObjectPanel {
   }
 
   close(): void {
+    this.resetComparisons();
     this.releaseFocus();
     this.root.hidden = true;
     this.body.replaceChildren();
@@ -227,6 +249,7 @@ export class ObjectPanel {
    * and keep sending answers to the room it left.
    */
   destroy(): void {
+    this.destroyed = true;
     this.closeButton.removeEventListener("click", this.handleClose);
     window.removeEventListener("keydown", this.handleKey);
     this.close();
@@ -295,11 +318,27 @@ export class ObjectPanel {
     section.append(list);
 
     this.body.append(section);
+    if (this.shopComparisons.size > 0) {
+      const status = document.createElement("p");
+      status.className = "object__shop-comparison-status";
+      status.setAttribute("role", "status");
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "object__shop-comparison-retry";
+      retry.textContent = "장비 비교 다시 확인";
+      retry.hidden = true;
+      retry.addEventListener("click", () => this.invalidateComparisons());
+      section.insertBefore(status, list);
+      section.insertBefore(retry, list);
+      this.comparisonStatus = status;
+      this.comparisonRetry = retry;
+    }
   }
 
   private buildShopRow(listing: ShopListingView): HTMLLIElement {
     const row = document.createElement("li");
     row.className = "object__shop-row";
+    row.dataset.itemKey = listing.itemKey;
 
     const icon = document.createElement("span");
     applyItemIcon(icon, listing.icon);
@@ -333,8 +372,106 @@ export class ObjectPanel {
     buy.addEventListener("click", () => this.buyItem(listing.itemKey));
 
     row.append(icon, name, price, buy);
+    if (listing.equipment !== undefined || listing.attackBonus !== undefined || listing.damageReductionRatio !== undefined) {
+      const comparison = document.createElement("div");
+      comparison.className = "object__shop-comparison";
+      const baseline = document.createElement("span");
+      baseline.className = "object__shop-comparison-baseline";
+      const difference = document.createElement("span");
+      difference.className = "object__shop-comparison-difference";
+      comparison.append(baseline, difference);
+      row.append(comparison);
+      this.shopComparisons.set(listing.itemKey, { listing, baseline, difference });
+    }
     this.shopRows.set(listing.itemKey, buy);
     return row;
+  }
+
+  applyGrant(_event: ItemGranted): void {
+    this.invalidateComparisons();
+  }
+
+  applyItemRemoved(_event: ItemRemoved): void {
+    this.invalidateComparisons();
+  }
+
+  applyEquipmentChange(event: EquipmentChanged): void {
+    if (event.applied) this.invalidateComparisons();
+  }
+
+  private resetComparisons(): void {
+    this.comparisonGeneration += 1;
+    this.comparisonDirty = false;
+    this.shopComparisons.clear();
+    this.comparisonStatus = null;
+    this.comparisonRetry = null;
+  }
+
+  private hasOpenComparison(): boolean {
+    return !this.destroyed && this.isOpen && this.currentShopNpcId !== null && this.shopComparisons.size > 0;
+  }
+
+  private invalidateComparisons(): void {
+    if (!this.hasOpenComparison()) return;
+    this.comparisonDirty = true;
+    this.setComparisonPending();
+    this.refreshComparisons();
+  }
+
+  private setComparisonPending(): void {
+    if (this.comparisonStatus) this.comparisonStatus.textContent = "장착 장비를 확인하는 중…";
+    if (this.comparisonRetry) this.comparisonRetry.hidden = true;
+    for (const { baseline, difference } of this.shopComparisons.values()) {
+      baseline.textContent = "비교: 장비 확인 중";
+      difference.textContent = "";
+      difference.hidden = true;
+    }
+  }
+
+  private refreshComparisons(): void {
+    if (this.comparisonLoading || !this.comparisonDirty || !this.hasOpenComparison()) return;
+    const generation = this.comparisonGeneration;
+    this.comparisonLoading = true;
+    this.comparisonDirty = false;
+    void loadInventory({ strict: true }).then(
+      (items) => {
+        if (generation !== this.comparisonGeneration || !this.hasOpenComparison() || this.comparisonDirty) return;
+        this.renderComparisons(items);
+      },
+      () => {
+        if (generation !== this.comparisonGeneration || !this.hasOpenComparison() || this.comparisonDirty) return;
+        if (this.comparisonStatus) this.comparisonStatus.textContent = "장착 장비를 읽지 못했습니다. 다시 확인해 주세요.";
+        if (this.comparisonRetry) this.comparisonRetry.hidden = false;
+        for (const { baseline, difference } of this.shopComparisons.values()) {
+          baseline.textContent = "비교 장비 확인 필요";
+          difference.textContent = "비교 수치 정보 없음";
+          difference.hidden = false;
+        }
+      },
+    ).finally(() => {
+      this.comparisonLoading = false;
+      this.refreshComparisons();
+    });
+  }
+
+  private renderComparisons(items: readonly InventoryItem[]): void {
+    const equipped = items.filter((item) => item.equipped);
+    const hasUnknownSlot = equipped.some((item) => !item.equipment || item.equipment.slot === "ring");
+    if (this.comparisonStatus) this.comparisonStatus.textContent = "같은 슬롯의 장비 수치를 비교합니다.";
+    for (const { listing, baseline, difference } of this.shopComparisons.values()) {
+      const equipment = readEquipmentMetadata(listing.equipment);
+      const sameSlot = equipment ? equipped.filter((item) => item.equipment?.slot === equipment.slot) : [];
+      const current = !equipment || equipment.slot === "ring" || hasUnknownSlot || sameSlot.length > 1
+        ? undefined : sameSlot[0] ?? null;
+      const description = describeEquipmentComparison({
+        name: listing.name,
+        equipped: current?.itemKey === listing.itemKey,
+        equipment,
+      }, current);
+      baseline.textContent = description.baseline;
+      difference.textContent = description.difference;
+      difference.hidden = description.difference.length === 0;
+    }
   }
 
   /**

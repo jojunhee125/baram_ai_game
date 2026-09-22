@@ -1,5 +1,13 @@
 # 제품 방향 결정 기록
 
+## 2026-09-22 — 상점 구매 전 장비 비교 구현·검증 완료
+
+- 전체1187개·browser26개와 typecheck/build, 독립 코드 검토를 통과했다. main에 반영하며 운영 배포는 수행하지 않았다.
+
+- 사용자 “다음 코드작업도 개시한다” 지시에 따라 가방 비교의 후속으로 상점에서 같은 슬롯 장비 대비 공격력·피해 감소 차이를 표시한다. 착수 범위를 안내하고 main `3b7f5b5`에서 시작했다.
+- 상품에 optional 장비 metadata를 전달하고 현재 장비는 inventory 조회로 확인한다. 정보 누락·조회 실패는 비교 불가로 처리한다. 가격·정산·DB·전투 수치는 유지한다.
+- [설계 계약](design-2026-09-22-next-shop-comparison.md) · [구현·검증 기록](implementation-2026-09-22-shop-equipment-comparison.md). branch/worktree 생성 없이 main에 반영하며 운영 배포는 별도다.
+
 ## 2026-09-22 — 장비 비교 구현·검증 및 main 반영 완료
 
 - 구현 `e7b01d5`와 선행 병렬 구현 `ac70d3f`는 `origin/main`에 push 완료했다. 전체1185개·browser15개·추가 layout2개 및 typecheck/build 통과. 운영 배포는 미수행이다.

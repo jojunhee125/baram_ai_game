@@ -57,7 +57,7 @@ export interface InventoryItem {
  * avatar skin there is no sensible substitute to fall back to: an empty bag drawn after a failed
  * read is a lie about the player's belongings.
  */
-export async function loadInventory(): Promise<readonly InventoryItem[]> {
+export async function loadInventory(options: { strict?: boolean } = {}): Promise<readonly InventoryItem[]> {
   const response = await fetch(INVENTORY_PATH, {
     headers: { accept: "application/json" },
     signal: AbortSignal.timeout(LOAD_TIMEOUT_MS),
@@ -65,7 +65,7 @@ export async function loadInventory(): Promise<readonly InventoryItem[]> {
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
   }
-  return readItems(await response.json());
+  return readItems(await response.json(), options.strict ?? false);
 }
 
 /**
@@ -73,10 +73,13 @@ export async function loadInventory(): Promise<readonly InventoryItem[]> {
  * grow a field or a type this bundle was not built against; losing one row from the list beats
  * replacing the whole bag with an error the player cannot act on.
  */
-function readItems(body: unknown): readonly InventoryItem[] {
+function readItems(body: unknown, strict: boolean): readonly InventoryItem[] {
   const items = (body as { items?: unknown } | null)?.items;
   if (!Array.isArray(items)) {
     throw new Error("response had no items array");
+  }
+  if (strict && items.some((item) => !isInventoryItem(item) || !Number.isInteger(item.quantity) || item.quantity <= 0)) {
+    throw new Error("response had an invalid inventory row");
   }
   return items.filter(isInventoryItem).map((item) => ({
     ...item,

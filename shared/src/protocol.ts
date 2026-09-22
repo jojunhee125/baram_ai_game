@@ -521,6 +521,7 @@ export interface ShopListingView {
   price: number;
   attackBonus?: number;
   damageReductionRatio?: number;
+  equipment?: EquipmentMetadata;
 }
 
 /** What one shop NPC offers, in authored (display) order — design §9 D11. */
