@@ -1,5 +1,7 @@
 # R05 실제 접속 통합 테스트 보강
 
+> Git 후속 상태: 이 작업과 E2E 타입 정리는 `297e7ba`로 origin/main에 반영했다. 아래 실패·미커밋 표현은 당시 검증 단계 이력이다. 최신 E2E typecheck는 통과했으며 [현재 정본](../PROJECT_MEMORY.md)을 따른다.
+
 ## 목적과 변경
 
 기존 R05-c 7개 테스트는 room 접속 없이 UI 모듈을 직접 생성하므로 WorldScene과 RoomConnection의 연결을 검증하지 못했다. 실제 로컬 서버와 브라우저를 연결하는 `client/e2e/tests/r05-skill-integration.spec.ts`를 추가했다. production 코드와 기존 테스트는 변경하지 않았다.

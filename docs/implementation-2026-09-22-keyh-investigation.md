@@ -1,5 +1,7 @@
 # KeyH 귀환 실패 재현 조사
 
+> Git 후속 상태: 이 조사 기록은 `297e7ba`로 origin/main에 반영했다. 아래 미커밋 표현은 당시 단계다. KeyH 실패 원인은 미확정이며 미재현 결과를 해결 완료로 바꾸지 않는다.
+
 ## 범위와 결과
 
 사용자 요청에 따라 `heritage-first-play.spec.ts`에 기록된 KeyH 귀환 실패를 조사했다. 기준은 clean `main`, `origin/main`과 동일한 `297e7bafacef989478cb938e6add65b918b544b6`이다.

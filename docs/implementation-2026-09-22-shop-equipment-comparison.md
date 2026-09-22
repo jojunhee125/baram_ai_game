@@ -10,7 +10,7 @@ git fetch origin 후 main과 origin/main은 모두 `3b7f5b5`이며 작업 트리
 
 ## 진행 상태
 
-구현·독립 코드 검토 완료. 전체 테스트1187개, browser26개와 typecheck/build 통과. main에 커밋·push하며 운영 배포는 수행하지 않았다. [설계 계약](design-2026-09-22-next-shop-comparison.md).
+구현·독립 코드 검토 완료. 전체 테스트1187개, browser26개와 typecheck/build 통과. 구현 커밋 `a8fbcb0`를 origin/main에 push 완료했다. 운영 배포는 수행하지 않았다. [설계 계약](design-2026-09-22-next-shop-comparison.md).
 
 ## 실제 변경
 

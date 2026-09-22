@@ -2,7 +2,7 @@
 
 ## 2026-09-22 — 상점 구매 전 장비 비교 구현·검증 완료
 
-- 전체1187개·browser26개와 typecheck/build, 독립 코드 검토를 통과했다. main에 반영하며 운영 배포는 수행하지 않았다.
+- 전체1187개·browser26개와 typecheck/build, 독립 코드 검토를 통과했다. 구현 커밋 `a8fbcb0`를 origin/main에 push 완료했고 운영 배포는 수행하지 않았다.
 
 - 사용자 “다음 코드작업도 개시한다” 지시에 따라 가방 비교의 후속으로 상점에서 같은 슬롯 장비 대비 공격력·피해 감소 차이를 표시한다. 착수 범위를 안내하고 main `3b7f5b5`에서 시작했다.
 - 상품에 optional 장비 metadata를 전달하고 현재 장비는 inventory 조회로 확인한다. 정보 누락·조회 실패는 비교 불가로 처리한다. 가격·정산·DB·전투 수치는 유지한다.
@@ -22,7 +22,7 @@
 - 이어 “브렌치 분기 절대 금지. 오직 main에만 작업내용이 업로드 되어야한다. 혹시 분리되어있다면 main으로 합쳐라”로 Git 방침을 명시했다. 이후 모든 작업·커밋·push는 main에서만 수행한다.
 - 원격 동기화 후 기존 `feat/south-gate-progression`의 두 커밋을 main에 fast-forward하고 `origin/main`에 push했다. 기준 HEAD는 `d14ab02`이며 기존 구현을 보존했다.
 - 독립 테스트 파일과 지역 콘텐츠 파일의 소유권을 나누어 병렬 진행한다. 세부 계약은 [설계](design-2026-09-22-parallel-progression.md), 실제 변경·검증·제한은 [구현 기록](implementation-2026-09-22-parallel-progression.md)에 기록한다. 실제 플레이 시간·시각 승인·배포 완료는 자동 테스트와 구분한다.
-- 구현·검증 완료: 전체1182개, 실제PostgreSQL 관련187개(신규경합7개), 관련browser10개, typecheck/build 통과. 숲지기 망토는 최초 HP+20 후보 대신 기존 장착·API 체계가 지원하는 피해 감소10%로 확정했다. main에 반영하며 배포는 수행하지 않는다.
+- 구현·검증 완료: 전체1182개, 실제PostgreSQL 관련187개(신규경합7개), 관련browser10개, typecheck/build 통과. 숲지기 망토는 최초 HP+20 후보 대신 기존 장착·API 체계가 지원하는 피해 감소10%로 확정했다. 구현 커밋 `ac70d3f`를 origin/main에 push 완료했으며 배포는 수행하지 않았다.
 
 > **과거 Git 반영 이력 — 2026-09-22, main 통합 이전:** 당시 구현 커밋 `5eb0f33`을 `origin/feat/south-gate-progression`에 push했다. 이후 main 통합과 후속 구현 push를 완료했으며 현재 상태는 위 완료 기록을 따른다. 운영 배포는 수행하지 않았다.
 
