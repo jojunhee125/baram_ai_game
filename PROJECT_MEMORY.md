@@ -1,12 +1,22 @@
 # 프로젝트 메모리
 
+## 세션 종료 — 2026-09-22
+
+- 사용자 요청으로 세션을 종료한다. 추가 코드 작업은 시작하지 않는다.
+- 장착 외형 구현 `57fe304`까지 origin/main에 push 완료. 최신 검증은 전체1193개·browser50개·workspace/E2E typecheck·build 통과다. branch/worktree 없이 main만 사용한다.
+- 로컬 게임: http://127.0.0.1:5173/ , 서버2567. 종료 기록 시 두 포트 LISTEN을 확인했으며 사용자가 실행을 요청한 프로세스는 그대로 유지했다. 서버는 DB 연결 없이 실행 중이다. 다음 세션에는 프로세스 생존을 다시 확인한다.
+- 로컬 실행 로그: `%TEMP%/ksc-local-run/`. 원격 운영 배포는 수행하지 않았다.
+- 다음 확인: 사용자의 실제 화면 피드백,20~30분 성장·전투 밸런스 측정. 원격 빈공격·투구/망토 외형·24종 맞춤 원화는 별도 승인 후 진행한다. KeyH 원인 미확정·SSO gateway/500CCU·다중process cache 한계는 유지한다.
+- [종료 기록](docs/implementation-2026-09-22-session-close.md) · [로드맵](docs/roadmap.md).
+
+
 ## 2026-09-22 후속 — 장착 외형
 
 사용자1번 승인으로 무기3종·갑옷3종의 원본 pixel overlay와 공개 장착 외형키2개를 구현했다. 모든 방에서 복원하고 로컬/원격 방향·이동·장착 변경과 로컬 공격을 따라간다. 기존 composite atlas는 유지한다. 전체1193개·browser50개 및 typecheck/build 통과. 상세 검증과 Git 반영 결과는 [구현 기록](docs/implementation-2026-09-22-equipped-appearance.md) 및 main 이력을 따른다. 아래 a8fbcb0 요약은 이 작업 직전 코드 기준이다.
 
 같은 행 actor layer 혼합·공격후 방향잔상을 수정했다. 원격 빈공격 protocol·helmet/cloak/ring 외형·24종 맞춤 원화·500CCU·운영 배포·사용자 시각 승인은 추가하지 않았다. legacy 무기 HTTP export는 남아 있으나 현행 WorldScene 외형은 authoritative replicated state만 사용한다.
 
-기준일: 2026-09-22. 최신 코드 커밋은 `a8fbcb0`이며 `origin/main`에 push 완료했다. 문서 최신화 시작 시 main과 origin/main이 일치하고 작업 트리는 깨끗했다. 운영 배포는 수행하지 않았다.
+기준일: 2026-09-22. 최신 코드 커밋은 `57fe304`이며 `origin/main`에 push 완료했다. 문서 최신화 시작 시 main과 origin/main이 일치하고 작업 트리는 깨끗했다. 운영 배포는 수행하지 않았다.
 
 ## 사용자 방향과 작업 규칙
 
