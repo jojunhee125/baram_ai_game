@@ -564,7 +564,7 @@ test("9 concurrency: a turn or replacement during movement cannot revive a remov
  * attack resolves idle and preserves the generic attack effect path").
  */
 test.describe("classic attack art, reached through skin zero's fallback", () => {
-  test.use({ missingTextures: ["master-adventurer"] });
+  test.use({ missingTextures: ["baram-adventurer"] });
 
 test("classic normal attack plays directional frames and cancels safely", async ({ harness }) => {
   const result = await harness.evaluate(async h => {
@@ -732,16 +732,16 @@ test("live hunting ground: all four PNGs load and the real 1440x900 world surviv
   });
   await joinRoom(page, "hunting-ground", { skinIndex: 0 });
   const guide = page.getByRole("region", { name: "현재 지역 안내" });
-  await expect(guide).toContainText("초보 사냥터 · 1굴");
+  await expect(guide).toContainText("초보 들판");
   await expect.poll(() => loaded.size).toBe(4);
   await expect(page.locator("#transition")).toHaveAttribute("data-state", "clear");
   const path = testInfo.outputPath("hunting-monsters.png");
   await page.screenshot({ path });
   await testInfo.attach("Real hunting ground (visual review artifact)", { path, contentType: "image/png" });
-  for (const destination of ["마을 광장", "사냥터 입구"]) {
+  for (const destination of ["남문 마을", "초보 들판 · Lv 1–3"]) {
     await page.locator("#landmark-button").click();
     await page.locator("#landmark-panel-list").getByRole("button", { name: destination, exact: true }).click();
-    await expect(guide).toContainText(destination === "마을 광장" ? "마을 광장" : "초보 사냥터 · 1굴");
+    await expect(guide).toContainText(destination === "남문 마을" ? "남문 마을" : "초보 들판");
     await expect(page.locator("#transition")).toHaveAttribute("data-state", "clear");
   }
 });
@@ -773,7 +773,7 @@ test.describe("missing optional art", () => {
 
   test("PNG 404s do not trigger the global WorldScene load error or prevent entry", async ({ page }) => {
     await joinRoom(page, "hunting-ground", { skinIndex: 0 });
-    await expect(page.getByRole("region", { name: "현재 지역 안내" })).toContainText("초보 사냥터 · 1굴");
+    await expect(page.getByRole("region", { name: "현재 지역 안내" })).toContainText("초보 들판");
     await expect(page.locator("#game-root canvas")).toBeVisible();
     await expect(page.getByText("맵을 불러오지 못했습니다", { exact: true })).toBeHidden();
   });

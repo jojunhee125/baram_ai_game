@@ -403,7 +403,7 @@ describe("VERIFY grand-plaza pays zero cost for a gate it does not have", () => 
     await testServer.cleanup();
   });
 
-  it("builds an empty gatedItemKeys and never calls the store on join", async () => {
+  it("skips possession reads but hydrates equipment appearance once on join", async () => {
     const room = (await testServer.createRoom<RoomState>("grand-plaza", {})) as Awaited<
       ReturnType<ColyseusTestServer["createRoom"]>
     > & { state: RoomState };
@@ -421,13 +421,13 @@ describe("VERIFY grand-plaza pays zero cost for a gate it does not have", () => 
       "precondition: grand-plaza has no monsters either",
     );
     const listCalls = (globalThis as { __listCalls?: string[] }).__listCalls ?? [];
-    assert.equal(listCalls.length, 0, "onJoin must not touch the store at all for this room");
+    assert.equal(listCalls.length, 0, "onJoin must not read portal possessions for this room");
     const getEquippedSlotsCalls =
       (globalThis as { __getEquippedSlotsCalls?: string[] }).__getEquippedSlotsCalls ?? [];
     assert.equal(
       getEquippedSlotsCalls.length,
-      0,
-      "the equipment cache (Phase F/V) must also stay gated on hasMonsters for this room",
+      1,
+      "public equipment appearance must hydrate once even in a non-combat room",
     );
     assert.ok(room.state.players.get(client.sessionId), "the join itself still succeeded");
   });

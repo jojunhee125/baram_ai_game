@@ -1,5 +1,11 @@
 # 프로젝트 메모리
 
+## 2026-09-22 후속 — 장착 외형
+
+사용자1번 승인으로 무기3종·갑옷3종의 원본 pixel overlay와 공개 장착 외형키2개를 구현했다. 모든 방에서 복원하고 로컬/원격 방향·이동·장착 변경과 로컬 공격을 따라간다. 기존 composite atlas는 유지한다. 전체1193개·browser50개 및 typecheck/build 통과. 상세 검증과 Git 반영 결과는 [구현 기록](docs/implementation-2026-09-22-equipped-appearance.md) 및 main 이력을 따른다. 아래 a8fbcb0 요약은 이 작업 직전 코드 기준이다.
+
+같은 행 actor layer 혼합·공격후 방향잔상을 수정했다. 원격 빈공격 protocol·helmet/cloak/ring 외형·24종 맞춤 원화·500CCU·운영 배포·사용자 시각 승인은 추가하지 않았다. legacy 무기 HTTP export는 남아 있으나 현행 WorldScene 외형은 authoritative replicated state만 사용한다.
+
 기준일: 2026-09-22. 최신 코드 커밋은 `a8fbcb0`이며 `origin/main`에 push 완료했다. 문서 최신화 시작 시 main과 origin/main이 일치하고 작업 트리는 깨끗했다. 운영 배포는 수행하지 않았다.
 
 ## 사용자 방향과 작업 규칙

@@ -170,11 +170,8 @@ function spawnAt(id: string, kind: MonsterKind, at: TilePosition): MonsterSpawnD
 }
 
 /**
- * `hydrateEquipmentCache` only fires in a `hasMonsters` room (Phase F reviewer fix — grand-plaza
- * must never pay a join-time DB cost for a cache `damagePlayer` can't read there). The
- * session-cache tests below are about the version-race logic itself, not about a specific
- * monster, so every room they create needs *some* monster — this one, far off-tile and fully
- * inert (0 aggro/leash radius, 0 damage), exists purely to make `hasMonsters` true.
+ * The session-cache tests keep an inert monster so combat assertions can share the same room
+ * fixture without background damage. Equipment appearance now hydrates in every room.
  */
 const INERT_SPAWN = spawnAt("inert-hasMonsters-fixture", MonsterKind.Deer, { tileX: 0, tileY: 0 });
 
@@ -819,14 +816,10 @@ describe(
 );
 
 /**
- * `hydrateEquipmentCache` is gated on `this.hasMonsters`, mirroring the possession catch-up read
- * (`hydratePossessionCache`, gated on `gatedItemKeys.size > 0`) — `equippedItemKeys` is only ever
- * read by `damagePlayer`/`handleAttack`, neither of which ever runs outside a hasMonsters room, so
- * grand-plaza must pay zero cost for a cache it can never consume (reviewer finding, Phase F: an
- * earlier revision of this code hydrated unconditionally, wasting one DB round trip per join on
- * the 500 CCU path).
+ * Public weapon and armor appearance requires one equipment catch-up read in grand-plaza too.
+ * Possession hydration remains gated independently by the room's doors.
  */
-describe("VERIFY grand-plaza pays zero equipment-cache cost, matching the possession cache", () => {
+describe("VERIFY grand-plaza hydrates equipment appearance once", () => {
   const PORT = 2589;
   let testServer: ColyseusTestServer;
   let getEquippedCalls: string[];
@@ -858,7 +851,7 @@ describe("VERIFY grand-plaza pays zero equipment-cache cost, matching the posses
     await testServer.cleanup();
   });
 
-  it("never calls getEquipped on a grand-plaza join, since the room has no monsters to consume the cache", async () => {
+  it("calls getEquippedSlots once on a grand-plaza join for public equipment appearance", async () => {
     const room = (await testServer.createRoom<RoomState>("grand-plaza", {})) as Awaited<
       ReturnType<ColyseusTestServer["createRoom"]>
     > & { state: RoomState };
@@ -870,7 +863,7 @@ describe("VERIFY grand-plaza pays zero equipment-cache cost, matching the posses
       0,
       "precondition, matching entryPass-verification.test.ts: grand-plaza gates nothing",
     );
-    assert.equal(getEquippedCalls.length, 0, "the equipment cache is gated on hasMonsters, same as the possession cache");
+    assert.deepEqual(getEquippedCalls, [client.sessionId], "appearance hydration reads this visitor's equipment once");
     assert.ok(room.state.players.get(client.sessionId), "the join itself still succeeded");
   });
 });

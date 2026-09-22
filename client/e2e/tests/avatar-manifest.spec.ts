@@ -331,7 +331,11 @@ test.describe("native manifest runtime", () => {
       }
       return states;
     });
-    for (const { skin, player, npc } of result) expect(npc, `NPC skin ${skin}`).toEqual(player);
+    for (const { skin, player, npc } of result) {
+      expect(npc, `NPC skin ${skin}`).toEqual({ ...player, depth: npc.y });
+      expect(player.depth).toBeGreaterThanOrEqual(player.y);
+      expect(player.depth).toBeLessThan(player.y + 0.5);
+    }
   });
 
   test("preview uses native idle and falls back to the same legacy skin when its image fails", async ({ harness }) => {
@@ -476,7 +480,9 @@ test.describe("default master avatar", () => {
     });
     expect(result.errors).toEqual([]);
     expect(result.count).toBe(24);
-    expect(result.npc).toEqual(result.player);
+    expect(result.npc).toEqual({ ...result.player, depth: result.npc.y });
+    expect(result.player.depth).toBeGreaterThanOrEqual(result.player.y);
+    expect(result.player.depth).toBeLessThan(result.player.y + 0.5);
     expect(result.preview).toEqual({ path: "/sprites/baram-adventurer.png", rect: { x: 0, y: 0, width: 313, height: 313 } });
     for (const state of result.states) {
       const idleFrame = result.manifest.frames[`${state.facing}:0`]!;

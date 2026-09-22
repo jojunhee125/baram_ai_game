@@ -27,6 +27,13 @@ export interface RuntimeAvatarClip {
   animationKey: string;
 }
 
+export interface AvatarAttachmentFrame {
+  manifest: AvatarManifest;
+  frame: AvatarFrame;
+  action: AvatarAction;
+  frameIndex: number;
+}
+
 export function resolveAvatarPreview(
   skinId: number, catalog: AvatarCatalog = AVATAR_CATALOG,
   textureAvailable: (path: string) => boolean = () => true,
@@ -136,6 +143,13 @@ export function createAvatarArt(scene: Phaser.Scene, catalog: AvatarCatalog = AV
     },
     resolve(skinId: number, action: AvatarAction, direction: Direction): RuntimeAvatarClip | null {
       return clips.get(clipKey(skinId, action, direction)) ?? null;
+    },
+    currentFrame(sprite: Phaser.GameObjects.Sprite): AvatarAttachmentFrame | null {
+      const visual = spriteVisuals.get(sprite);
+      if (!visual) return null;
+      const frameIndex = visual.clip.frames.findIndex((entry) => frameKey(visual.manifest, entry.frame) === sprite.frame.name);
+      if (frameIndex < 0) return null;
+      return { manifest: visual.manifest, frame: visual.manifest.frames[visual.clip.frames[frameIndex]!.frame]!, action: visual.action, frameIndex };
     },
     apply(sprite: Phaser.GameObjects.Sprite, visual: RuntimeAvatarClip, animate: boolean): void {
       if (!spriteVisuals.has(sprite)) {

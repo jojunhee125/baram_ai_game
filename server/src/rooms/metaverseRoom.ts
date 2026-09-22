@@ -628,6 +628,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         // (`totalAttack`/`totalMaxHp`, design §2 D4) is what keeps this placeholder harmless to
         // every existing combat/level test in the window before hydration resolves.
         playerClass: classCodeFor(null),
+        weaponItemKey: "",
+        armorItemKey: "",
       }),
     );
     this.proximityIndex.insert(client.sessionId, spawnTile);
@@ -698,6 +700,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         current.equippedItemKeys[slot] = itemKey;
       }
       current.equipCacheVersions[slot] += 1;
+      this.updateEquipmentAppearance(client.sessionId, current);
       client.send(ServerMessage.EquipmentChanged, { slot, itemKey, applied: true } satisfies EquipmentChanged);
     });
     if (unsubscribeEquipment !== undefined) {
@@ -708,17 +711,13 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         console.warn(`[zep-test] could not hydrate possessions for ${ownerKey}`, cause);
       });
     }
-    // Same reasoning as the possession gate above: equippedItemKeys is only ever read by
-    // damagePlayer/handleAttack, neither of which ever runs outside a hasMonsters room, so
-    // hydrating it in grand-plaza is a pure-waste DB round trip on the 500 CCU join path (PoC #2).
-    // Equip/unequip itself still works in any room — that path writes the cache directly, it
-    // never depends on hydration.
-    if (this.hasMonsters && this.inventoryStore !== null) {
+    // Equipment appearance is public in every room, including rooms without combat.
+    if (this.inventoryStore !== null) {
       void this.hydrateEquipmentCache(client.sessionId, ownerKey).catch((cause) => {
         console.warn(`[zep-test] could not hydrate equipment for ${ownerKey}`, cause);
       });
     }
-    // Not gated on `hasMonsters` (unlike the equipment hydration just above): the level shown in
+    // Not gated on `hasMonsters`: the level shown in
     // `Player.level` is now real in every room, including grand-plaza (design-phase-w2-level-
     // client.md §1.3 — "레벨은 grand-plaza를 포함한 모든 room에서 실제 값이 보여야 한다",
     // `docs/decisions.md` 2026-09-11), so every room with a store hydrates on join. This is not the
@@ -880,6 +879,23 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
           current.equippedItemKeys[slot] = itemKey;
         }
         current.equipCacheVersions[slot] += 1;
+      }
+    }
+    this.updateEquipmentAppearance(sessionId, current);
+  }
+
+  private updateEquipmentAppearance(sessionId: string, session: PlayerSession): void {
+    const player = this.state.players.get(sessionId);
+    if (!player) {
+      return;
+    }
+    for (const slot of [EquipmentSlot.Weapon, EquipmentSlot.Armor]) {
+      const definition = ITEM_DEFINITIONS.find((item) => item.key === session.equippedItemKeys[slot]);
+      const itemKey = definition?.equipment?.slot === slot ? definition.key : "";
+      if (slot === EquipmentSlot.Weapon) {
+        player.weaponItemKey = itemKey;
+      } else {
+        player.armorItemKey = itemKey;
       }
     }
   }
@@ -2614,6 +2630,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         current.equippedItemKeys[slot] = applyTo;
       }
       current.equipCacheVersions[slot] += 1;
+      this.updateEquipmentAppearance(client.sessionId, current);
     }
     this.clientsBySession.get(client.sessionId)?.send(ServerMessage.EquipmentChanged, {
       slot,

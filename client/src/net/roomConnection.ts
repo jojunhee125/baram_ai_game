@@ -74,6 +74,8 @@ export interface PlayerSnapshot {
   avatarSkin: number;
   /** Public like `nickname` (design-phase-w-level-system.md §2) — real from join, every room. */
   level: number;
+  weaponItemKey?: string;
+  armorItemKey?: string;
 }
 
 /**
@@ -760,5 +762,7 @@ function toSnapshot(player: Player): PlayerSnapshot {
     facing: player.facing as Direction,
     avatarSkin: player.avatarSkin,
     level: player.level,
+    weaponItemKey: typeof player.weaponItemKey === "string" ? player.weaponItemKey : "",
+    armorItemKey: typeof player.armorItemKey === "string" ? player.armorItemKey : "",
   };
 }

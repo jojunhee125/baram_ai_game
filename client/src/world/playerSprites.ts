@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { Direction, PATCH_RATE_MS, TILE_SIZE_PX, type AvatarAction } from "@zep-test/shared";
 import type { PlayerSnapshot } from "../net/roomConnection";
 import type { AvatarArt } from "./avatarArt";
+import { EquipmentAppearance } from "./equipmentAppearance";
 
 /**
  * Slightly longer than the server patch interval so a step is still tweening when the
@@ -18,6 +19,9 @@ interface TrackedPlayer {
   tileY: number;
   facing: Direction;
   level: number;
+  equipment: EquipmentAppearance;
+  depthOffset: number;
+  layerDepthStep: number;
 }
 
 /** What one `update()` call found changed — today just the one thing a caller needs to react to. */
@@ -38,9 +42,13 @@ function pixelY(tileY: number): number {
 /** Owns one sprite per visible player. Renders positions it is given; decides nothing. */
 export class PlayerSprites {
   private readonly tracked = new Map<string, TrackedPlayer>();
+  private shuttingDown = false;
 
   constructor(private readonly scene: Phaser.Scene, private readonly art: AvatarArt) {
+    scene.events.on(Phaser.Scenes.Events.POST_UPDATE, this.syncEquipment, this);
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.shuttingDown = true;
+      scene.events.off(Phaser.Scenes.Events.POST_UPDATE, this.syncEquipment, this);
       for (const sessionId of this.tracked.keys()) this.remove(sessionId);
     });
   }
@@ -58,6 +66,9 @@ export class PlayerSprites {
     this.art.apply(sprite, visual, visual.clip.frames.length > 1);
     // Depth by row so a player standing lower on the map overlaps one standing higher.
     sprite.setDepth(sprite.y);
+    const equipment = new EquipmentAppearance(this.scene, sessionId);
+    equipment.setEquipment(snapshot.weaponItemKey ?? "", snapshot.armorItemKey ?? "");
+    equipment.sync(sprite, snapshot.facing, this.art.currentFrame(sprite));
 
     this.tracked.set(sessionId, {
       sprite,
@@ -68,7 +79,11 @@ export class PlayerSprites {
       tileY: snapshot.tileY,
       facing: snapshot.facing,
       level: snapshot.level,
+      equipment,
+      depthOffset: 0,
+      layerDepthStep: 0.01,
     });
+    this.refreshDepthGroups();
     return sprite;
   }
 
@@ -101,6 +116,8 @@ export class PlayerSprites {
     player.facing = snapshot.facing;
     player.skin = snapshot.avatarSkin;
     player.level = snapshot.level;
+    player.equipment.setEquipment(snapshot.weaponItemKey ?? "", snapshot.armorItemKey ?? "");
+    player.equipment.sync(player.sprite, player.facing, this.art.currentFrame(player.sprite), player.layerDepthStep);
     if (distance > 0) {
       this.stepTo(player, distance > 1);
       return { levelChanged };
@@ -119,8 +136,10 @@ export class PlayerSprites {
     }
     player.attackTimer?.remove(false);
     player.tween?.stop();
+    player.equipment.destroy();
     player.sprite.destroy();
     this.tracked.delete(sessionId);
+    this.refreshDepthGroups();
   }
 
   get(sessionId: string): Phaser.GameObjects.Sprite | undefined {
@@ -130,15 +149,35 @@ export class PlayerSprites {
   attack(sessionId: string, facing: Direction): boolean {
     const player = this.tracked.get(sessionId);
     if (!player) return false;
+    this.finishAttack(player);
+    player.equipment.attack(facing);
     const visual = this.art.resolve(player.skin, "attack", facing);
     if (!visual || visual.action !== "attack") return false;
-    this.finishAttack(player);
     this.art.apply(player.sprite, visual, true);
     player.attackTimer = this.scene.time.delayedCall(visual.durationMs, () => this.finishAttack(player));
     return true;
   }
 
+  private syncEquipment(): void {
+    for (const player of this.tracked.values()) {
+      player.equipment.sync(player.sprite, player.facing, this.art.currentFrame(player.sprite), player.layerDepthStep);
+    }
+  }
+
+  private refreshDepthGroups(): void {
+    if (this.shuttingDown) return;
+    const spacing = 0.5 / (this.tracked.size + 1);
+    let rank = 0;
+    for (const player of this.tracked.values()) {
+      player.depthOffset = spacing * ++rank;
+      player.layerDepthStep = spacing / 4;
+      player.sprite.setDepth(pixelY(player.tileY) + player.depthOffset);
+      player.equipment.sync(player.sprite, player.facing, this.art.currentFrame(player.sprite), player.layerDepthStep);
+    }
+  }
+
   private finishAttack(player: TrackedPlayer): void {
+    player.equipment.cancelSwing();
     if (!player.attackTimer) return;
     player.attackTimer.remove(false);
     player.attackTimer = null;
@@ -156,7 +195,7 @@ export class PlayerSprites {
     player.tween?.stop();
 
     const targetY = pixelY(player.tileY);
-    player.sprite.setDepth(targetY);
+    player.sprite.setDepth(targetY + player.depthOffset);
 
     if (snap) {
       player.tween = null;

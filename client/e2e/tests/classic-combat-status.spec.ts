@@ -34,7 +34,7 @@ test("attack status returns to ready and remains single after room hop", async (
   await page.keyboard.up("Space");
   await expect(status).toHaveText("공격 준비");
   await page.locator("#landmark-button").click();
-  await page.locator("#landmark-panel-list").getByRole("button", { name: "마을 광장", exact: true }).click();
+  await page.locator("#landmark-panel-list").getByRole("button", { name: "남문 마을", exact: true }).click();
   await expect(page.getByLabel("현재 좌표")).toHaveText("31, 20");
   await expect(status).toHaveCount(1);
   await expect(status).toHaveText("공격 준비");

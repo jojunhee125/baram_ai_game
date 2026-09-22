@@ -545,7 +545,7 @@ describe("T3 — ring1/ring2: independent slots of the same family", () => {
   });
 });
 
-describe("T4 — getEquippedSlots: one round trip for every slot, and the hasMonsters gate holds", () => {
+describe("T4 — getEquippedSlots: one round trip for every slot in every room", () => {
   it("hydrateEquipmentCache populates every returned slot from a single call, not just one", async () => {
     let calls = 0;
     const answer: Partial<Record<EquipmentSlot, string>> = {
@@ -578,7 +578,7 @@ describe("T4 — getEquippedSlots: one round trip for every slot, and the hasMon
     }
   });
 
-  it("never calls getEquippedSlots on a grand-plaza-shaped join (no monsters), matching the possession cache's own gate", async () => {
+  it("hydrates equipment once on a grand-plaza-shaped join for public appearance", async () => {
     let calls = 0;
     const store: InventoryStore = {
       list: () => Promise.resolve([]),
@@ -599,7 +599,7 @@ describe("T4 — getEquippedSlots: one round trip for every slot, and the hasMon
       join(room, "s1", "sso-no-monsters");
       await flush();
       assert.equal(room["hasMonsters"], false, "precondition: this room has no monsters");
-      assert.equal(calls, 0, "the 8-slot expansion must not turn a monster-less room into a DB round trip on join");
+      assert.equal(calls, 1, "public equipment appearance needs one catch-up read even without monsters");
     } finally {
       dispose(room);
     }

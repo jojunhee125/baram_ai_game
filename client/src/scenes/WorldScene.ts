@@ -69,7 +69,7 @@ import {
   PlayerSprites,
   STEP_TWEEN_MS,
 } from "../world/playerSprites";
-import { ITEM_TEXTURE, OLD_DAGGER_ITEM_KEY, WeaponVisualState, itemFrame } from "../world/weaponVisual";
+import { ITEM_TEXTURE } from "../world/weaponVisual";
 
 /** Doubles as the loader key for the image and the tileset name embedded in every map. */
 const TILESET_KEY = "plaza-tiles";
@@ -169,7 +169,6 @@ export class WorldScene extends Phaser.Scene {
   private localPlayer: LocalPlayer | null = null;
   private movementKeys: MovementKeys | null = null;
   private attackKey: AttackKey | null = null;
-  private weapon: WeaponVisualState | null = null;
   private lastStepAt = Number.NEGATIVE_INFINITY;
   private transitioning = false;
   /**
@@ -214,7 +213,6 @@ export class WorldScene extends Phaser.Scene {
     this.localPlayer = null;
     this.movementKeys = null;
     this.attackKey = null;
-    this.weapon = null;
     this.lastStepAt = Number.NEGATIVE_INFINITY;
     this.transitioning = false;
     this.skinPickerOpen = false;
@@ -284,7 +282,6 @@ export class WorldScene extends Phaser.Scene {
       this.bubbles = new ChatBubbles(this);
       this.nameTags = new NameTags(this);
       this.monsterNames = new NameTags(this);
-      this.weapon = new WeaponVisualState();
     } catch (error) {
       console.error(error);
       showBootError("맵을 그리지 못했습니다", "맵 데이터가 올바르지 않습니다. 새로고침해 주세요.");
@@ -376,7 +373,6 @@ export class WorldScene extends Phaser.Scene {
       onEquipmentChanged: (event) => {
         this.inventoryPanel?.applyEquipmentChange(event);
         this.objectPanel?.applyEquipmentChange(event);
-        this.weapon?.applyEquipmentChange(event);
       },
       onExpGranted: (event) => this.applyExpGranted(event),
       onMoveRejected: (correction) => this.localPlayer?.applyRejection(correction),
@@ -562,11 +558,8 @@ export class WorldScene extends Phaser.Scene {
     // the key registered. Drawn on the predicted facing, which is what the server will read too.
     const sprite = this.players.get(this.connection.sessionId);
     if (sprite) {
-      const weaponFrame = this.weapon?.hasOldDagger
-        ? itemFrame(OLD_DAGGER_ITEM_KEY)
-        : undefined;
       const attackPose = this.players.attack(this.connection.sessionId, this.localPlayer.facing);
-      this.effects.swing(sprite, this.localPlayer.facing, weaponFrame, attackPose);
+      this.effects.swing(sprite, this.localPlayer.facing, undefined, attackPose);
     }
     return true;
   }

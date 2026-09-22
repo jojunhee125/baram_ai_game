@@ -1,5 +1,12 @@
 # 제품 방향 결정 기록
 
+## 2026-09-22 — 장착 무기·갑옷 외형 구현 승인
+
+- 사용자가 추천1번에 “네 1번으로 코드 개발 시작”으로 승인했다. main `28f8d39`에서 기존 장착 시스템을 시각적으로 연결한다.
+- 무기3종·갑옷3종의 원본 code-native pixel 레이어와 공개 외형키2개를 사용한다. 기존 composite atlas·전투 수치·DB·가격은 유지한다. 모든 방에서 장비를 복원하고 기존 StateView 범위로 원격 외형을 동기화한다.
+- 새 원격 공격 protocol은 추가하지 않는다. 로컬 공격 pose와 모든 캐릭터의 기존 방향·이동·장비 변경을 처리한다. helmet/cloak/ring 외형·24종 맞춤 원화·시각 승인·운영 배포는 별도다.
+- [설계](design-2026-09-22-equipped-appearance.md) · [구현·검증 기록](implementation-2026-09-22-equipped-appearance.md). branch/worktree 없이 main에서만 반영한다.
+
 ## 2026-09-22 — 상점 구매 전 장비 비교 구현·검증 완료
 
 - 전체1187개·browser26개와 typecheck/build, 독립 코드 검토를 통과했다. 구현 커밋 `a8fbcb0`를 origin/main에 push 완료했고 운영 배포는 수행하지 않았다.

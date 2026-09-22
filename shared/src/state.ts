@@ -30,6 +30,8 @@ export const Player = schema({
    * `MetaverseRoom.onJoin`/`hydrateClassCache` are what raise it once the store answers.
    */
   playerClass: "uint8",
+  weaponItemKey: "string",
+  armorItemKey: "string",
 });
 
 export type Player = SchemaType<typeof Player>;

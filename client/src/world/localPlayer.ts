@@ -167,8 +167,15 @@ export class LocalPlayer {
     // caught up to an in-flight step yet), so without this a re-skin from the character menu
     // (Phase H) would go unseen on the local player's own screen until one of those branches
     // happened to fall through to `adopt()`.
-    if (snapshot.avatarSkin !== this.predicted.avatarSkin) {
-      this.predicted = { ...this.predicted, avatarSkin: snapshot.avatarSkin };
+    if (snapshot.avatarSkin !== this.predicted.avatarSkin ||
+      snapshot.weaponItemKey !== this.predicted.weaponItemKey ||
+      snapshot.armorItemKey !== this.predicted.armorItemKey) {
+      this.predicted = {
+        ...this.predicted,
+        avatarSkin: snapshot.avatarSkin,
+        weaponItemKey: snapshot.weaponItemKey,
+        armorItemKey: snapshot.armorItemKey,
+      };
       this.sprites.update(this.sessionId, this.predicted);
     }
 
