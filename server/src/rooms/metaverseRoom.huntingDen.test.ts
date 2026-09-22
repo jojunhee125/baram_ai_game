@@ -233,12 +233,11 @@ describe("hunting-den — the room itself", () => {
     assert.ok(map.isWalkable(player.tileX, player.tileY), "a spawn inside a wall strands the client");
   });
 
-  it("publishes only its own door's trigger tiles as portal markers, and no others", async () => {
-    // hunting-den has exactly one door (its south door back to hunting-ground) - unlike
-    // hunting-ground, which now has two. A regression that leaked another room's triggers in
-    // would show up here as an extra marker.
+  it("publishes its south and forest door trigger tiles, without another room's markers", async () => {
     const room = await createRoom(HUNTING_DEN);
-    const declared = inbound.from.tiles.map((tile) => `${tile.tileX},${tile.tileY}`).sort();
+    const declared = PORTAL_DEFINITIONS.filter((portal) => portal.from.room === HUNTING_DEN)
+      .flatMap((portal) => portal.from.tiles).map((tile) => `${tile.tileX},${tile.tileY}`).sort();
+    assert.equal(declared.length, 4);
     const published = [...room.state.portalMarkers].map((marker) => `${marker.tileX},${marker.tileY}`).sort();
     assert.deepEqual(published, declared);
   });

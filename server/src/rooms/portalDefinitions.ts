@@ -15,6 +15,18 @@ import type { PortalDefinition } from "./contracts";
  */
 export const PORTAL_DEFINITIONS: readonly PortalDefinition[] = [
   {
+    id: "hunting-den-forest-door",
+    from: { room: "hunting-den", tiles: [{ tileX: 47, tileY: 25 }, { tileX: 47, tileY: 26 }] },
+    to: { room: "hunting-forest", arrival: { tileX: 31, tileY: 26, spreadRadiusInTiles: 0 } },
+    requiresItemKey: "entry-pass",
+    deniedMessage: "입장권은 다람쥐를 잡아서 획득하세요",
+  },
+  {
+    id: "hunting-forest-south-door",
+    from: { room: "hunting-forest", tiles: [{ tileX: 31, tileY: 27 }, { tileX: 32, tileY: 27 }] },
+    to: { room: "hunting-den", arrival: { tileX: 46, tileY: 25, spreadRadiusInTiles: 0 } },
+  },
+  {
     id: "plaza-south-door",
     from: {
       room: "plaza",

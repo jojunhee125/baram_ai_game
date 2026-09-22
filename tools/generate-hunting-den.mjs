@@ -310,7 +310,7 @@ function buildLayers(firstgid) {
     for (let x = 0; x < MAP.width; x += 1) {
       const index = y * MAP.width + x;
       const cell = cellAt(x, y);
-      ground[index] = firstgid + cell.ground;
+      ground[index] = firstgid + (x === 47 && (y === 25 || y === 26) ? TILE.woodDeck : cell.ground);
       collision[index] = cell.collision === null ? 0 : firstgid + cell.collision;
     }
   }
@@ -554,6 +554,9 @@ function selfCheck(layers, firstgid, tileset, blockedTileIds) {
   }
 
   const doorway = [
+    { tile: { tileX: 47, tileY: 25 }, role: "forest trigger" },
+    { tile: { tileX: 47, tileY: 26 }, role: "forest trigger" },
+    { tile: { tileX: 46, tileY: 25 }, role: "forest arrival" },
     ...PORTAL.triggers.map((tile) => ({ tile, role: "trigger" })),
     { tile: PORTAL.arrival, role: "arrival" },
   ];

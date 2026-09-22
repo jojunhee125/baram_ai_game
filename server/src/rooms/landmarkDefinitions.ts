@@ -23,6 +23,12 @@ export interface LandmarkDefinition {
  * (`validateLandmarkDefinitions`) checks the two stay in step: same id set, same room per id.
  */
 export const LANDMARK_DEFINITIONS: readonly LandmarkDefinition[] = [
+  {
+    id: "landmark-hunting-forest", room: "hunting-forest",
+    tile: { tileX: 31, tileY: 26, spreadRadiusInTiles: 0 },
+    requiresItemKey: "entry-pass",
+    deniedMessage: "입장권은 다람쥐를 잡아서 획득하세요",
+  },
   { id: "landmark-plaza", room: "plaza" },
   { id: "landmark-grand-plaza", room: "grand-plaza" },
   { id: "landmark-hunting-ground", room: "hunting-ground", tile: { tileX: 35, tileY: 30, spreadRadiusInTiles: 0 } },

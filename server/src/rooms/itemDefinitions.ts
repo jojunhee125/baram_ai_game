@@ -127,4 +127,10 @@ export const ITEM_DEFINITIONS: readonly ItemDefinition[] = [
     sellValue: 75,
     equipment: { slot: "armor", stats: { damageReduction: 0.3 } },
   },
+  { key: "forest-resin", name: "숲의 수지", icon: "acorn", sellValue: 16 },
+  { key: "ancient-bark", name: "오래된 나무껍질", icon: "carrot", sellValue: 28 },
+  {
+    key: "forest-cloak", name: "숲지기 망토", icon: "leather-armor", sellValue: 90,
+    equipment: { slot: "cloak", stats: { damageReduction: 0.1 } },
+  },
 ];

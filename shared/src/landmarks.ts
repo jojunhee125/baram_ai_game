@@ -26,4 +26,5 @@ export const LANDMARK_DEFINITIONS: readonly LandmarkDescriptor[] = [
   { id: "landmark-grand-plaza", name: "대광장", room: "grand-plaza" },
   { id: "landmark-hunting-ground", name: "초보 들판 · Lv 1–3", room: "hunting-ground" },
   { id: "landmark-hunting-den", name: "바위 사냥굴 · Lv 3–10", room: "hunting-den" },
+  { id: "landmark-hunting-forest", name: "위험한 숲 · Lv 8–15", room: "hunting-forest" },
 ];

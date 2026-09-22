@@ -50,6 +50,7 @@ const EQUIPMENT_ITEM_SLOTS: Partial<Record<string, EquipmentSlot>> = {
   "padded-armor": EquipmentSlot.Armor,
   "reinforced-armor": EquipmentSlot.Armor,
   "golden-helmet": EquipmentSlot.Helmet,
+  "forest-cloak": EquipmentSlot.Cloak,
 };
 
 /**

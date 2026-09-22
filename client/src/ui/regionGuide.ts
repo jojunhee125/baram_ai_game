@@ -4,7 +4,8 @@ const REGIONS: Readonly<Record<string, { name: string; kind: string; hint: strin
   plaza: { name: "남문 마을", kind: "마을 · 시작 지점", hint: "남쪽 성문은 들판, 북쪽 길은 대광장입니다. 성문 옆 길잡이에게 임무를 받고 동쪽 상점에서 준비하세요." },
   "grand-plaza": { name: "대광장", kind: "만남의 공간", hint: "동료와 대화하거나 T를 눌러 다른 지역을 방문하세요." },
   "hunting-ground": { name: "초보 들판", kind: "사냥 지역 · 권장 Lv 1–3", hint: "들판에서 사냥하고 입장권을 얻어 북쪽 바위 사냥굴로 향하세요. 남쪽 문은 남문 마을로 이어집니다." },
-  "hunting-den": { name: "바위 사냥굴", kind: "사냥 지역 · 권장 Lv 3–10", hint: "바위 사이의 넓은 길을 따라 사냥하세요. 남쪽 출구는 들판이며 L에서 경험치와 전리품을 확인할 수 있습니다." },
+  "hunting-den": { name: "바위 사냥굴", kind: "사냥 지역 · 권장 Lv 3–10", hint: "남쪽은 초보 들판, 남동쪽 샛길은 위험한 숲입니다. L에서 경험치와 전리품을 확인하세요." },
+  "hunting-forest": { name: "위험한 숲", kind: "사냥 지역 · 권장 Lv 8–15", hint: "토끼는 제자리에서 매복하고 사슴은 추격합니다. 수지·나무껍질을 팔거나 숲지기 망토를 얻으세요. 남쪽 출구는 바위 사냥굴입니다." },
 };
 
 /** Scene-owned DOM; each hop removes the old panel and creates the destination's guide. */

@@ -7,7 +7,7 @@ export const HERITAGE_TILESET = "heritage-tiles";
 export const CLASSIC_VILLAGE_SOURCE = "classic-village-ground";
 
 export function usesClassicTerrain(mapKey: string): boolean {
-  return mapKey === "plaza" || mapKey === "hunting-ground" || mapKey === "hunting-den";
+  return mapKey === "plaza" || mapKey === "hunting-ground" || mapKey === "hunting-den" || mapKey === "hunting-forest";
 }
 
 const ENVIRONMENT_RECTS = [
@@ -21,7 +21,8 @@ const ENVIRONMENT_RECTS = [
  * Tile IDs and collides properties stay untouched; no server/map migration is needed. */
 export function registerHeritageTerrain(scene: Phaser.Scene, mapKey = ""): string {
   const cave = mapKey === "hunting-den";
-  const textureKey = cave ? "rock-cave-tiles" : usesClassicTerrain(mapKey) ? "classic-village-tiles" : HERITAGE_TILESET;
+  const forest = mapKey === "hunting-forest";
+  const textureKey = forest ? "dangerous-forest-tiles" : cave ? "rock-cave-tiles" : usesClassicTerrain(mapKey) ? "classic-village-tiles" : HERITAGE_TILESET;
   if (scene.textures.exists(textureKey)) return textureKey;
   const source = scene.textures.get(HERITAGE_TERRAIN_SOURCE).getSourceImage() as HTMLImageElement;
   const village = usesClassicTerrain(mapKey)
@@ -34,6 +35,11 @@ export function registerHeritageTerrain(scene: Phaser.Scene, mapKey = ""): strin
   const context = texture.getContext();
   context.imageSmoothingEnabled = false;
   for (let i = 0; i < 16; i++) {
+    if (forest) {
+      paintForestTile(context, i);
+      texture.add(i, 0, (i % 8) * 32, Math.floor(i / 8) * 32, 32, 32);
+      continue;
+    }
     if (cave) {
       paintCaveTile(context, i);
       texture.add(i, 0, (i % 8) * 32, Math.floor(i / 8) * 32, 32, 32);
@@ -137,7 +143,44 @@ export function drawHeritageEnvironment(
     drawWayfinding(scene, 35.5, 8.5, "바위 사냥굴 ↑");
     drawWayfinding(scene, 35.5, 31.5, "남문 마을 ↓");
   }
-  if (mapKey === "hunting-den") drawWayfinding(scene, 31.5, 27.5, "초보 들판 ↓");
+  if (mapKey === "hunting-den") {
+    drawWayfinding(scene, 31.5, 27.5, "초보 들판 ↓");
+    drawWayfinding(scene, 46.5, 25.5, "위험한 숲 →");
+  }
+  if (mapKey === "hunting-forest") drawWayfinding(scene, 31.5, 27.5, "바위 사냥굴 ↓");
+}
+
+function paintForestTile(context: CanvasRenderingContext2D, tile: number): void {
+  const x = (tile % 8) * TILE_SIZE_PX;
+  const y = Math.floor(tile / 8) * TILE_SIZE_PX;
+  const blocked = tile >= 8;
+  const trail = tile === 3 || tile === 4;
+  context.fillStyle = blocked ? "#1a3125" : trail ? "#776749" : "#405737";
+  context.fillRect(x, y, 32, 32);
+  if (blocked) {
+    context.fillStyle = "#352e22";
+    context.fillRect(x + 12, y + 14, 9, 18);
+    context.fillRect(x + 5, y + 28, 22, 4);
+    context.fillStyle = "#604b30";
+    context.fillRect(x + 14, y + 17, 3, 14);
+    for (const [dx, dy, width, height, color] of [
+      [4, 4, 24, 16, "#294932"], [8, 0, 17, 23, "#355c3a"],
+      [1, 9, 29, 10, "#36583a"], [5, 5, 10, 6, "#507244"],
+      [11, 1, 9, 4, "#63804b"], [21, 10, 8, 10, "#223f2d"],
+    ] as const) {
+      context.fillStyle = color;
+      context.fillRect(x + dx, y + dy, width, height);
+    }
+  } else {
+    for (let i = 0; i < 16; i++) {
+      context.fillStyle = trail ? (i % 2 ? "#8a7954" : "#5c513a") : (i % 2 ? "#526944" : "#30452e");
+      context.fillRect(x + (i * 13 + tile * 3) % 30, y + (i * 7 + tile * 11) % 30, 2, i % 3 + 1);
+    }
+    if (tile === 3) {
+      context.fillStyle = "#b6a077";
+      for (let row = 3; row < 32; row += 8) context.fillRect(x, y + row, 32, 2);
+    }
+  }
 }
 
 function paintCaveTile(context: CanvasRenderingContext2D, tile: number): void {

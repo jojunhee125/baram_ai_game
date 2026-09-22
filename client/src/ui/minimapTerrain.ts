@@ -57,6 +57,7 @@ export function buildMinimapTerrain(
       const blocked = collision.getTileAt(x, y)?.collides === true;
       const ground = map.getTileAt(x, y, false, "ground")?.index;
       const color = mapKey === "hunting-den" ? (blocked ? CAVE_WALL : CAVE_FLOOR)
+        : mapKey === "hunting-forest" ? (blocked ? [26, 49, 37] as const : ground === 4 || ground === 5 ? ROAD : [65, 90, 55] as const)
         : blocked ? WALL : ground === 3 || ground === 8 ? GRASS : ground === 4 || ground === 5 ? ROAD : FLOOR;
       paint(image.data, (y * cols + x) * 4, color);
     }

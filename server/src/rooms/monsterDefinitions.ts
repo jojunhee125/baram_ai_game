@@ -51,7 +51,7 @@ export interface LootEntry {
  * (`hpMax`) rides along on every `MonsterHit`, so the client never holds a stat table that can
  * fall behind the server's.
  */
-export type MonsterBehavior = "aggressive" | "timid";
+export type MonsterBehavior = "aggressive" | "timid" | "ambush";
 
 export interface MonsterType {
   kind: MonsterKind;
@@ -304,7 +304,33 @@ const DEN_MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map(
   }),
 );
 
+const FOREST_MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
+  [MonsterKind.Rabbit, {
+    ...MONSTER_TYPES.get(MonsterKind.Rabbit)!,
+    maxHp: 96, damage: 20, expReward: 45, behavior: "ambush",
+    attackCooldownMs: 1600, aggroRadiusTiles: 1,
+    loot: [
+      { itemKey: "forest-resin", chance: 0.8, quantity: 1 },
+      { itemKey: "copper-coin", chance: 0.3, quantity: 1 },
+      { itemKey: "herb", chance: 0.15, quantity: 1 },
+      { itemKey: "forest-cloak", chance: 0.02, quantity: 1 },
+    ],
+  }],
+  [MonsterKind.Deer, {
+    ...MONSTER_TYPES.get(MonsterKind.Deer)!,
+    maxHp: 140, damage: 17, expReward: 70, behavior: "aggressive",
+    aggroRadiusTiles: 3, chaseStepIntervalMs: 400,
+    loot: [
+      { itemKey: "ancient-bark", chance: 0.75, quantity: 1 },
+      { itemKey: "copper-coin", chance: 0.4, quantity: 1 },
+      { itemKey: "herb", chance: 0.2, quantity: 1 },
+      { itemKey: "forest-cloak", chance: 0.04, quantity: 1 },
+    ],
+  }],
+]);
+
 export function monsterTypesForRoom(roomName: string | undefined): ReadonlyMap<MonsterKind, MonsterType> {
+  if (roomName === "hunting-forest") return FOREST_MONSTER_TYPES;
   if (roomName === "hunting-ground") {
     return FIELD_MONSTER_TYPES;
   }
@@ -363,6 +389,14 @@ export interface MonsterSpawnDefinition {
  * the interior, clear of the portal tiles, and at least 6 tiles from the arrival and player spawn).
  */
 export const MONSTER_SPAWN_DEFINITIONS: readonly MonsterSpawnDefinition[] = [
+  { id: "hf-rabbit-01", room: "hunting-forest", kind: MonsterKind.Rabbit, at: { tileX: 22, tileY: 12 }, wanderRadiusTiles: 0 },
+  { id: "hf-rabbit-02", room: "hunting-forest", kind: MonsterKind.Rabbit, at: { tileX: 41, tileY: 12 }, wanderRadiusTiles: 0 },
+  { id: "hf-rabbit-03", room: "hunting-forest", kind: MonsterKind.Rabbit, at: { tileX: 22, tileY: 19 }, wanderRadiusTiles: 0 },
+  { id: "hf-rabbit-04", room: "hunting-forest", kind: MonsterKind.Rabbit, at: { tileX: 41, tileY: 19 }, wanderRadiusTiles: 0 },
+  { id: "hf-deer-01", room: "hunting-forest", kind: MonsterKind.Deer, at: { tileX: 27, tileY: 12 }, wanderRadiusTiles: 1 },
+  { id: "hf-deer-02", room: "hunting-forest", kind: MonsterKind.Deer, at: { tileX: 36, tileY: 12 }, wanderRadiusTiles: 1 },
+  { id: "hf-deer-03", room: "hunting-forest", kind: MonsterKind.Deer, at: { tileX: 25, tileY: 18 }, wanderRadiusTiles: 1 },
+  { id: "hf-deer-04", room: "hunting-forest", kind: MonsterKind.Deer, at: { tileX: 38, tileY: 18 }, wanderRadiusTiles: 1 },
   // -- Southern band, nearest the entrance; all squirrels --
   { id: "hg-squirrel-01", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 19, tileY: 24 }, wanderRadiusTiles: 2 },
   { id: "hg-squirrel-02", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 24, tileY: 23 }, wanderRadiusTiles: 2 },
@@ -478,13 +512,16 @@ export function validateMonsterSpawnDefinitions(
       // 0, a negative amount or a fraction is a typo that boot should catch, not `awardExp`.
       errors.push(`${label} has an expReward of ${type.expReward}, which is not a positive integer`);
     }
-    if (type.behavior !== undefined && type.behavior !== "aggressive" && type.behavior !== "timid") {
+    if (type.behavior !== undefined && type.behavior !== "aggressive" && type.behavior !== "timid" && type.behavior !== "ambush") {
       errors.push(`${label} has an unknown behavior "${type.behavior}"`);
     }
     if (type.behavior === "timid" && (!Number.isInteger(type.fleeStepIntervalMs) || (type.fleeStepIntervalMs ?? 0) <= 0)) {
       errors.push(`${label} needs a positive integer fleeStepIntervalMs for timid behavior`);
     }
     const seenLootKeys = new Set<string>();
+    if (type.behavior === "ambush" && type.aggroRadiusTiles !== 1) {
+      errors.push(`${label} needs aggroRadiusTiles 1 for ambush behavior`);
+    }
     for (const [index, entry] of type.loot.entries()) {
       const line = `${label} loot row ${index}`;
       if (seenLootKeys.has(entry.itemKey)) {
@@ -559,6 +596,10 @@ export function validateMonsterSpawnDefinitions(
       errors.push(
         `${label} has a wanderRadiusTiles of ${spawn.wanderRadiusTiles}, which is not a non-negative integer`,
       );
+    }
+
+    if (type?.behavior === "ambush" && spawn.wanderRadiusTiles !== 0) {
+      errors.push(`${label} needs wanderRadiusTiles 0 for ambush behavior`);
     }
 
     const map = mapsByRoom.get(spawn.room);

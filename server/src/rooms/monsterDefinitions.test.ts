@@ -5,6 +5,7 @@ import {
   MONSTER_SPAWN_DEFINITIONS,
   MONSTER_TYPES,
   MonsterKind,
+  monsterTypesForRoom,
   validateMonsterSpawnDefinitions,
   type MonsterSpawnDefinition,
   type MonsterType,
@@ -316,6 +317,7 @@ describe("MONSTER_SPAWN_DEFINITIONS / MONSTER_TYPES against the real room maps",
       mapsByRoom,
       PORTAL_DEFINITIONS,
       INTERACTABLE_DEFINITIONS,
+      monsterTypesForRoom,
     );
     assert.deepEqual(errors, []);
   });

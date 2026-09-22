@@ -101,7 +101,7 @@ export function isHeritageMonsterTexture(key: string): boolean {
  * 빈 스프라이트가 되지는 않는다.
  */
 export function roomHasHeritageMonsters(mapKey: string): boolean {
-  return mapKey === "hunting-ground" || mapKey === "hunting-den";
+  return mapKey === "hunting-ground" || mapKey === "hunting-den" || mapKey === "hunting-forest";
 }
 
 export function preloadHeritageMonsterArt(scene: Phaser.Scene): void {

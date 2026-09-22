@@ -77,4 +77,12 @@ export const ROOM_DEFINITIONS: readonly RoomDefinition[] = [
      */
     spawn: { tileX: 31, tileY: 24, spreadRadiusInTiles: 1 },
   },
+  {
+    name: "hunting-forest",
+    roomType: "hunting-forest",
+    mapKey: "hunting-forest",
+    maxClients: 500,
+    realCapacity: 20,
+    spawn: { tileX: 31, tileY: 24, spreadRadiusInTiles: 1 },
+  },
 ];

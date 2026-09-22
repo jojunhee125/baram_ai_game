@@ -149,6 +149,9 @@ export function decideMonsterAction(
   }
 
   const target = selectTarget(snapshot, nearbyPlayers, type);
+  if (type.behavior === "ambush" && (target === null || chebyshevDistance(snapshot, target) > MONSTER_ATTACK_RANGE_TILES)) {
+    return { kind: MonsterActionKind.Hold, state: MonsterAiState.Idle, targetSessionId: null };
+  }
   if (target === null) {
     return decideUnaggroed(snapshot, now, type);
   }

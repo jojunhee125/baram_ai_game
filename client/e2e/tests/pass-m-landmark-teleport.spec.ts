@@ -1,8 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { LANDMARK_DEFINITIONS } from "@zep-test/shared";
 import { launchSharedBrowser, openFreshClient, type Client } from "../helpers/browser";
 import { probeAnimationLoop, waitForCanvasReady } from "../helpers/canvas";
 import { tapKey } from "../helpers/input";
-import { joinRoom } from "../helpers/flows";
+import { dismissClassPicker, joinRoom } from "../helpers/flows";
+
+const landmarkName = (room: string) => LANDMARK_DEFINITIONS.find(landmark => landmark.room === room)!.name;
 
 /**
  * Independent ui-engineer coverage for docs/design-phase-m-landmark-teleport.md §7 Pass C's golden
@@ -32,8 +35,8 @@ test.afterEach(async () => {
   await client.close();
 });
 
-test.describe("Phase M (a)(b) — T 단축키로 패널을 열고 닫는다, 4개 랜드마크가 표시된다", () => {
-  test("T로 열리고, 4개 항목이 표시되며, T나 Escape로 닫힌다", async () => {
+test.describe("Phase M (a)(b) — T 단축키로 패널을 열고 닫는다, 등록된 랜드마크가 표시된다", () => {
+  test("T로 열리고, 모든 항목이 표시되며, T나 Escape로 닫힌다", async () => {
     await joinRoom(client.page, "plaza");
     const button = client.page.locator("#landmark-button");
     await expect(button).toBeVisible();
@@ -44,11 +47,7 @@ test.describe("Phase M (a)(b) — T 단축키로 패널을 열고 닫는다, 4�
     await expect(button).toHaveAttribute("aria-expanded", "true");
 
     const rows = client.page.locator("#landmark-panel-list .landmark-panel__item");
-    await expect(rows).toHaveCount(4);
-    await expect(rows.nth(0)).toHaveText("마을 광장");
-    await expect(rows.nth(1)).toHaveText("분수 광장");
-    await expect(rows.nth(2)).toHaveText("사냥터 입구");
-    await expect(rows.nth(3)).toHaveText("사냥굴 입구");
+    await expect(rows).toHaveText(LANDMARK_DEFINITIONS.map(landmark => landmark.name));
 
     await tapKey(client.page, "KeyT");
     await expect(panel).toBeHidden();
@@ -88,7 +87,7 @@ test.describe("Phase M (c) — 같은 room 랜드마크는 hop 없이 워프한�
     await tapKey(client.page, "KeyT");
     const ownRow = client.page
       .locator("#landmark-panel-list")
-      .getByRole("button", { name: "분수 광장", exact: true });
+      .getByRole("button", { name: landmarkName("grand-plaza"), exact: true });
     await ownRow.click();
 
     // Row click closes the panel before anything else happens (design §3.4).
@@ -108,16 +107,17 @@ test.describe("Phase M (d) — 다른 room 랜드마크는 hop한다", () => {
     await tapKey(client.page, "KeyT");
     await client.page
       .locator("#landmark-panel-list")
-      .getByRole("button", { name: "사냥터 입구", exact: true })
+      .getByRole("button", { name: landmarkName("hunting-ground"), exact: true })
       .click();
 
     await client.page.waitForTimeout(1500); // fade-out + rejoin + fade-in (hop())
     await waitForCanvasReady(client.page);
+    await dismissClassPicker(client.page);
 
     await tapKey(client.page, "KeyM");
     await expect(client.page.locator("#minimap-canvas")).toHaveAttribute(
       "aria-label",
-      "hunting-ground 미니맵",
+      `${landmarkName("hunting-ground")} 미니맵`,
     );
   });
 });
@@ -128,7 +128,7 @@ test.describe("Phase M (e) — 입장권 없이 '사냥굴 입구'를 클릭하�
     await tapKey(client.page, "KeyT");
     await client.page
       .locator("#landmark-panel-list")
-      .getByRole("button", { name: "사냥굴 입구", exact: true })
+      .getByRole("button", { name: landmarkName("hunting-den"), exact: true })
       .click();
 
     await client.page.waitForTimeout(1500); // failed join round trip + abandonTransition's fade-in
@@ -139,20 +139,20 @@ test.describe("Phase M (e) — 입장권 없이 '사냥굴 입구'를 클릭하�
     await expect(client.page.locator("#transition")).toHaveAttribute("data-state", "clear");
 
     await tapKey(client.page, "KeyM");
-    await expect(client.page.locator("#minimap-canvas")).toHaveAttribute("aria-label", "plaza 미니맵");
+    await expect(client.page.locator("#minimap-canvas")).toHaveAttribute("aria-label", `${landmarkName("plaza")} 미니맵`);
   });
 });
 
 test.describe("Phase M (g) — 홈 워프 직후에도 랜드마크 패널의 표시는 독립적이다 (§8-1)", () => {
   test("H로 홈 워프한 직후, 랜드마크 행은 disabled로 보이지 않는다", async () => {
-    await joinRoom(client.page, "grand-plaza"); // this session's home is grand-plaza
+    await joinRoom(client.page, "plaza");
     await tapKey(client.page, "KeyH");
     await expect(client.page.locator("#home-button")).toBeDisabled();
 
     await tapKey(client.page, "KeyT");
     const ownRow = client.page
       .locator("#landmark-panel-list")
-      .getByRole("button", { name: "분수 광장", exact: true });
+      .getByRole("button", { name: landmarkName("plaza"), exact: true });
     // Independent module-scope cooldowns (design §2.3/§8-1): the home warp just started the
     // server's shared budget, but the panel's own display has not, so the row still reads
     // clickable even though the server will silently drop the click that follows.
@@ -182,7 +182,7 @@ test.describe("Phase M (j) — 이동 중 같은 room 랜드마크로 워프해�
     await client.page.waitForTimeout(150);
     await client.page
       .locator("#landmark-panel-list")
-      .getByRole("button", { name: "분수 광장", exact: true })
+      .getByRole("button", { name: landmarkName("grand-plaza"), exact: true })
       .click();
     await client.page.waitForTimeout(150);
     await client.page.keyboard.up("ArrowDown");
