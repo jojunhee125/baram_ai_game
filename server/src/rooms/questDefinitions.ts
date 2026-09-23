@@ -49,6 +49,7 @@ export interface QuestDefinition {
    */
   objectiveText: string;
   objective: QuestObjective;
+  prerequisiteQuestId?: string;
   /** Shown once the objective is met. */
   completionText: string;
   /**
@@ -65,6 +66,8 @@ export interface QuestDefinition {
 /** The only objective kind R03 defines: kill `count` monsters of `kind`. */
 export interface QuestObjective {
   kind: MonsterKind;
+  /** Restricts credit to kills in this room; omitted for existing quests. */
+  room?: string;
   /** Positive integer. Boot validation refuses anything else, `LootEntry.quantity`'s own treatment. */
   count: number;
 }
@@ -102,6 +105,28 @@ export const QUEST_DEFINITIONS: readonly QuestDefinition[] = [
     completionText: "첫 사냥을 마쳤군요! 남문 잡화상에서 낡은 단검을 사고 가방에서 장착하세요. 전리품을 팔아 갑옷을 마련하면 사냥굴에 도전할 수 있습니다.",
     // 화폐만, 소액(`docs/decisions.md` 2026-09-17) — R04-c 상점이 아직 없어 아이템은 쓸 데가 없다.
     reward: { currencyDelta: 50 },
+  },
+  {
+    id: "den-trial",
+    giverObjectId: "plaza-hunting-ground-npc",
+    prerequisiteQuestId: "first-hunt",
+    title: "사냥굴 조사",
+    summary: "첫 사냥을 마쳤다면 사냥굴로 들어가 사슴을 처치하세요.",
+    objectiveText: "사냥굴에서 사슴 3마리 처치",
+    objective: { kind: MonsterKind.Deer, room: "hunting-den", count: 3 },
+    completionText: "사냥굴 조사를 마쳤습니다. 다음은 숲입니다.",
+    reward: { currencyDelta: 90 },
+  },
+  {
+    id: "forest-trial",
+    giverObjectId: "plaza-hunting-ground-npc",
+    prerequisiteQuestId: "den-trial",
+    title: "숲의 위협",
+    summary: "사냥굴을 돌파했다면 숲의 사슴을 처치하세요.",
+    objectiveText: "사냥숲에서 사슴 4마리 처치",
+    objective: { kind: MonsterKind.Deer, room: "hunting-forest", count: 4 },
+    completionText: "숲의 위협을 잠재웠습니다.",
+    reward: { currencyDelta: 140 },
   },
 ];
 
@@ -150,6 +175,7 @@ export function validateQuestDefinitions(
   const seenIds = new Set<string>();
   const objectsById = new Map(objects.map((object) => [object.id, object]));
   const spawnedKinds = new Set(spawns.map((spawn) => spawn.kind));
+  const questIds = new Set(quests.map((quest) => quest.id));
 
   for (const quest of quests) {
     const label = `quest "${quest.id}"`;
@@ -160,6 +186,12 @@ export function validateQuestDefinitions(
       errors.push(`${label} is defined twice`);
     }
     seenIds.add(quest.id);
+    if (quest.prerequisiteQuestId !== undefined && !questIds.has(quest.prerequisiteQuestId)) {
+      errors.push(`${label} requires missing quest "${quest.prerequisiteQuestId}"`);
+    }
+    if (quest.prerequisiteQuestId === quest.id) {
+      errors.push(`${label} cannot require itself`);
+    }
 
     const giver = objectsById.get(quest.giverObjectId);
     if (giver === undefined) {
@@ -179,6 +211,9 @@ export function validateQuestDefinitions(
       // never finished — the fault this whole function exists to catch before a player finds it.
       errors.push(`${label} targets monster kind "${kind}", which no spawn row places`);
     }
+    if (quest.objective.room !== undefined && !spawns.some((spawn) => spawn.kind === kind && spawn.room === quest.objective.room)) {
+      errors.push(`${label} targets monster kind "${kind}" absent from room "${quest.objective.room}"`);
+    }
     if (Number.isInteger(count) && count > 0 && !quest.objectiveText.includes(String(count))) {
       // A warning rather than an error: the copy being out of step with the requirement misleads a
       // player but still leaves a finishable quest, and an author writing the number in words is a
@@ -195,6 +230,18 @@ export function validateQuestDefinitions(
       if (!Number.isInteger(currencyDelta) || currencyDelta < 1) {
         errors.push(`${label} rewards ${currencyDelta} currency, which is not a positive integer`);
       }
+    }
+  }
+  for (const quest of quests) {
+    const visited = new Set<string>();
+    let current: QuestDefinition | undefined = quest;
+    while (current?.prerequisiteQuestId !== undefined) {
+      if (visited.has(current.id)) {
+        errors.push(`quest "${quest.id}" has a prerequisite cycle`);
+        break;
+      }
+      visited.add(current.id);
+      current = quests.find((candidate) => candidate.id === current?.prerequisiteQuestId);
     }
   }
   return { errors, warnings };

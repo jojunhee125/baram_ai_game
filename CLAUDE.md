@@ -1,5 +1,11 @@
 # ksc_metaverse — Project Rules
 
+## Current State References (2026-09-23)
+
+- Read `PROJECT_MEMORY.md`, `docs/roadmap.md` and `docs/implementation-2026-09-23-parallel-code-bundle.md` for current implementation, verification limits and Git delivery status.
+- The approved A+B+C+D+I bundle is implemented; R02/R06/R07 are partial. New party/trade/crafting work requires its own scope authorization. The user authorized documentation/memory synchronization and commit/push; deployment remains separate.
+- Current user-provided AGENTS.md instructions take precedence over historical rules below. Every implementation task must create or update a Markdown implementation record in the repository's `docs/` with actual changes, checks and remaining limits.
+
 ZEP-style in-house 2D metaverse service (pixel avatars, movement + text chat), extended 2026-08-31 with a Baram-style hunting/combat/inventory subsystem. Current direction is the 2009–2010 PC 바람의나라 MMORPG roadmap — see `docs/roadmap.md` for background, scope and the R01–R10 plan.
 
 **This file is the live rule set and it is git-tracked on purpose**, so every PC and session reads the same rules instead of each keeping its own copy. The project root outside this repo holds only a pointer. Rules change here, in a commit, never in a session's local file.
@@ -32,9 +38,9 @@ Subagents buy context isolation and buy **nothing** in visibility. Closing that 
 
 Never create source files under either `docs/` folder. Planning/review docs go under this repo's `docs/`, not the old root one.
 
-## Markdown Discipline (MANDATORY, replaces the 2026-09-09 per-task record rule — user order 2026-09-17)
+## Historical Markdown Discipline (2026-09-17; superseded by current AGENTS.md record policy)
 
-Keep as few `.md` files in the git path as possible. Fewer, denser, current — not an archive of every task.
+The following records an earlier policy, not the current implementation gate. Follow the current AGENTS.md record policy above.
 
 - **Never create a new `.md` file unless the user asked for one.** Default to adding a section to the existing item doc, or a single line in `decisions.md`. Creating files nobody asked for is what produced the 49-file / 12,826-line root `docs/` sprawl; being short a record has never once cost this project anything.
 - **One doc per roadmap item**, named `docs/r<NN>-<topic>.md`, holding design + implementation + verification together. Never a per-task or per-date file: `implementation-YYYY-MM-DD-*.md` and `verification-*.md` are retired shapes. Extend the item's doc instead.

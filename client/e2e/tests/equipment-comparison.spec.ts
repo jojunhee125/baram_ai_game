@@ -86,6 +86,24 @@ test("same-slot values use additive attack and percentage-point armor difference
   await expect(line(page, "forest-cloak", "difference")).toHaveText("공격력 0 · 피해 감소 +10%p");
 });
 
+test("equipment requirements explain and gate equip as level and class change", async ({ page }) => {
+  const restricted = { ...blade(), equipment: { ...blade().equipment!, requirement: {
+    minLevel: 5, classes: ["warrior"] as const,
+  } } };
+  await mount(page, [dagger(), restricted]);
+  const button = row(page, "hunting-blade").locator(".bag__equip");
+  const condition = line(page, "hunting-blade", "requirement");
+  await expect(condition).toContainText("Lv.5");
+  await expect(button).toBeDisabled();
+  await page.evaluate(() => (window as unknown as { comparisonFixture: Fixture }).comparisonFixture.panel.setEligibility(5, "rogue"));
+  await expect(button).toBeDisabled();
+  await page.evaluate(() => (window as unknown as { comparisonFixture: Fixture }).comparisonFixture.panel.setEligibility(5, "warrior"));
+  await expect(button).toBeEnabled();
+  await button.click();
+  expect(await page.evaluate(() => (window as unknown as { comparisonFixture: Fixture }).comparisonFixture.equip))
+    .toEqual([{ itemKey: "hunting-blade", slot: "weapon" }]);
+});
+
 test("keyboard equip waits for success, keeps focus and updates negative, zero and empty baselines", async ({ page }) => {
   const { state } = await mount(page, [dagger(), blade()]);
   const button = row(page, "hunting-blade").locator(".bag__equip");

@@ -314,6 +314,7 @@ const FOREST_MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       { itemKey: "copper-coin", chance: 0.3, quantity: 1 },
       { itemKey: "herb", chance: 0.15, quantity: 1 },
       { itemKey: "forest-cloak", chance: 0.02, quantity: 1 },
+      { itemKey: "mystic-cloak", chance: 0.01, quantity: 1 },
     ],
   }],
   [MonsterKind.Deer, {
@@ -325,6 +326,7 @@ const FOREST_MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       { itemKey: "copper-coin", chance: 0.4, quantity: 1 },
       { itemKey: "herb", chance: 0.2, quantity: 1 },
       { itemKey: "forest-cloak", chance: 0.04, quantity: 1 },
+      { itemKey: "veteran-blade", chance: 0.015, quantity: 1 },
     ],
   }],
 ]);

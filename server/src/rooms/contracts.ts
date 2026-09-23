@@ -12,6 +12,7 @@ import {
   EquipmentSlot,
   InteractableKind,
   type Direction,
+  type EquipmentRequirement,
   type PlayerClassKey,
   type RoomState,
   type SkillKey,
@@ -424,6 +425,7 @@ export interface ItemDefinition {
   equipment?: {
     /** Which slot family (design §1.3) this item goes in — `slotFamily(request.slot)` must match. */
     slot: EquipmentSlotFamily;
+    requirement?: EquipmentRequirement;
     /**
      * Axis-by-axis bonuses this item grants while equipped. A small record rather than one field
      * per axis (design §6.1): at least two axes are already needed at once (damage reduction,
@@ -618,6 +620,8 @@ export interface PlayerSession {
    * is what makes that pessimistic path safe as well as correct.
    */
   questRowsHydrated: boolean;
+  /** Quest offers shown before the join-time read completes; replayed when the stored rows arrive. */
+  pendingQuestOfferRefresh: Set<string>;
   /**
    * Cached spendable balance, the currency twin of {@link totalExp} (roadmap R04-b): never in
    * `RoomState` (nobody but the owner needs to see it, `hp`'s own reasoning) and 0 until

@@ -1,3 +1,4 @@
+import { isPlayerClassKey } from "@zep-test/shared";
 import type { ItemDefinition } from "../rooms/contracts";
 
 /** Boot-validation outcome. Every error refuses boot; warnings are authoring smells only. */
@@ -52,6 +53,15 @@ export function validateItemDefinitions(
       errors.push(`${label} has a sellValue that is not a positive safe integer`);
     }
     if (item.equipment !== undefined) {
+      const requirement = item.equipment.requirement;
+      if (requirement?.minLevel !== undefined && (!Number.isSafeInteger(requirement.minLevel) || requirement.minLevel < 1)) {
+        errors.push(`${label} has an invalid minimum equipment level`);
+      }
+      if (requirement?.classes !== undefined && (requirement.classes.length === 0 ||
+        new Set(requirement.classes).size !== requirement.classes.length ||
+        requirement.classes.some((classKey) => !isPlayerClassKey(classKey)))) {
+        errors.push(`${label} has invalid equipment classes`);
+      }
       for (const [stat, value] of Object.entries(item.equipment.stats)) {
         if (stat === "damageReduction") {
           if (!Number.isFinite(value) || value <= 0 || value >= 1) {

@@ -115,14 +115,15 @@ describe("ITEM_DEFINITIONS", () => {
       ITEM_DEFINITIONS.map((definition) => definition.key),
       ["acorn", "carrot", "copper-coin", "herb", "old-dagger", "entry-pass", "leather-armor", "golden-helmet",
         "den-fur", "antler", "hunting-blade", "iron-blade", "padded-armor", "reinforced-armor",
-        "forest-resin", "ancient-bark", "forest-cloak"],
+        "forest-resin", "ancient-bark", "forest-cloak", "veteran-blade", "mystic-cloak"],
     );
   });
 
   it("names every item and keeps explicit icon aliases for progression items", () => {
     const aliases: Record<string, string> = { "hunting-blade": "old-dagger", "iron-blade": "old-dagger",
       "padded-armor": "leather-armor", "reinforced-armor": "leather-armor", "den-fur": "acorn", antler: "carrot",
-      "forest-resin": "acorn", "ancient-bark": "carrot", "forest-cloak": "leather-armor" };
+      "forest-resin": "acorn", "ancient-bark": "carrot", "forest-cloak": "leather-armor",
+      "veteran-blade": "old-dagger", "mystic-cloak": "leather-armor" };
     for (const definition of ITEM_DEFINITIONS) {
       assert.equal(definition.icon, aliases[definition.key] ?? definition.key, definition.key);
       assert.ok(definition.name.trim().length > 0, definition.key);

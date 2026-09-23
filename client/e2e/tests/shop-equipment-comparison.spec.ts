@@ -97,6 +97,16 @@ test("shop compares same-slot bonuses, percentage points and currently worn prod
   expect(state.reads).toBe(1);
 });
 
+test("shop listing shows equipment level and class before purchase", async ({ page }) => {
+  const restricted = { ...blade(), equipment: { ...blade().equipment!, requirement: {
+    minLevel: 5, classes: ["warrior"] as const,
+  } } };
+  await mount(page, [dagger()], { listings: [offer(restricted)] });
+  await expect(row(page).locator(".object__shop-requirement")).toContainText("Lv.5");
+  await expect(row(page).locator(".object__shop-requirement")).toContainText("전사");
+  await expect(row(page).locator(".object__shop-buy")).toBeEnabled();
+});
+
 test("only a successful empty snapshot permits a zero baseline", async ({ page }) => {
   const { initial } = await mount(page, [], { holdInitial: true });
   await expect(line(page, "baseline")).toHaveText("비교: 장비 확인 중");

@@ -1,4 +1,5 @@
 import {
+  CLASS_DEFINITIONS,
   EQUIPMENT_SLOTS,
   EquipmentSlot,
   type CurrencyChanged,
@@ -6,6 +7,7 @@ import {
   type ItemGranted,
   type ItemRemoved,
   type ShopDenied,
+  type PlayerClassKey,
 } from "@zep-test/shared";
 import { loadInventory, readEquipmentMetadata, type InventoryItem } from "../net/inventory";
 import { isTextEntry } from "../input/textEntry";
@@ -52,6 +54,8 @@ const EQUIPMENT_ITEM_SLOTS: Partial<Record<string, EquipmentSlot>> = {
   "reinforced-armor": EquipmentSlot.Armor,
   "golden-helmet": EquipmentSlot.Helmet,
   "forest-cloak": EquipmentSlot.Cloak,
+  "veteran-blade": EquipmentSlot.Weapon,
+  "mystic-cloak": EquipmentSlot.Cloak,
 };
 
 function itemSlot(item: InventoryItem): EquipmentSlot | undefined {
@@ -159,6 +163,40 @@ export class InventoryPanel {
    */
   private readonly pendingSell = new Map<string, string>();
   private readonly pendingUse = new Map<string, string>();
+  private level = 1;
+  private classKey: PlayerClassKey | null = null;
+
+  setEligibility(level: number, classKey: PlayerClassKey | null): void {
+    this.level = level;
+    this.classKey = classKey;
+    this.renderComparisons();
+    for (const item of this.items.values()) {
+      const row = this.findRow(item.itemKey);
+      if (row) this.applyEquipEligibility(row, item);
+    }
+  }
+
+  private requirementOf(item: InventoryItem): { label: string; eligible: boolean } | null {
+    const requirement = item.equipment?.requirement;
+    if (!requirement) return null;
+    const parts: string[] = [];
+    if (requirement.minLevel !== undefined) parts.push(`Lv.${requirement.minLevel} 이상`);
+    if (requirement.classes?.length) {
+      parts.push(requirement.classes.map((key) => CLASS_DEFINITIONS[key].label).join(" / "));
+    }
+    if (!parts.length) return null;
+    return { label: `착용 조건: ${parts.join(" · ")}`,
+      eligible: (requirement.minLevel === undefined || this.level >= requirement.minLevel) &&
+        (!requirement.classes?.length || this.classKey !== null && requirement.classes.includes(this.classKey)) };
+  }
+
+  private applyEquipEligibility(row: HTMLElement, item: InventoryItem): void {
+    const button = row.querySelector<HTMLButtonElement>(".bag__equip");
+    if (!button) return;
+    const requirement = this.requirementOf(item);
+    button.disabled = !item.equipped && requirement !== null && !requirement.eligible;
+    button.title = button.disabled ? requirement!.label : "";
+  }
 
   constructor(
     private readonly onEquipItem: (itemKey: string, slot: EquipmentSlot) => void,
@@ -665,6 +703,18 @@ export class InventoryPanel {
         line.textContent = text;
         line.hidden = text.length === 0;
       }
+      const requirement = this.requirementOf(item);
+      let condition = details.querySelector<HTMLElement>(".bag__comparison-requirement");
+      if (requirement && !condition) {
+        condition = document.createElement("span");
+        condition.className = "bag__comparison-requirement";
+        details.append(condition);
+      }
+      if (condition) {
+        condition.textContent = requirement?.label ?? "";
+        condition.hidden = requirement === null;
+        condition.dataset.eligible = String(requirement?.eligible ?? true);
+      }
     }
   }
 
@@ -677,7 +727,10 @@ export class InventoryPanel {
     if (slot === undefined) return;
     row.dataset.slot = slot;
     row.dataset.equipped = String(item.equipped);
-    if (row.querySelector(".bag__equip")) return;
+    if (row.querySelector(".bag__equip")) {
+      this.applyEquipEligibility(row, item);
+      return;
+    }
     let actions = row.querySelector<HTMLElement>(".bag__actions");
     if (!actions) {
       actions = document.createElement("div");
@@ -695,6 +748,7 @@ export class InventoryPanel {
       if (event.detail > 0) equip.blur();
     });
     actions.prepend(equip);
+    this.applyEquipEligibility(row, item);
   }
 
   private buildRow(item: InventoryItem): HTMLLIElement {

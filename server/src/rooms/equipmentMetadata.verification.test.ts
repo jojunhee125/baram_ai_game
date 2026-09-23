@@ -23,6 +23,8 @@ const EXPECTED: Readonly<Record<string, EquipmentMetadata>> = {
   "reinforced-armor": { slot: "armor", attackDamage: 0, damageReduction: 0.3 },
   "golden-helmet": { slot: "helmet", attackDamage: 0, damageReduction: 0.15 },
   "forest-cloak": { slot: "cloak", attackDamage: 0, damageReduction: 0.1 },
+  "veteran-blade": { slot: "weapon", attackDamage: 12, damageReduction: 0, requirement: { minLevel: 6, classes: ["warrior", "rogue"] } },
+  "mystic-cloak": { slot: "cloak", attackDamage: 0, damageReduction: 0.13, requirement: { minLevel: 7, classes: ["shaman", "cleric"] } },
 };
 
 interface InventoryView {

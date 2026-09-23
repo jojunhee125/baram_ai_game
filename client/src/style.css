@@ -1170,6 +1170,19 @@ body {
   font-weight: 600;
 }
 
+.bag__comparison-requirement {
+  color: #ded9c7;
+}
+
+.bag__comparison-requirement[data-eligible="false"] {
+  color: #f2b8a5;
+}
+
+.bag__equip:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 /*
  * One frame of assets/sprites/items.png; inventoryPanel.ts sets the column. Fixed 32px because
  * the HUD's controls are fixed px too, so an icon here never has to match the canvas scale.
@@ -2060,6 +2073,13 @@ body {
   font-size: 12px;
   overflow-wrap: anywhere;
   text-wrap: pretty;
+}
+
+.object__shop-requirement {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 /* Tabular figures, .bag__count's own reason: a price must not jitter against its neighbours. */

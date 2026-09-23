@@ -1,4 +1,4 @@
-import { EQUIPMENT_SLOTS, type EquipmentMetadata } from "@zep-test/shared";
+import { CLASS_DEFINITIONS, EQUIPMENT_SLOTS, type EquipmentMetadata, type PlayerClassKey } from "@zep-test/shared";
 
 /**
  * Same-origin like `profile.ts`, and for the same reason: in production the game server serves
@@ -99,7 +99,14 @@ export function readEquipmentMetadata(value: unknown): EquipmentMetadata | undef
     !Number.isFinite(equipment.damageReduction) ||
     equipment.damageReduction < 0 || equipment.damageReduction > 1
   ) return undefined;
-  return { slot: equipment.slot!, attackDamage: equipment.attackDamage, damageReduction: equipment.damageReduction };
+  const source = equipment.requirement;
+  const requirement = source && typeof source === "object" &&
+    (source.minLevel === undefined || Number.isInteger(source.minLevel) && source.minLevel > 0) &&
+    (source.classes === undefined || Array.isArray(source.classes) && source.classes.length > 0 &&
+      source.classes.every((key) => typeof key === "string" && Object.hasOwn(CLASS_DEFINITIONS, key)))
+    ? { minLevel: source.minLevel, classes: source.classes as readonly PlayerClassKey[] | undefined }
+    : undefined;
+  return { slot: equipment.slot!, attackDamage: equipment.attackDamage, damageReduction: equipment.damageReduction, requirement };
 }
 
 function isInventoryItem(row: unknown): row is InventoryItem {

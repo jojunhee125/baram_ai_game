@@ -238,6 +238,37 @@ test("turn, warp and skin changes cancel an active fallback weapon pose immediat
   }
 });
 
+test("boss warning covers exactly the affected tiles and clears on cancel or deadline", async ({ harness }) => {
+  const result = await harness.evaluate(async h => {
+    const { BossTelegraphs } = await import("/src/world/bossTelegraphs.ts");
+    const warnings = new BossTelegraphs(h.scene);
+    const graphicCount = () => h.scene.children.list.filter(child => child.name.startsWith("boss-telegraph:")).length;
+    const context = h.game.canvas.getContext("2d")!;
+    const sample = (x: number, y: number) => Array.from(context.getImageData(x, y, 1, 1).data);
+    await h.render();
+    const before = [sample(112, 112), sample(112, 80), sample(80, 80)];
+    const baseline = graphicCount();
+    warnings.show({ monsterId: "boss", targetTileX: 3, targetTileY: 3, radiusTiles: 1,
+      resolvesAt: Date.now() - 60_000, windupMs: 500, phase: 2 });
+    const shown = graphicCount();
+    await h.render();
+    const during = [sample(112, 112), sample(112, 80), sample(80, 80)];
+    warnings.remove("boss");
+    const cancelled = graphicCount();
+    warnings.show({ monsterId: "boss", targetTileX: 3, targetTileY: 3, radiusTiles: 0,
+      resolvesAt: Date.now() - 60_000, windupMs: 50, phase: 1 });
+    await h.delay(100);
+    const expired = graphicCount();
+    return { baseline, shown, cancelled, expired, before, during };
+  });
+  expect(result.shown).toBe(result.baseline + 1);
+  expect(result.cancelled).toBe(result.baseline);
+  expect(result.expired).toBe(result.baseline);
+  expect(result.during[0]).not.toEqual(result.before[0]);
+  expect(result.during[1]).not.toEqual(result.before[1]);
+  expect(result.during[2]).toEqual(result.before[2]);
+});
+
 test("same-tile actors keep whole bodies and gear grouped across insertion and removal", async ({ harness, page }, testInfo) => {
   const groups = await harness.evaluate(async h => {
     const groups = [];

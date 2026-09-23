@@ -24,7 +24,7 @@ import type {
 } from "./contracts";
 import { ROOM_DEFINITIONS } from "./definitions";
 import { INTERACTABLE_DEFINITIONS } from "./interactableDefinitions";
-import { ITEM_DEFINITIONS } from "./itemDefinitions";
+import { ITEM_DEFINITIONS, equipmentMetadata } from "./itemDefinitions";
 import { PORTAL_DEFINITIONS } from "./portalDefinitions";
 import { QUESTS_BY_GIVER } from "./questDefinitions";
 import { SHOPS_BY_NPC } from "./shopDefinitions";
@@ -59,12 +59,6 @@ const QUIZ = definitionFor("plaza-quiz-stand", InteractableKind.Quiz) as QuizInt
 const NPC = definitionFor("plaza-hunting-ground-npc", InteractableKind.Npc) as NpcInteractable;
 const SHOP_NPC = definitionFor("plaza-shop-npc", InteractableKind.Npc) as NpcInteractable;
 const RETURN_NPC = definitionFor("hunting-ground-return-npc", InteractableKind.Npc) as NpcInteractable;
-/** Read from the quest table rather than repeated here — the panel quotes it verbatim. */
-const FIRST_QUEST = (() => {
-  const [quest] = QUESTS_BY_GIVER.get(NPC.id) ?? [];
-  assert.ok(quest, `the quest table no longer has a row given by "${NPC.id}"`);
-  return quest;
-})();
 /** Read from the shop table rather than repeated here (roadmap R04-c) — the panel quotes it verbatim. */
 const SHOP = (() => {
   const shop = SHOPS_BY_NPC.get(SHOP_NPC.id);
@@ -451,18 +445,20 @@ describe("MetaverseRoom — entering an object", () => {
         // This guide also gives R03's first quest, and the panel carries the reader's own state on
         // it (`questSystem.test.ts` covers that state; here it is the payload's shape that matters).
         // `Offered` with no progress, since this server is built without a quest store.
-        quests: [
-          {
-            questId: FIRST_QUEST.id,
-            title: FIRST_QUEST.title,
-            summary: FIRST_QUEST.summary,
-            objectiveText: FIRST_QUEST.objectiveText,
-            completionText: FIRST_QUEST.completionText,
-            status: QuestStatus.Offered,
-            killCount: 0,
-            requiredCount: FIRST_QUEST.objective.count,
-          },
-        ],
+        quests: QUESTS_BY_GIVER.get(NPC.id)?.map((quest) => ({
+          questId: quest.id,
+          title: quest.title,
+          summary: quest.summary,
+          objectiveText: quest.objectiveText,
+          completionText: quest.completionText,
+          status: QuestStatus.Offered,
+          killCount: 0,
+          requiredCount: quest.objective.count,
+          ...(quest.prerequisiteQuestId === undefined ? {} : {
+            prerequisiteQuestId: quest.prerequisiteQuestId,
+            blocked: true,
+          }),
+        })),
         shop: undefined,
       },
     ]);
@@ -494,13 +490,7 @@ describe("MetaverseRoom — entering an object", () => {
               price: listing.price,
               ...(item.equipment?.stats.attackDamage === undefined ? {} : { attackBonus: item.equipment.stats.attackDamage }),
               ...(item.equipment?.stats.damageReduction === undefined ? {} : { damageReductionRatio: item.equipment.stats.damageReduction }),
-              ...(item.equipment === undefined ? {} : {
-                equipment: {
-                  slot: item.equipment.slot,
-                  attackDamage: item.equipment.stats.attackDamage ?? 0,
-                  damageReduction: item.equipment.stats.damageReduction ?? 0,
-                },
-              }),
+              ...(item.equipment === undefined ? {} : { equipment: equipmentMetadata(item) }),
             };
           }),
         },

@@ -10,6 +10,8 @@ import {
   type ExpGranted,
   type JoinOptions,
   type MonsterHit,
+  type PlayerAction,
+  type PlayerClassKey,
   type PlayerHealed,
   type PlayerHit,
   type SkillDenied,
@@ -45,6 +47,7 @@ import { PortalDenialBanner } from "../ui/portalDenialBanner";
 import { ChatBubbles } from "../world/chatBubbles";
 import { createAvatarArt, type AvatarArt } from "../world/avatarArt";
 import { CombatEffects, type CastTone, type DamageTone } from "../world/combatEffects";
+import { BossTelegraphs } from "../world/bossTelegraphs";
 import { drawInteractableMarkers } from "../world/interactableMarkers";
 import { LocalPlayer } from "../world/localPlayer";
 import { MonsterHealthBars } from "../world/monsterHealthBars";
@@ -144,6 +147,7 @@ export class WorldScene extends Phaser.Scene {
   private monsters!: MonsterSprites;
   private monsterHealth!: MonsterHealthBars;
   private effects!: CombatEffects;
+  private bossTelegraphs!: BossTelegraphs;
   private bubbles!: ChatBubbles;
   private nameTags!: NameTags;
   private monsterNames!: NameTags;
@@ -181,6 +185,7 @@ export class WorldScene extends Phaser.Scene {
   private regionGuide: RegionGuide | null = null;
   /** The local player's own level, last seen. Compared on every `ExpGranted` to spot a level-up. */
   private lastKnownLevel = 1;
+  private currentClassKey: PlayerClassKey | null = null;
 
   constructor() {
     super(WorldScene.KEY);
@@ -279,6 +284,7 @@ export class WorldScene extends Phaser.Scene {
       this.monsters = new MonsterSprites(this, monsterArt);
       this.monsterHealth = new MonsterHealthBars(this);
       this.effects = new CombatEffects(this);
+      this.bossTelegraphs = new BossTelegraphs(this);
       this.bubbles = new ChatBubbles(this);
       this.nameTags = new NameTags(this);
       this.monsterNames = new NameTags(this);
@@ -331,6 +337,7 @@ export class WorldScene extends Phaser.Scene {
       },
       onMonsterChange: (monsterId, snapshot) => this.monsters.update(monsterId, snapshot),
       onMonsterRemove: (monsterId) => {
+        this.bossTelegraphs.remove(monsterId);
         this.monsters.remove(monsterId);
         this.monsterHealth.remove(monsterId);
         // Death and walking out of the view radius arrive the same way, and a boss bar left up
@@ -340,6 +347,9 @@ export class WorldScene extends Phaser.Scene {
       },
       onMonsterHit: (event) => this.showMonsterHit(event),
       onPlayerHit: (event) => this.showPlayerHit(event),
+      onPlayerAction: (event) => this.showPlayerAction(event),
+      onBossTelegraph: (event) => this.bossTelegraphs.show(event),
+      onBossTelegraphCancelled: (event) => this.bossTelegraphs.remove(event.monsterId),
       onItemGranted: (event) => {
         this.toasts?.show(event);
         // The bag is the one window that stays open in a fight, so a pickup lands in it live
@@ -437,6 +447,7 @@ export class WorldScene extends Phaser.Scene {
       (itemKey, quantity, nonce) => connection.sendSellItem(itemKey, quantity, nonce),
       (itemKey, nonce) => connection.sendUseItem(itemKey, nonce),
     );
+    this.inventoryPanel.setEligibility(this.lastKnownLevel, this.currentClassKey);
     this.lootTablePanel = new LootTablePanel(this.connection.roomName);
     this.characterMenu = new CharacterMenu(
       () => void this.openSkinPicker(),
@@ -599,7 +610,32 @@ export class WorldScene extends Phaser.Scene {
     // the `state.monsters` deletion already does it, which is why the puff is a detached object.
     this.monsterHealth.remove(event.monsterId);
     this.bossVitals?.release(event.monsterId);
+    this.bossTelegraphs.remove(event.monsterId);
     this.effects.death(sprite);
+  }
+
+  private showPlayerAction(event: PlayerAction): void {
+    if (event.sessionId === this.connection.sessionId) return;
+    const sprite = this.players.get(event.sessionId);
+    if (!sprite) return;
+    switch (event.action) {
+      case "attack": {
+        const hasClip = this.players.attack(event.sessionId, event.facing);
+        this.effects.swing(sprite, event.facing, undefined, hasClip);
+        break;
+      }
+      case "cast":
+        this.players.cast(event.sessionId, event.facing);
+        break;
+      case "hit":
+        this.players.hit(event.sessionId, event.facing);
+        this.effects.flash(sprite);
+        break;
+      case "death":
+        this.players.death(event.sessionId, event.facing);
+        this.effects.death(sprite);
+        break;
+    }
   }
 
   /**
@@ -621,9 +657,11 @@ export class WorldScene extends Phaser.Scene {
     this.effects.damage(sprite, event.damage, tone);
     this.effects.impact(sprite, tone);
     if (event.hpRemaining <= 0) {
+      this.players.death(this.connection.sessionId, this.localPlayer?.facing ?? 0);
       this.effects.death(sprite);
       showDeathNotice("쓰러졌습니다 — 마을로 돌아갑니다");
     }
+    else this.players.hit(this.connection.sessionId, this.localPlayer?.facing ?? 0);
   }
 
   /**
@@ -812,6 +850,8 @@ export class WorldScene extends Phaser.Scene {
     const sprite = this.players.add(sessionId, snapshot);
     this.nameTags.add(sessionId, sprite, `Lv.${snapshot.level} ${snapshot.nickname}`);
     if (sessionId === this.connection.sessionId) {
+      this.lastKnownLevel = snapshot.level;
+      this.inventoryPanel?.setEligibility(snapshot.level, this.currentClassKey);
       this.vitals?.setLevel(snapshot.level);
       this.initLocalPlayer();
     }
@@ -822,6 +862,7 @@ export class WorldScene extends Phaser.Scene {
     // anything new to say; applying them directly would undo every predicted step.
     if (this.localPlayer && sessionId === this.connection.sessionId) {
       this.localPlayer.applyServerState(snapshot);
+      this.inventoryPanel?.setEligibility(snapshot.level, this.currentClassKey);
       return;
     }
     const { levelChanged } = this.players.update(sessionId, snapshot);
@@ -845,6 +886,7 @@ export class WorldScene extends Phaser.Scene {
       this.vitals?.announceLevelUp(event.level);
     }
     this.lastKnownLevel = event.level;
+    this.inventoryPanel?.setEligibility(event.level, this.currentClassKey);
   }
 
   /**
@@ -861,6 +903,8 @@ export class WorldScene extends Phaser.Scene {
    * which skills exist is a function of the class and of nothing else.
    */
   private applyClassChanged(event: ClassChanged): void {
+    this.currentClassKey = event.classKey;
+    this.inventoryPanel?.setEligibility(this.lastKnownLevel, event.classKey);
     this.classPicker?.applyClassChanged(event);
     this.characterMenu?.applyClass(
       event.classKey === null ? null : CLASS_DEFINITIONS[event.classKey].label,
@@ -910,6 +954,9 @@ export class WorldScene extends Phaser.Scene {
     const sprite = this.players.get(event.casterSessionId);
     if (sprite && isSkillKey(event.skillKey)) {
       this.effects.cast(sprite, castToneOf(event.skillKey));
+      if (event.casterSessionId === this.connection.sessionId) {
+        this.players.cast(event.casterSessionId, this.localPlayer?.facing ?? 0);
+      }
     }
     if (event.casterSessionId !== this.connection.sessionId) {
       return;

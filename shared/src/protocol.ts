@@ -151,6 +151,12 @@ export interface EquipmentMetadata {
   slot: Exclude<EquipmentSlot, "ring1" | "ring2"> | "ring";
   attackDamage: number;
   damageReduction: number;
+  requirement?: EquipmentRequirement;
+}
+
+export interface EquipmentRequirement {
+  minLevel?: number;
+  classes?: readonly PlayerClassKey[];
 }
 
 /** Every concrete slot, in the order `EquipmentSlot` declares them. */
@@ -293,6 +299,9 @@ export const ServerMessage = {
   QuizResult: "quiz:result",
   MonsterHit: "combat:monster-hit",
   PlayerHit: "combat:player-hit",
+  BossTelegraph: "combat:boss-telegraph",
+  BossTelegraphCancelled: "combat:boss-telegraph-cancelled",
+  PlayerAction: "player:action",
   ItemGranted: "inventory:granted",
   EquipmentChanged: "equipment:changed",
   /** design-phase-w-level-system.md §6 — one kill's EXP, and a level-up if this pushes past one. */
@@ -506,6 +515,8 @@ export interface QuestState {
    */
   killCount: number;
   requiredCount: number;
+  prerequisiteQuestId?: string;
+  blocked?: boolean;
 }
 
 /**
@@ -624,6 +635,28 @@ export interface PlayerHit {
   hpRemaining: number;
   /** PLAYER_MAX_HP today, and sent anyway for {@link MonsterHit.hpMax}'s reason. */
   hpMax: number;
+}
+
+export interface BossTelegraph {
+  monsterId: string;
+  targetTileX: number;
+  targetTileY: number;
+  radiusTiles: number;
+  /** Positive milliseconds between the warning and its planned resolution. */
+  windupMs: number;
+  resolvesAt: number;
+  phase: 1 | 2;
+}
+
+export interface BossTelegraphCancelled {
+  monsterId: string;
+}
+
+export interface PlayerAction {
+  sessionId: string;
+  action: "attack" | "cast" | "hit" | "death";
+  facing: Direction;
+  at: number;
 }
 
 /**
@@ -905,6 +938,9 @@ export interface ServerMessagePayload {
   [ServerMessage.QuizResult]: QuizResult;
   [ServerMessage.MonsterHit]: MonsterHit;
   [ServerMessage.PlayerHit]: PlayerHit;
+  [ServerMessage.BossTelegraph]: BossTelegraph;
+  [ServerMessage.BossTelegraphCancelled]: BossTelegraphCancelled;
+  [ServerMessage.PlayerAction]: PlayerAction;
   [ServerMessage.ItemGranted]: ItemGranted;
   [ServerMessage.EquipmentChanged]: EquipmentChanged;
   [ServerMessage.ExpGranted]: ExpGranted;

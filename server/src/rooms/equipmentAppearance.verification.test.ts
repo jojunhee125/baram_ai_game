@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { it, type TestContext } from "node:test";
 import { Decoder, Encoder, StateView } from "@colyseus/schema";
 import { ColyseusTestServer } from "@colyseus/testing";
-import { ClientMessage, Direction, Player, RoomState, ServerMessage, type EquipmentChanged, type EquipmentSlot } from "@zep-test/shared";
+import { ClientMessage, Direction, Player, RoomState, ServerMessage, cumulativeExpForLevel, type EquipmentChanged, type EquipmentSlot } from "@zep-test/shared";
 import { InMemoryInventoryStore, type InventoryStore } from "../db/inventoryStore";
 import { createGameServer } from "../server";
 import { ROOM_DEFINITIONS } from "./definitions";
@@ -70,6 +70,40 @@ it("hydrates persisted weapon and armor in every authored room and on a later se
   const noStore = await fixture(t);
   const anonymous = await join(noStore, randomUUID());
   assert.deepEqual(appearance(noStore, anonymous.client), { weapon: "", armor: "" });
+});
+
+it("enforces level and class requirements on new forest equipment", async (t) => {
+  const owner = randomUUID();
+  const store = new InMemoryInventoryStore();
+  await store.add(owner, "veteran-blade", 1);
+  await store.add(owner, "mystic-cloak", 1);
+  const room = await fixture(t, store);
+  const { client, equipment } = await join(room, owner);
+
+  room["handleEquipItem"](client, { itemKey: "veteran-blade", slot: "weapon" });
+  await flush();
+  assert.deepEqual(await store.getEquippedSlots(owner), {});
+  assert.equal(equipment.length, 0);
+
+  client.userData!.totalExp = cumulativeExpForLevel(6);
+  client.userData!.playerClass = "shaman";
+  room["handleEquipItem"](client, { itemKey: "veteran-blade", slot: "weapon" });
+  await flush();
+  assert.deepEqual(await store.getEquippedSlots(owner), {});
+
+  client.userData!.playerClass = "warrior";
+  room["handleEquipItem"](client, { itemKey: "veteran-blade", slot: "weapon" });
+  await flush();
+  assert.equal((await store.getEquippedSlots(owner)).weapon, "veteran-blade");
+
+  room["handleEquipItem"](client, { itemKey: "mystic-cloak", slot: "cloak" });
+  await flush();
+  assert.equal((await store.getEquippedSlots(owner)).cloak, undefined);
+  client.userData!.totalExp = cumulativeExpForLevel(7);
+  client.userData!.playerClass = "cleric";
+  room["handleEquipItem"](client, { itemKey: "mystic-cloak", slot: "cloak" });
+  await flush();
+  assert.equal((await store.getEquippedSlots(owner)).cloak, "mystic-cloak");
 });
 
 it("late hydration preserves newer subscribed weapon changes while hydrating an independent armor slot", async (t) => {

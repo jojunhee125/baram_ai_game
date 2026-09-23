@@ -5,6 +5,8 @@ import {
   MONSTER_TICK_MS,
   PLAYER_ATTACK_DAMAGE,
   PLAYER_MAX_HP,
+  ServerMessage,
+  type BossTelegraph,
   type EquipmentSlot,
   type JoinOptions,
   type TilePosition,
@@ -1431,5 +1433,85 @@ describe("VERIFY the boss reaches the loot-table panel of both hunting rooms", (
 
   it("leaves a room with no spawn rows without a panel at all", () => {
     assert.deepEqual(buildLootTableView("grand-plaza"), []);
+  });
+});
+
+describe("hunting-ground boss telegraph", () => {
+  it("cancels a pending warning only for clients who saw it", async () => {
+    const room = await createRoom([bossAt("hg-boss-01", BOSS_TILE)]);
+    try {
+      const target = join(room, "target");
+      const distant = join(room, "distant");
+      place(room, "target", { tileX: BOSS_TILE.tileX + 1, tileY: BOSS_TILE.tileY });
+      place(room, "distant", { tileX: OPEN_CENTRE.tileX - 30, tileY: OPEN_CENTRE.tileY });
+      room["tick"](1000);
+      assert.equal(target.sent.filter((message) => message.type === ServerMessage.BossTelegraph).length, 1);
+      assert.equal(distant.sent.filter((message) => message.type === ServerMessage.BossTelegraph).length, 0);
+      room["killMonster"]("hg-boss-01", 1200);
+      assert.equal(target.sent.filter((message) => message.type === ServerMessage.BossTelegraphCancelled).length, 1);
+      assert.equal(distant.sent.filter((message) => message.type === ServerMessage.BossTelegraphCancelled).length, 0);
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("damages only after the phase-two warning resolves", async () => {
+    const room = await createRoom([bossAt("hg-boss-01", BOSS_TILE)]);
+    try {
+      const target = join(room, "target");
+      place(room, "target", { tileX: BOSS_TILE.tileX + 1, tileY: BOSS_TILE.tileY });
+      runtimeOf(room, "hg-boss-01").hp = FIXTURE_BOSS_HP / 2;
+      room["tick"](1000);
+      const warning = target.sent.find((message) => message.type === ServerMessage.BossTelegraph)?.payload as BossTelegraph;
+      assert.equal(warning.phase, 2);
+      assert.equal(warning.windupMs, 800);
+      assert.equal(target.sent.some((message) => message.type === ServerMessage.PlayerHit), false);
+      room["tick"](warning.resolvesAt - 1);
+      assert.equal(target.sent.some((message) => message.type === ServerMessage.PlayerHit), false);
+      room["tick"](warning.resolvesAt);
+      assert.equal(target.sent.filter((message) => message.type === ServerMessage.PlayerHit).length, 1);
+      assert.equal(target.sent.filter((message) => message.type === ServerMessage.BossTelegraphCancelled).length, 1);
+    } finally {
+      dispose(room);
+    }
+  });
+
+  it("announces the tile, lets a player dodge, and changes to a circular phase-two hit", async () => {
+    const room = await createRoom([bossAt("hg-boss-01", BOSS_TILE)]);
+    try {
+      const target = join(room, "target");
+      const ally = join(room, "ally");
+      place(room, "target", { tileX: BOSS_TILE.tileX + 1, tileY: BOSS_TILE.tileY });
+      place(room, "ally", { tileX: BOSS_TILE.tileX + 2, tileY: BOSS_TILE.tileY });
+
+      room["tick"](1000);
+      const first = target.sent.find((message) => message.type === ServerMessage.BossTelegraph)?.payload as BossTelegraph;
+      assert.ok(first);
+      assert.equal(first.phase, 1);
+      assert.equal(first.radiusTiles, 0);
+      assert.equal(first.windupMs, 1000);
+      assert.equal(first.resolvesAt, 2000);
+      assert.equal(target.sent.some((message) => message.type === ServerMessage.PlayerHit), false);
+
+      place(room, "target", { tileX: BOSS_TILE.tileX + 1, tileY: BOSS_TILE.tileY + 1 });
+      room["tick"](2000);
+      assert.equal(target.sent.some((message) => message.type === ServerMessage.PlayerHit), false);
+      assert.equal(target.sent.filter((message) => message.type === ServerMessage.BossTelegraphCancelled).length, 1);
+
+      const runtime = runtimeOf(room, "hg-boss-01");
+      runtime.hp = FIXTURE_BOSS_HP / 2;
+      place(room, "target", { tileX: BOSS_TILE.tileX + 1, tileY: BOSS_TILE.tileY });
+      room["tick"](2400);
+      const warnings = target.sent.filter((message) => message.type === ServerMessage.BossTelegraph);
+      const second = warnings.at(-1)?.payload as BossTelegraph;
+      assert.equal(second.phase, 2);
+      assert.equal(second.radiusTiles, 1);
+      place(room, "target", { tileX: second.targetTileX + 1, tileY: second.targetTileY + 1 });
+      room["tick"](second.resolvesAt);
+      assert.equal(target.sent.some((message) => message.type === ServerMessage.PlayerHit), false,
+        "diagonal outside the phase-two circle must dodge");
+    } finally {
+      dispose(room);
+    }
   });
 });

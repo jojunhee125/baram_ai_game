@@ -41,6 +41,9 @@ export interface QuestStore {
    */
   accept(ownerKey: string, questId: string): Promise<QuestRow>;
 
+  /** Atomically accepts only when the prerequisite is completed. Null means it remains locked. */
+  acceptAfter(ownerKey: string, questId: string, prerequisiteQuestId: string): Promise<QuestRow | null>;
+
   /**
    * Credits one kill against `questId` and answers the state afterwards, or `null` when there was
    * nothing to credit — the account has not accepted it, or has already completed it.
@@ -96,6 +99,13 @@ export class InMemoryQuestStore implements QuestStore {
     const created = { killCount: 0, completed: false, settled: false };
     rows.set(questId, created);
     return Promise.resolve({ questId, ...created });
+  }
+
+  acceptAfter(ownerKey: string, questId: string, prerequisiteQuestId: string): Promise<QuestRow | null> {
+    if (this.byOwner.get(ownerKey)?.get(prerequisiteQuestId)?.completed !== true) {
+      return Promise.resolve(null);
+    }
+    return this.accept(ownerKey, questId);
   }
 
   recordKill(ownerKey: string, questId: string, requiredCount: number): Promise<QuestRow | null> {
@@ -165,6 +175,22 @@ export class PostgresQuestStore implements QuestStore {
     const row = result.rows[0];
     // RETURNING always answers here: the insert either wrote the row or the DO UPDATE touched it.
     return row === undefined ? { questId, killCount: 0, completed: false, settled: false } : toQuestRow(row);
+  }
+
+  async acceptAfter(ownerKey: string, questId: string, prerequisiteQuestId: string): Promise<QuestRow | null> {
+    assertUuidOwnerKey(ownerKey);
+    const result = await this.query<StoredRow>(
+      `INSERT INTO quest_progress (owner_key, quest_id)
+       SELECT $1, $2 WHERE EXISTS (
+         SELECT 1 FROM quest_progress
+         WHERE owner_key = $1 AND quest_id = $3 AND completed_at IS NOT NULL
+       )
+       ON CONFLICT (owner_key, quest_id)
+       DO UPDATE SET quest_id = quest_progress.quest_id
+       RETURNING quest_id, kill_count, completed_at, settled_at`,
+      [ownerKey, questId, prerequisiteQuestId],
+    );
+    return result.rows[0] === undefined ? null : toQuestRow(result.rows[0]);
   }
 
   async recordKill(

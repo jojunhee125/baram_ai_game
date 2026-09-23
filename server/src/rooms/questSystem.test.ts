@@ -290,6 +290,40 @@ describe("the authored quest table", () => {
 });
 
 describe("the NPC panel", () => {
+  it("refreshes a blocked offer when a delayed join read reveals its completed prerequisite", async () => {
+    const inner = new InMemoryQuestStore();
+    await inner.accept(OWNER, "first-hunt");
+    for (let index = 0; index < 3; index++) {
+      await inner.recordKill(OWNER, "first-hunt", 3);
+    }
+    let release!: (rows: readonly QuestRow[]) => void;
+    const held = new Promise<readonly QuestRow[]>((resolve) => { release = resolve; });
+    const store: QuestStore = {
+      list: () => held,
+      accept: (owner, questId) => inner.accept(owner, questId),
+      acceptAfter: (owner, questId, prerequisite) => inner.acceptAfter(owner, questId, prerequisite),
+      recordKill: (owner, questId, count) => inner.recordKill(owner, questId, count),
+      markSettled: (owner, questId) => inner.markSettled(owner, questId),
+    };
+    const room = await createRoom({ questStore: store });
+    const client = join(room, "hunter");
+    await flush();
+    const { from, dir } = approach(GIVER_TILE);
+    place(room, "hunter", from);
+    room["handleMove"](asRoomClient(client), { dir });
+    const panel = sentOfType<InteractableEntered>(client, ServerMessage.InteractableEntered)
+      .find((entry) => entry.objectId === QUEST.giverObjectId) as NpcInteraction | undefined;
+    assert.equal(panel?.quests?.find((quest) => quest.questId === "den-trial")?.blocked, true);
+
+    release(await inner.list(OWNER));
+    await flush();
+    const unlocked = questUpdates(client).filter((quest) => quest.questId === "den-trial");
+    assert.equal(unlocked.length, 1);
+    assert.equal(unlocked[0]?.status, QuestStatus.Offered);
+    assert.equal(unlocked[0]?.blocked, undefined);
+    dispose(room);
+  });
+
   it("offers the quest to an account that has never accepted it", async () => {
     const room = await createRoom({ questStore: new InMemoryQuestStore() });
     const client = join(room, "hunter");
@@ -302,7 +336,7 @@ describe("the NPC panel", () => {
     const npc = panels.find((panel) => panel.objectId === QUEST.giverObjectId);
     assert.ok(npc, `the step onto (${GIVER_TILE.tileX},${GIVER_TILE.tileY}) opened no panel`);
     assert.equal(npc.kind, InteractableKind.Npc);
-    assert.deepEqual((npc as NpcInteraction).quests, [
+    assert.deepEqual((npc as NpcInteraction).quests?.[0],
       {
         questId: QUEST.id,
         title: QUEST.title,
@@ -313,7 +347,10 @@ describe("the NPC panel", () => {
         killCount: 0,
         requiredCount: QUEST.objective.count,
       } satisfies QuestState,
-    ]);
+    );
+    assert.equal((npc as NpcInteraction).quests?.length, 3);
+    assert.equal((npc as NpcInteraction).quests?.[1]?.blocked, true);
+    assert.equal((npc as NpcInteraction).quests?.[2]?.blocked, true);
     dispose(room);
   });
 
@@ -340,6 +377,27 @@ describe("the NPC panel", () => {
 });
 
 describe("accepting a quest", () => {
+  it("requires the prior quest to be completed before accepting the den quest", async () => {
+    const store = new InMemoryQuestStore();
+    const room = await createRoom({ questStore: store });
+    const client = join(room, "hunter");
+    await flush();
+    accept(room, client, "den-trial");
+    await flush();
+    assert.equal(questUpdates(client).at(-1)?.blocked, true);
+    assert.deepEqual(await store.list(OWNER), []);
+
+    await store.accept(OWNER, "first-hunt");
+    for (let count = 0; count < 3; count++) {
+      await store.recordKill(OWNER, "first-hunt", 3);
+    }
+    accept(room, client, "den-trial");
+    await flush();
+    assert.equal(questUpdates(client).at(-1)?.status, QuestStatus.Accepted);
+    assert.equal((await store.list(OWNER)).find((row) => row.questId === "den-trial")?.killCount, 0);
+    dispose(room);
+  });
+
   it("stores it and answers with the accepted state", async () => {
     const store = new InMemoryQuestStore();
     const room = await createRoom({ questStore: store });
@@ -458,7 +516,7 @@ describe("kills advancing a quest", () => {
 
     const updates = questUpdates(client);
     assert.deepEqual(
-      updates.map((update) => `${update.killCount}/${update.requiredCount} ${update.status}`),
+      updates.filter((update) => update.questId === QUEST.id).map((update) => `${update.killCount}/${update.requiredCount} ${update.status}`),
       [
         `0/${required} ${QuestStatus.Accepted}`,
         `1/${required} ${QuestStatus.Accepted}`,
@@ -611,6 +669,7 @@ describe("rejoining", () => {
     const holding: QuestStore = {
       list: () => held,
       accept: (ownerKey, questId) => inner.accept(ownerKey, questId),
+      acceptAfter: (ownerKey, questId, prerequisiteQuestId) => inner.acceptAfter(ownerKey, questId, prerequisiteQuestId),
       recordKill: (ownerKey, questId, required) => {
         killCalls += 1;
         return inner.recordKill(ownerKey, questId, required);
@@ -648,6 +707,7 @@ describe("rejoining", () => {
         return inner.list(ownerKey);
       },
       accept: (ownerKey, questId) => inner.accept(ownerKey, questId),
+      acceptAfter: (ownerKey, questId, prerequisiteQuestId) => inner.acceptAfter(ownerKey, questId, prerequisiteQuestId),
       recordKill: (ownerKey, questId, required) => {
         killCalls += 1;
         return inner.recordKill(ownerKey, questId, required);

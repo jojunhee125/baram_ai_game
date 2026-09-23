@@ -7,6 +7,7 @@ export function equipmentMetadata(definition: ItemDefinition): EquipmentMetadata
     slot: equipment.slot,
     attackDamage: equipment.stats.attackDamage ?? 0,
     damageReduction: equipment.stats.damageReduction ?? 0,
+    ...(equipment.requirement === undefined ? {} : { requirement: equipment.requirement }),
   };
 }
 
@@ -142,5 +143,13 @@ export const ITEM_DEFINITIONS: readonly ItemDefinition[] = [
   {
     key: "forest-cloak", name: "숲지기 망토", icon: "leather-armor", sellValue: 90,
     equipment: { slot: "cloak", stats: { damageReduction: 0.1 } },
+  },
+  {
+    key: "veteran-blade", name: "노련한 사냥검", icon: "old-dagger", sellValue: 145,
+    equipment: { slot: "weapon", requirement: { minLevel: 6, classes: ["warrior", "rogue"] }, stats: { attackDamage: 12 } },
+  },
+  {
+    key: "mystic-cloak", name: "신비한 숲 망토", icon: "leather-armor", sellValue: 110,
+    equipment: { slot: "cloak", requirement: { minLevel: 7, classes: ["shaman", "cleric"] }, stats: { damageReduction: 0.13 } },
   },
 ];

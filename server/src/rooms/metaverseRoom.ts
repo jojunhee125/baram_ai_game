@@ -43,6 +43,7 @@ import {
   remainingExpToNextLevel,
   type AcceptQuestRequest,
   type BuyItemRequest,
+  type BossTelegraph,
   type ChangeSkinRequest,
   type ChatBroadcast,
   type ChatRequest,
@@ -63,6 +64,7 @@ import {
   type PlayerClassKey,
   type PlayerHealed,
   type PlayerHit,
+  type PlayerAction,
   type PortalDenied,
   type PortalEntered,
   type QuestState,
@@ -138,6 +140,7 @@ import {
 } from "./monsterDefinitions";
 import { PORTAL_DEFINITIONS } from "./portalDefinitions";
 import {
+  QUEST_DEFINITIONS,
   QUESTS_BY_GIVER,
   QUESTS_BY_MONSTER_KIND,
   QUESTS_BY_ID,
@@ -204,6 +207,8 @@ interface MonsterRuntime {
    * `monsterRuntimes` is one `Map` of one type populated by one loop ({@link populateMonsters}).
    */
   combat: BossCombatTracker | null;
+  telegraph: BossTelegraph | null;
+  telegraphAudience: Set<string>;
 }
 
 /**
@@ -668,6 +673,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       questRows: new Map(),
       // The map above is empty *and* says nothing yet; only the flag distinguishes the two.
       questRowsHydrated: false,
+      pendingQuestOfferRefresh: new Set(),
       // hydrateCurrencyCache supplies the real value on join; a settled quest reward updates it live.
       currencyBalance: 0,
     };
@@ -1269,6 +1275,12 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       if (viewer === undefined) {
         continue;
       }
+      viewer.send(ServerMessage.PlayerAction, {
+        sessionId: client.sessionId,
+        action: "cast",
+        facing: caster.facing as Direction,
+        at: Date.now(),
+      } satisfies PlayerAction);
       if (sessionId === client.sessionId) {
         viewer.send(ServerMessage.SkillUsed, {
           ...base,
@@ -1329,7 +1341,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       if (quest === undefined) {
         continue;
       }
-      client.send(ServerMessage.QuestUpdated, questState(quest, row));
+      client.send(ServerMessage.QuestUpdated, questState(quest, session.questRows.get(row.questId) ?? row));
       if (row.completed && quest.reward !== undefined && !row.settled) {
         // D6's own retry: the completion that produced this row may have called `settleQuestReward`
         // and lost the race (the process died, or the session left, between `store.recordKill`
@@ -1348,6 +1360,18 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     }
     // `settleQuestReward` never rejects (it logs and returns), so this cannot turn a paid-out
     // retry into a failed hydration — it only holds the currency sync until the ledger is settled.
+    for (const questId of session.pendingQuestOfferRefresh) {
+      const quest = this.roomQuests.get(questId);
+      if (quest === undefined) {
+        continue;
+      }
+      client.send(ServerMessage.QuestUpdated, questState(
+        quest,
+        session.questRows.get(quest.id) ?? null,
+        quest.prerequisiteQuestId !== undefined && session.questRows.get(quest.prerequisiteQuestId)?.completed !== true,
+      ));
+    }
+    session.pendingQuestOfferRefresh.clear();
     await Promise.all(retries);
   }
 
@@ -1709,9 +1733,11 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     store: QuestStore,
   ): Promise<void> {
     const ownerKey = this.clientsBySession.get(sessionId)?.userData?.ownerKey ?? sessionId;
-    let row: QuestRow;
+    let row: QuestRow | null;
     try {
-      row = await store.accept(ownerKey, quest.id);
+      row = quest.prerequisiteQuestId === undefined
+        ? await store.accept(ownerKey, quest.id)
+        : await store.acceptAfter(ownerKey, quest.id, quest.prerequisiteQuestId);
     } catch (cause) {
       console.warn(`[zep-test] could not accept ${quest.id} for ${ownerKey}`, cause);
       return;
@@ -1720,6 +1746,10 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // the account and stands whether or not this session is still here to be told about it.
     const client = this.clientsBySession.get(sessionId);
     if (!client?.userData) {
+      return;
+    }
+    if (row === null) {
+      client.send(ServerMessage.QuestUpdated, questState(quest, null, true));
       return;
     }
     this.rememberQuestRow(client.userData, row);
@@ -1749,6 +1779,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     }
     const session = this.clientsBySession.get(lastHit.sessionId)?.userData;
     for (const quest of quests) {
+      if (quest.objective.room !== undefined && quest.objective.room !== this.roomName) {
+        continue;
+      }
       // Only a hydrated cache may answer "no" — see `PlayerSession.questRowsHydrated`. A session
       // that has already left the room cannot answer at all, and its account still earned the kill.
       if (session?.questRowsHydrated === true) {
@@ -1796,6 +1829,13 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     }
     this.rememberQuestRow(client.userData, row);
     client.send(ServerMessage.QuestUpdated, questState(quest, row));
+    if (row.completed) {
+      for (const next of QUEST_DEFINITIONS) {
+        if (next.prerequisiteQuestId === quest.id && !client.userData.questRows.has(next.id)) {
+          client.send(ServerMessage.QuestUpdated, questState(next, null));
+        }
+      }
+    }
   }
 
   /**
@@ -1905,7 +1945,16 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     objectId: string,
   ): readonly QuestState[] | undefined {
     const quests = QUESTS_BY_GIVER.get(objectId);
-    return quests?.map((quest) => questState(quest, session.questRows.get(quest.id) ?? null));
+    if (quests !== undefined && !session.questRowsHydrated) {
+      for (const quest of quests) {
+        session.pendingQuestOfferRefresh.add(quest.id);
+      }
+    }
+    return quests?.map((quest) => questState(
+      quest,
+      session.questRows.get(quest.id) ?? null,
+      quest.prerequisiteQuestId !== undefined && session.questRows.get(quest.prerequisiteQuestId)?.completed !== true,
+    ));
   }
 
   /**
@@ -2380,6 +2429,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // Stamped before the target search, so a miss costs the cooldown too. Otherwise a client
     // swinging at thin air would buy `maxMessagesPerSecond` proximity queries a second.
     session.lastAttackAt = now;
+    this.broadcastPlayerAction(client.sessionId, player, "attack", now);
 
     const monsterId = this.pickAttackTarget(player, ATTACK_RANGE_TILES);
     if (monsterId === null) {
@@ -2517,7 +2567,11 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     if (
       definition === undefined ||
       definition.equipment === undefined ||
-      definition.equipment.slot !== slotFamily(slot)
+      definition.equipment.slot !== slotFamily(slot) ||
+      (definition.equipment.requirement?.minLevel !== undefined &&
+        levelForExp(session.totalExp) < definition.equipment.requirement.minLevel) ||
+      (definition.equipment.requirement?.classes !== undefined &&
+        (session.playerClass === null || !definition.equipment.requirement.classes.includes(session.playerClass)))
     ) {
       return;
     }
@@ -3038,6 +3092,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
         hp: type.maxHp,
         lastHitBy: null,
         combat: type.isBoss === true ? { combatants: new Set(), wipeResetAt: null } : null,
+        telegraph: null,
+        telegraphAudience: new Set(),
       };
       this.monsterRuntimes.set(definition.id, runtime);
 
@@ -3094,6 +3150,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // A respawn is a new monster: it arrives whole, and it owes its drops to nobody.
     runtime.hp = runtime.type.maxHp;
     runtime.lastHitBy = null;
+    this.cancelBossTelegraph(monsterId, runtime);
     if (runtime.combat !== null) {
       // And it is nobody's fight yet. Without this the new boss inherits the previous one's
       // roster, so anybody who hit that boss and is still in the room holds a seat this fight can
@@ -3127,6 +3184,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // removal into every StateView, so `refreshMonsterViewAround` only has to drop the ledger.
     this.state.monsters.delete(monsterId);
     runtime.state = MonsterAiState.Dead;
+    this.cancelBossTelegraph(monsterId, runtime);
     runtime.respawnAt = now + runtime.type.respawnDelayMs;
 
     if (runtime.type.isBoss === true && this.bossStateStore !== null) {
@@ -3201,6 +3259,29 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
    */
   private tick(now: number): void {
     for (const [monsterId, runtime] of this.monsterRuntimes) {
+      if (runtime.telegraph !== null) {
+        if (runtime.combat?.wipeResetAt !== null && runtime.combat?.wipeResetAt !== undefined) {
+          this.cancelBossTelegraph(monsterId, runtime);
+        } else if (now < runtime.telegraph.resolvesAt) {
+          continue;
+        } else {
+          const telegraph = runtime.telegraph;
+          this.cancelBossTelegraph(monsterId, runtime);
+          for (const sessionId of this.proximityIndex.within(
+            { tileX: telegraph.targetTileX, tileY: telegraph.targetTileY },
+            telegraph.radiusTiles,
+            this.monsterAggroBuffer,
+          )) {
+            const target = this.state.players.get(sessionId);
+            if (target === undefined ||
+              (target.tileX - telegraph.targetTileX) ** 2 + (target.tileY - telegraph.targetTileY) ** 2 > telegraph.radiusTiles ** 2) {
+              continue;
+            }
+            this.damagePlayer(sessionId, monsterId, runtime.type.damage * (telegraph.phase === 2 ? 2 : 1), now);
+          }
+          continue;
+        }
+      }
       // Boss wipe reset (design §6.6): the whole group that was fighting this boss died and the
       // grace window has passed with nobody rejoining. `killMonster` is not called — this is a
       // full-heal, not a kill, so `respawnAt` and the DB record are both left untouched.
@@ -3255,7 +3336,30 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
             monster.facing = action.facing;
           }
           if (action.targetSessionId !== null) {
-            this.damagePlayer(action.targetSessionId, monsterId, runtime.type.damage, now);
+            if (monsterId === "hg-boss-01" && monster !== undefined) {
+              const target = this.state.players.get(action.targetSessionId);
+              if (target !== undefined) {
+                const phase: 1 | 2 = runtime.hp <= runtime.type.maxHp / 2 ? 2 : 1;
+                const windupMs = phase === 2 ? 800 : 1000;
+                const telegraph: BossTelegraph = {
+                  monsterId,
+                  targetTileX: target.tileX,
+                  targetTileY: target.tileY,
+                  radiusTiles: phase === 2 ? 1 : 0,
+                  windupMs,
+                  resolvesAt: now + windupMs,
+                  phase,
+                };
+                runtime.telegraph = telegraph;
+                runtime.telegraphAudience.clear();
+                for (const sessionId of this.proximityIndex.within(monster, VIEW_RADIUS_TILES, this.hitAudienceBuffer)) {
+                  runtime.telegraphAudience.add(sessionId);
+                  this.clientsBySession.get(sessionId)?.send(ServerMessage.BossTelegraph, telegraph);
+                }
+              }
+            } else {
+              this.damagePlayer(action.targetSessionId, monsterId, runtime.type.damage, now);
+            }
           }
           break;
         case MonsterActionKind.Respawn:
@@ -3268,6 +3372,32 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
 
     // After the monsters, so that a player hit this tick cannot also be healed by it.
     this.recoverOutOfCombat(now);
+  }
+
+  private cancelBossTelegraph(monsterId: string, runtime: MonsterRuntime): void {
+    if (runtime.telegraph === null) {
+      return;
+    }
+    runtime.telegraph = null;
+    for (const sessionId of runtime.telegraphAudience) {
+      this.clientsBySession.get(sessionId)?.send(ServerMessage.BossTelegraphCancelled, { monsterId });
+    }
+    runtime.telegraphAudience.clear();
+  }
+
+  private broadcastPlayerAction(
+    sessionId: string,
+    player: Player,
+    action: PlayerAction["action"],
+    at: number,
+  ): void {
+    const payload: PlayerAction = { sessionId, action, facing: player.facing as Direction, at };
+    for (const viewerId of this.proximityIndex.within(player, VIEW_RADIUS_TILES, this.hitAudienceBuffer)) {
+      if (viewerId === sessionId) {
+        continue;
+      }
+      this.clientsBySession.get(viewerId)?.send(ServerMessage.PlayerAction, payload);
+    }
   }
 
   /**
@@ -3342,6 +3472,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       hpRemaining,
       hpMax: this.totalMaxHp(session),
     } satisfies PlayerHit);
+    this.broadcastPlayerAction(sessionId, player, hpRemaining > 0 ? "hit" : "death", now);
 
     if (hpRemaining > 0) {
       return;
@@ -3667,7 +3798,7 @@ function toInteraction(
  * five kills outlives a redeploy that lowers it to three, and a progress bar reading "5 / 3" would
  * be the client's problem for a requirement change that is entirely the server's.
  */
-function questState(quest: QuestDefinition, row: QuestRow | null): QuestState {
+function questState(quest: QuestDefinition, row: QuestRow | null, blocked = false): QuestState {
   return {
     questId: quest.id,
     title: quest.title,
@@ -3682,6 +3813,8 @@ function questState(quest: QuestDefinition, row: QuestRow | null): QuestState {
           : QuestStatus.Accepted,
     killCount: Math.min(row?.killCount ?? 0, quest.objective.count),
     requiredCount: quest.objective.count,
+    ...(quest.prerequisiteQuestId === undefined ? {} : { prerequisiteQuestId: quest.prerequisiteQuestId }),
+    ...(row === null && blocked ? { blocked: true } : {}),
   };
 }
 

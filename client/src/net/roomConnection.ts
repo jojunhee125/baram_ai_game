@@ -5,6 +5,8 @@ import {
   ServerMessage,
   type AcceptQuestRequest,
   type BuyItemRequest,
+  type BossTelegraph,
+  type BossTelegraphCancelled,
   type ChangeSkinRequest,
   type ChatBroadcast,
   type ChatRequest,
@@ -30,6 +32,7 @@ import {
   type PlayerClassKey,
   type PlayerHealed,
   type PlayerHit,
+  type PlayerAction,
   type PortalDenied,
   type PortalEntered,
   type PortalMarker,
@@ -124,6 +127,9 @@ export interface RoomEvents {
   onMonsterHit?(event: MonsterHit): void;
   /** The local player took a hit. Unicast: nobody else's health ever arrives here. */
   onPlayerHit?(event: PlayerHit): void;
+  onPlayerAction?(event: PlayerAction): void;
+  onBossTelegraph?(event: BossTelegraph): void;
+  onBossTelegraphCancelled?(event: BossTelegraphCancelled): void;
   /** A drop was credited to this account, and the store has already committed it. */
   onItemGranted?(event: ItemGranted): void;
   /** The account's equipped item slot changed — or an equip/unequip request was ignored. */
@@ -539,6 +545,15 @@ export class RoomConnection {
     });
     this.room.onMessage(ServerMessage.PlayerHit, (event: PlayerHit) => {
       this.events.onPlayerHit?.(event);
+    });
+    this.room.onMessage(ServerMessage.PlayerAction, (event: PlayerAction) => {
+      this.events.onPlayerAction?.(event);
+    });
+    this.room.onMessage(ServerMessage.BossTelegraph, (event: BossTelegraph) => {
+      this.events.onBossTelegraph?.(event);
+    });
+    this.room.onMessage(ServerMessage.BossTelegraphCancelled, (event: BossTelegraphCancelled) => {
+      this.events.onBossTelegraphCancelled?.(event);
     });
     this.room.onMessage(ServerMessage.ItemGranted, (event: ItemGranted) => {
       this.events.onItemGranted?.(event);

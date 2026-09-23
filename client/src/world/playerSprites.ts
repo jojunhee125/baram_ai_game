@@ -13,6 +13,7 @@ export const STEP_TWEEN_MS = PATCH_RATE_MS + 20;
 interface TrackedPlayer {
   sprite: Phaser.GameObjects.Sprite;
   attackTimer: Phaser.Time.TimerEvent | null;
+  action: AvatarAction | null;
   tween: Phaser.Tweens.Tween | null;
   skin: number;
   tileX: number;
@@ -73,6 +74,7 @@ export class PlayerSprites {
     this.tracked.set(sessionId, {
       sprite,
       attackTimer: null,
+      action: null,
       tween: null,
       skin: snapshot.avatarSkin,
       tileX: snapshot.tileX,
@@ -110,7 +112,7 @@ export class PlayerSprites {
     // the name tag on a change, and nothing here holds a sprite-visible cue for level the way skin
     // does, so the caller needs this flag rather than a texture diff of its own.
     const levelChanged = snapshot.level !== player.level;
-    if (distance > 0 || turned || skinChanged) this.finishAttack(player);
+    if (distance > 0 || turned || skinChanged) this.finishAction(player);
     player.tileX = snapshot.tileX;
     player.tileY = snapshot.tileY;
     player.facing = snapshot.facing;
@@ -149,12 +151,38 @@ export class PlayerSprites {
   attack(sessionId: string, facing: Direction): boolean {
     const player = this.tracked.get(sessionId);
     if (!player) return false;
-    this.finishAttack(player);
+    this.finishAction(player);
     player.equipment.attack(facing);
-    const visual = this.art.resolve(player.skin, "attack", facing);
-    if (!visual || visual.action !== "attack") return false;
+    return this.playAction(player, "attack", facing);
+  }
+
+  cast(sessionId: string, facing: Direction): boolean {
+    const player = this.tracked.get(sessionId);
+    if (!player) return false;
+    this.finishAction(player);
+    return this.playAction(player, "cast", facing);
+  }
+
+  hit(sessionId: string, facing: Direction): boolean {
+    const player = this.tracked.get(sessionId);
+    if (!player) return false;
+    this.finishAction(player);
+    return this.playAction(player, "hit", facing);
+  }
+
+  death(sessionId: string, facing: Direction): boolean {
+    const player = this.tracked.get(sessionId);
+    if (!player) return false;
+    this.finishAction(player);
+    return this.playAction(player, "death", facing);
+  }
+
+  private playAction(player: TrackedPlayer, action: AvatarAction, facing: Direction): boolean {
+    const visual = this.art.resolve(player.skin, action, facing);
+    if (!visual || visual.action !== action) return false;
+    player.action = action;
     this.art.apply(player.sprite, visual, true);
-    player.attackTimer = this.scene.time.delayedCall(visual.durationMs, () => this.finishAttack(player));
+    player.attackTimer = this.scene.time.delayedCall(visual.durationMs, () => this.finishAction(player));
     return true;
   }
 
@@ -176,11 +204,12 @@ export class PlayerSprites {
     }
   }
 
-  private finishAttack(player: TrackedPlayer): void {
+  private finishAction(player: TrackedPlayer): void {
     player.equipment.cancelSwing();
-    if (!player.attackTimer) return;
-    player.attackTimer.remove(false);
+    if (!player.attackTimer && !player.action) return;
+    player.attackTimer?.remove(false);
     player.attackTimer = null;
+    player.action = null;
     if (!player.sprite.active) return;
     this.show(player, player.tween ? "walk" : "idle");
   }

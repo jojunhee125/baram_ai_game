@@ -151,8 +151,11 @@ test("first growth loop earns, sells, equips and survives a fresh session for th
 
     await walk(page, 29, 20);
     await walk(page, 29, 22);
-    await expect(page.locator(".object__quest-title")).toHaveText("첫 사냥");
-    await page.locator(".object__quest-accept").click();
+    const firstQuest = page.locator(".object__quest").filter({
+      has: page.locator(".object__quest-title", { hasText: "첫 사냥" }),
+    });
+    await expect(firstQuest.locator(".object__quest-title")).toHaveText("첫 사냥");
+    await firstQuest.locator(".object__quest-accept").click();
     await expect(page.locator(".quests__count")).toHaveText("0 / 3");
     await page.locator("#object-panel-close").click();
     await walk(page, 31, 24);
@@ -186,7 +189,8 @@ test("first growth loop earns, sells, equips and survives a fresh session for th
     expect(kills().length, "three real monster deaths are required").toBeGreaterThanOrEqual(3);
     const drop = loot();
     expect(drop, "real saleable loot must drop within the bounded hunt").toBeDefined();
-    await expect.poll(() => wire.messages<QuestState>(ServerMessage.QuestUpdated).at(-1))
+    await expect.poll(() => wire.messages<QuestState>(ServerMessage.QuestUpdated)
+      .filter(event => event.questId === "first-hunt").at(-1))
       .toMatchObject({ questId: "first-hunt", status: "completed", killCount: 3 });
     await expect.poll(() => wire.messages<CurrencyChanged>(ServerMessage.CurrencyChanged).filter(event => event.reason === "quest"))
       .toEqual([{ balance: 50, delta: 50, reason: "quest" }]);

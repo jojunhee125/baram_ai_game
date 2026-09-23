@@ -1,4 +1,5 @@
 import {
+  CLASS_DEFINITIONS,
   InteractableKind,
   QuestStatus,
   type InteractableEntered,
@@ -355,6 +356,20 @@ export class ObjectPanel {
       stats.textContent = benefits.join(" · ");
       name.append(stats);
     }
+    const requirement = readEquipmentMetadata(listing.equipment)?.requirement;
+    if (requirement) {
+      const conditions: string[] = [];
+      if (requirement.minLevel !== undefined) conditions.push(`Lv.${requirement.minLevel} 이상`);
+      if (requirement.classes?.length) {
+        conditions.push(requirement.classes.map((key) => CLASS_DEFINITIONS[key].label).join(" / "));
+      }
+      if (conditions.length) {
+        const hint = document.createElement("small");
+        hint.className = "object__shop-requirement";
+        hint.textContent = `착용 조건: ${conditions.join(" · ")}`;
+        name.append(hint);
+      }
+    }
 
     const price = document.createElement("span");
     price.className = "object__shop-price";
@@ -578,8 +593,10 @@ export class ObjectPanel {
   private drawQuestState(quest: OpenQuest, state: QuestState): void {
     quest.root.dataset.status = state.status;
     const offered = state.status === QuestStatus.Offered;
+    const blocked = offered && state.blocked === true;
     quest.accept.hidden = !offered;
-    quest.accept.disabled = false;
+    quest.accept.disabled = blocked;
+    quest.accept.title = blocked ? "선행 퀘스트를 먼저 완료하세요." : "";
 
     if (state.status === QuestStatus.Completed) {
       quest.objective.textContent = state.completionText;
@@ -587,9 +604,10 @@ export class ObjectPanel {
       return;
     }
     quest.objective.textContent = state.objectiveText;
-    quest.status.textContent = offered
-      ? "아직 수락하지 않았습니다."
-      : `진행 중 · ${state.killCount} / ${state.requiredCount}`;
+    quest.status.textContent = blocked
+      ? "선행 퀘스트를 먼저 완료하면 수락할 수 있습니다."
+      : offered ? "아직 수락하지 않았습니다."
+        : `진행 중 · ${state.killCount} / ${state.requiredCount}`;
   }
 
   /**
