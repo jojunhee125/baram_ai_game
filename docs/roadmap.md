@@ -1,6 +1,6 @@
 # 2009–2010 PC 감성 MMORPG 로드맵
 
-> **미결 우려사항 5건(2026-09-23, 사용자 판단 대기):** 문서 규칙 충돌·보안 재판단 트리거·room 비대화·커밋 단위·테스트 중복. 작업 전 [open-concerns.md](open-concerns.md)를 먼저 읽는다. 마일스톤 상태는 변경 없음.
+> **미결 우려사항 4건(2026-09-23):** 두 에이전트의 문서 규칙 충돌은 **반드시 하나로 통일할 필수 과제**(사용자 미지시 변경), 보안 재판단 트리거·room 비대화·테스트 중복은 판단 대기. 작업 전 [open-concerns.md](open-concerns.md)를 먼저 읽는다. 마일스톤 상태는 변경 없음.
 
 > **2026-09-23 사냥 콘텐츠 교체 상태:** 부여 7개 대표 사냥 지역, 허브 연결, 몬스터·아이템·퀘스트 대체를 구현했다. 전체 server suite 1249/1249, shared 26/26, 관련 browser suite와 typecheck/build가 통과했다. 구현은 [4ae0045](https://github.com/jojunhee125/baram_ai_game/commit/4ae00455ada8ffb64cca0bb2012bcb8a6ee849ab)로 origin/main에 push됐다. 지도는 로컬 대표 지형이며 역사적 원작 맵 복원본이 아니다. 실 PostgreSQL·장시간 플레이·전체 제품 browser·운영 배포는 미실행이다. 세부 근거와 한계는 [구현 기록](implementation-2026-09-23-original-hunting-content.md)을 따른다. 이전 방향 보정은 아래의 결정 이력으로 보존한다.
 

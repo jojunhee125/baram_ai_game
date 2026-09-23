@@ -1,6 +1,6 @@
 # Repository Rules
 
-- **At session start, read `docs/open-concerns.md` first.** It lists 5 open concerns awaiting a user decision; do not resolve any of them without that decision.
+- **At session start, read `docs/open-concerns.md` first.** It lists open concerns. #3 (two agents following different doc rules) is a user-confirmed MUST-FIX: the rule flip in 9560690 was never authorized and doc rules must be unified into one. The others await a user decision.
 
 - Perform all work, commits, and pushes on `main`. Do not create branches.
 - Before repository work, fetch `origin` and inspect status and divergence from `origin/main`.
