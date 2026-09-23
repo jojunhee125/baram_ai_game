@@ -23,7 +23,7 @@ manifest의 `format: "native60"`은 기존 계약 식별자다. 이 asset의 해
 
 `avatar-manifest.spec.ts`는 현재 경로·313px crop·404 mock·프레임별 foot 검증에 맞춰 갱신되었다. 2026-09-22 로컬 재실행 결과: `npm test -- avatar-manifest.spec.ts` **13 passed (25.2s)**, client typecheck·build 통과.
 
-이전 `heritage-first-play` 2개 테스트 중 KeyH 귀환 단계에서 1개가 실패했다. 2026-09-22 후속 조사(`297e7ba`)에서는 원본 2개와 귀환 시나리오 반복 10회가 모두 통과했다. 과거 실패 trace가 없고 원인은 `[needs verification]`이므로 코드 수정·해결 또는 전체 회귀 통과로 처리하지 않는다. [재현 조사 기록](implementation-2026-09-22-keyh-investigation.md)
+이전 `heritage-first-play` 2개 테스트 중 KeyH 귀환 단계에서 1개가 실패했다. 2026-09-22 후속 조사(`297e7ba`)에서는 원본 2개와 귀환 시나리오 반복 10회가 모두 통과했다. 과거 실패 trace가 없고 원인은 `[needs verification]`이므로 코드 수정·해결 또는 전체 회귀 통과로 처리하지 않는다. [재현 조사 기록](master-adventurer.md)
 
 ## Legacy 제작 원본과 재생성
 
@@ -49,3 +49,43 @@ client typecheck와 Vite build가 통과했다. shared manifest 26개와 browser
 `node tools/prepare-master-avatar.mjs --check`는 atlas와 비교 이미지 5개의 byte equality를 확인했다. 최종 atlas는 16개 고유 48px 프레임, 불투명 팔레트 20색, binary alpha, 발 기준점 `(24, 46)`이며 고립 픽셀 검사를 통과했다. runtime PNG와 build 배포 산출물의 SHA-256은 모두 `f411e6c28da0de3cab0d63a2d0d659737ea207fc76760c96baa4497bd175b06d`다.
 
 [실제 광장 화면](art/master-adventurer-game.png)을 현재 PC에서 촬영하고 새 master의 표시와 발·이름 정렬을 확인했다. 최종 코드 검토에서 발견된 결함은 없다. Vite의 기존 500kB chunk 경고는 남아 있다. 다음 판단은 1x/4x와 맵 화면에서 비례·방향·발 위치를 비교한 사용자 시각 승인이다. 운영 배포는 수행하지 않았다. Git 반영은 사용자 요청에 따라 이 문서와 함께 `main`에서 commit·push하며, 실제 반영 이력은 Git 기록을 따른다.
+
+## KeyH 귀환 실패 재현 조사
+
+> 원본: `master-adventurer.md` (날짜별 문서 단일화로 이 절에 통합, 2026-09-23)
+
+> Git 후속 상태: 이 조사 기록은 `297e7ba`로 origin/main에 반영했다. 아래 미커밋 표현은 당시 단계다. KeyH 실패 원인은 미확정이며 미재현 결과를 해결 완료로 바꾸지 않는다.
+
+### 범위와 결과
+
+사용자 요청에 따라 `heritage-first-play.spec.ts`에 기록된 KeyH 귀환 실패를 조사했다. 기준은 clean `main`, `origin/main`과 동일한 `297e7bafacef989478cb938e6add65b918b544b6`이다.
+
+현재 코드에서 원본 테스트 2개와 귀환 시나리오 반복 10회가 모두 통과했다. 과거 실패 trace는 저장소에 없으며, 원인이 확인된 수정이나 해결 완료로 처리하지 않는다. production 코드와 테스트는 변경하지 않았다.
+
+### 재현 시나리오와 실행 증거
+
+대상은 `client/e2e/tests/heritage-first-play.spec.ts:5`다. 광장 접속·스킨 변경 후 landmark로 사냥터에 진입하고, Up → Space → I 두 번 → H를 입력해 광장 좌표 `31, 20`으로 돌아오는 흐름이다.
+
+Astra tester가 `code/client/e2e/`에서 실행했다. 두 명령 모두 exit 0이다.
+
+- `npm test -- heritage-first-play.spec.ts --output "$env:TEMP/keyh-initial-20260922-qa"` — 2 passed, 13.3초.
+- `npm test -- heritage-first-play.spec.ts --grep 'new artwork' --repeat-each 10 --output "$env:TEMP/keyh-repeat-20260922-qa"` — 10 passed, 1.3분.
+
+전체 suite는 실행하지 않았다. 이번 결과만으로 다른 실행 순서·부하 조건에서의 실패 가능성을 배제하지 않는다.
+
+### 확인한 코드 경로
+
+- `HomeButton.handleKey`: KeyH/Home을 받되 repeat·수정키·텍스트 입력 focus·귀환 버튼 disabled 상태에서는 무시한다.
+- `WorldScene.returnHome`: 전환 중이거나 이동 차단 NPC 패널·스킨 선택창이 열려 있으면 귀환을 막는다.
+- `resolveHomeRoomName`: 페이지 최초 진입 방을 귀환 대상으로 유지한다. 대상 시나리오는 광장으로 부팅한다.
+- cross-room 귀환은 목적지 접속 성공 후 원래 방을 떠나며, 성공 시에만 귀환 버튼 cooldown을 시작한다.
+
+이 차단 조건 중 어느 것이 과거 실패 당시 활성화됐는지는 확인하지 못했다. 실패가 재현되지 않은 상태에서 guard를 제거하거나 대기 시간을 늘리지 않는다.
+
+별도 모델 `gpt-5.6-sol` architect의 독립 분석도 재현 가능한 production bug나 test race를 확인하지 못했다. 두 번째 KeyI는 가방을 동기적으로 닫고, 귀환의 전환·패널 차단 조건은 의도된 동작이므로 현재 근거로는 production 변경이 필요하지 않다는 결론이다.
+
+### 남은 확인
+
+재발 시 실패 trace와 함께 H 입력 직전의 현재 방·좌표, activeElement, home-button disabled, transition 상태, NPC/스킨 패널 표시, console 오류를 확보해야 한다. 실제 귀환 실패와 의도된 입력 차단, 테스트 타이밍 문제를 구분하는 데 필요하다.
+
+기능 수정이 없어 build·전체 테스트를 추가 반복하지 않았다. commit·push는 수행하지 않았다.

@@ -1,6 +1,6 @@
 # assets — Ninja Adventure 기반 리스킨 아트
 
-2026-09-22 장착 무기·갑옷 외형은 기존 bitmap을 편집한 파일이 아니라 [equipmentAppearance.ts](../client/src/world/equipmentAppearance.ts)의 원본 pixel mask·palette로 생성한다. 무기3종·갑옷3종을 별도 레이어로 표시하며 위 자산팩에서 가져온 원화로 분류하지 않는다. [설계](../docs/design-2026-09-22-equipped-appearance.md) · [구현·검증](../docs/implementation-2026-09-22-equipped-appearance.md).
+2026-09-22 장착 무기·갑옷 외형은 기존 bitmap을 편집한 파일이 아니라 [equipmentAppearance.ts](../client/src/world/equipmentAppearance.ts)의 원본 pixel mask·palette로 생성한다. 무기3종·갑옷3종을 별도 레이어로 표시하며 위 자산팩에서 가져온 원화로 분류하지 않는다. [설계](../docs/r02-motion-equipment.md) · [구현·검증](../docs/r02-motion-equipment.md).
 
 Phase1.5 리스킨 적용본. 절차적 placeholder가 아니라 **[Ninja Adventure Asset Pack](https://github.com/pixel-boy/NinjaAdventure)**(제작자 pixel-boy, **CC0** — 귀속 불필요, 상업 이용 가능)의 원본 픽셀 아트를 잘라 만든 실제 에셋이다. 파일 규약(치수·행 배치·`collides` 규약)만 지키면 여전히 통째로 리스킨 가능하다.
 

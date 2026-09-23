@@ -1,8 +1,14 @@
-# 장착 무기·갑옷 외형 반영 계약
+# R02 동작·장비 표현 — 설계·구현·검증
+
+[로드맵](roadmap.md) R02의 단일 문서. 원격 동작 이벤트(A)는 병렬 코드 묶음과 함께 [R06 문서](r06-gear-progression.md)에 기록돼 있다.
+
+## 장착 무기·갑옷 외형 반영 계약
+
+> 원본: `design-2026-09-22-equipped-appearance.md` (날짜별 문서 단일화로 이 절에 통합, 2026-09-23)
 
 상태: 2026-09-22 설계 확정. 사용자가 제안된 1번 작업인 장착 장비 외형 반영을 승인했다. main 담당자가 fetch 후 `main == origin/main == 28f8d39`, clean 상태를 확인했다. branch/worktree를 만들지 않고 main에서만 반영한다. 이 문서는 설계이며 실제 결과·테스트·Git·배포 상태는 별도 implementation record와 roadmap/decisions에 기록한다.
 
-## Task Plan: 실제 착용 상태를 캐릭터에 표시
+### Task Plan: 실제 착용 상태를 캐릭터에 표시
 
 - Phase 0 Design → architect: 기존 renderer·동기화·원화를 확인하고 공개 외형키/attachment/lifecycle 계약 확정.
 - Phase 1 Implementation → coder(shared/server) | ui-engineer(client). **parallel: yes; file_overlap: 없음.** 아래 두 snapshot 필드 이름은 고정하며 UI typecheck는 shared 변경 후 수행.
@@ -19,7 +25,7 @@
 
 파일은 Git root 기준이다. 기존 파일 존재를 확인했고 신규 파일은 위에 명시했다. nested AGENTS 파일은 발견하지 않았으며 주입된 규칙을 다시 읽지 않았다. 다른 담당자의 변경을 되돌리지 않고 테스트 파일 소유권·browser port는 main이 조율한다.
 
-## 확인한 현재 구조와 자산
+### 확인한 현재 구조와 자산
 
 - `WeaponVisualState`는 로컬 inventory HTTP에서 세 무기를 단검 하나의 boolean으로 합친다. `WorldScene.swing`/`CombatEffects.swing`은 공격 순간 `items.png`의 단검 아이콘만 붙이며 상시 착용/갑옷/원격 장비 표시는 없다.
 - `Player` schema는 위치·방향·skin·level·class만 공개한다. 장비는 session의 `equippedItemKeys`에 있고 `EquipmentChanged`는 소유자 세션에게 전달한다. 기존 `subscribeEquipment`는 같은 process/store의 동일 계정 세션에 cache 변경을 알린다.
@@ -28,7 +34,7 @@
 - 실제 `assets/sprites/items.png`, `baram-adventurer.png`, `avatar.png`를 열어 확인했다. items는 가방 아이콘이며 착용용 갑옷 layer가 아니다. skin0은 313px composite frame을 48px로 표시하고 frame별 foot이 다르다. legacy avatars는 다른 display size/비례를 쓰므로 skin 번호만으로 48px anchor를 공통 적용하면 안 된다. composite의 머리/몸/장비를 분리한 원화는 없다.
 - 기존 assets README는 avatar CC0 원본과 절차적 item icons를 구분한다. 이번에는 기존 원화를 훼손하거나 외부 저작물을 가져오지 않고 새 원본 pixel overlays를 코드로 만든다. 2009–2010 PC pixel 스타일 방향을 따르되 원작 동일 품질·원화 재현 완료를 주장하지 않는다.
 
-## Design Decision: authoritative 공개 외형
+### Design Decision: authoritative 공개 외형
 
 Options: 1) owner-only EquipmentChanged를 모든 관전자에게 중계하고 별도 재접속 snapshot을 만든다 — 순서/재진입/권한 전달 경로가 중복된다. 2) 기존 view-tagged Player state에 외형키 두 개를 추가한다 — 이미 구현한 가까운 player snapshot/patch/재진입 경로를 재사용한다.
 
@@ -57,7 +63,7 @@ interface PlayerSnapshot {
 
 server catalogue에서 해당 key가 실제 장비이고 slot family가 weapon/armor와 일치할 때만 공개한다. 불명/slot 불일치는 외형만 `""`로 투영하고 기존 session/combat 데이터를 임의로 고치지 않는다. 투영 helper를 둔다면 기존 room 안의 작은 helper로 한정한다. DB schema/query/정산/장착 권한/전투 수치를 바꾸지 않는다. 모든 room join의 장비 조회 1회는 외형 기능에 필요한 변경이며 grand-plaza 무조회 가정을 검증하던 기존 test는 이 계약으로 수정한다. 500 CCU 성능 검증 완료로 해석하지 않는다.
 
-## Design Decision: 착용용 원화가 없는 상태의 rendering
+### Design Decision: 착용용 원화가 없는 상태의 rendering
 
 Options: 1) 24개 avatar와 모든 장비 조합의 새 composite atlas를 제작한다 — 큰 아트 범위와 조합/cache 관리가 필요하다. 2) 제한된 원본 pixel overlays를 별도 sprite로 만들어 실제 avatar transform/frame에 정렬한다 — 기존 atlas를 보존하면서 장비별 silhouette과 재접속 동작을 작은 범위로 구현할 수 있다.
 
@@ -72,7 +78,7 @@ Decision: **2**. 아래 여섯 품목만 상시 착용 외형으로 지원한다
 
 실제 renderer는 primary와 legacy fallback 모두 지원한다. profile은 현재 resolved manifest/display size를 기준으로 고르고, 필요 최소한의 방향/frame별 hand/torso anchor를 명시한다. static skin0 좌표를 legacy fallback에 적용하지 않는다. 예상하지 못한 manifest는 보수적으로 처리하며 기존 avatar 자체를 숨기거나 깨뜨리지 않는다.
 
-### Attachment interface와 lifecycle
+#### Attachment interface와 lifecycle
 
 `AvatarArt`는 private WeakMap의 현재 visual/frame을 읽을 수 있는 작은 accessor를 제공할 수 있다. 캐릭터 animation 선택·frame origin 계산을 두 군데로 복사하지 않는다. 이름은 UI 구현 내에서 일관되게 정하되 반환 의미는 다음과 같다.
 
@@ -97,7 +103,7 @@ local 공격은 기본 avatar에 실제 attack clip이 있으면 그 clip을 따
 
 remove/view 이탈/scene shutdown에서는 overlay sprite, appearance timer/tween, listener를 모두 정리한다. 장비 교체 중 사용하던 pose도 새 key/빈 key에 안전하게 수렴한다. 오래된 controller가 재사용된 scene/sprite를 변경하지 못하게 한다. 실패한 장착 응답이나 구매/획득만으로 외형을 낙관적으로 바꾸지 않는다.
 
-## Verification과 자체 검토
+### Verification과 자체 검토
 
 - Server: 빈 초기값; social/hunt/grand-plaza 재접속 hydrate; 성공한 장착/교체/해제; failed/exception/late response; per-slot 경합; 같은 계정 다른 session subscription; remote observer 및 view 이탈 후 재진입 snapshot. 알 수 없는/mismatched key는 외형만 숨김, 보유만 한 장비는 표시 안 함. private inventory/HP/MP를 공개하지 않는 기존 경계 유지.
 - Client: primary skin0과 실제 legacy profile, 네 방향 idle/walk, 세 무기와 세 갑옷의 구별, 두 player의 독립 장비, pending movement 중 외형 patch, 막힌 이동 방향·warp·skin/fallback 변경, local attack 도중 장비 교체/해제, view remove/re-add/shutdown 후 유령 sprite/timer 없음. 실제 Phaser.CANVAS fixture 및 확대 screenshot으로 anchor/손·머리 가림/두께/겹침을 확인한다.
@@ -105,3 +111,51 @@ remove/view 이탈/scene shutdown에서는 overlay sprite, appearance timer/twee
 - main은 관련 tests/browser 결과와 `npm run typecheck`, `npm test`, `npm run build`, `git diff --check` 결과를 implementation 기록에 저장한다. 실행하지 못한 검사는 이유를 기록한다. 운영 배포·사용자 아트 승인·장시간 플레이·500 CCU는 자동 완료하지 않는다.
 
 자체 검토: 두 공개 key와 기존 state view는 필요한 최소 계약이며 per-slot race guard를 유지한다. composite 원화의 한계는 두 실제 profile의 attachment 확인으로 제한한다. local prediction early return, all-room hydration, 중복 아이콘, stale controller, 알 수 없는 key, remote skill 오인까지 실패 모드를 반영했다. 새 user 결정이 필요한 열린 항목은 없다.
+
+## 2026-09-22 장착 장비 외형 반영
+
+> 원본: `implementation-2026-09-22-equipped-appearance.md` (날짜별 문서 단일화로 이 절에 통합, 2026-09-23)
+
+### 승인·시작 상태
+
+사용자가 제안1번 “장착 장비 외형 반영”에 “네 1번으로 코드 개발 시작”으로 구현을 승인했다. 무기·방어구를 캐릭터에 표시하고 이동·공격·방향 전환에 맞춰 정렬하는 범위다. 기존 자산과 렌더링을 확인해 상세 계약을 설계한다.
+
+git fetch origin 후 main과 origin/main은 `28f8d39`로 일치하며 작업 트리는 깨끗했다. branch/worktree 분기 없이 main에서만 작업·커밋·push한다.
+
+### 진행 상태
+
+구현·독립 검토·검증 완료. 전체1193개·browser50개와 typecheck/build를 통과했다. 기존 atlas는 옷까지 합쳐진 이미지이므로 원본 이미지를 변형하지 않고 새 code-native pixel 레이어를 사용한다. 단검·사냥꾼 검·철검 및 누비옷·가죽갑옷·강화 갑옷을 구분한다. main에 커밋·push하며 운영 배포는 수행하지 않았다.
+
+- 서버는 실제 장착 cache에서 weaponItemKey/armorItemKey만 replicated Player에 반영한다. 모든 방에서 초기 장비를 읽어 재접속/방 이동 후 외형을 복원한다.
+- 본인과 원격 플레이어의 현재 렌더링 위치·방향·이동을 따라간다. 본인의 공격 동작에도 정렬한다. 현재 원격 빈 공격에는 broadcast가 없으므로 새 공격 protocol을 추가하거나 skill hit를 평타로 추측하지 않는다.
+- 기존 전투 수치·DB·장착 권한·가격은 변경하지 않는다. helmet/cloak/ring의 외형과24종 전용 장비 원화는 이번 범위 밖이다. 사용자 시각 승인·운영 배포는 별도다.
+
+### 실제 변경
+
+- `shared/src/state.ts`: 기존 Player 마지막에 공개 외형키2개 append. `server/src/rooms/metaverseRoom.ts`: store 구독·승인된 hydration·장착 성공 cache에서만 key를 투영하며 unknown/slot 불일치는 빈값으로 처리한다. 기존 StateView 가시성 범위를 따른다.
+- `client/src/net/roomConnection.ts`: snapshot에 optional 외형키를 전달한다. `localPlayer.ts`: 이동 reconciliation의 early return 전에 서버 외형을 반영한다.
+- `client/src/world/equipmentAppearance.ts`: 원본 pixel texture15개를 공유 cache로 생성하고 플레이어마다 무기/갑옷 sprite최대2개를 부착한다. 공격 clip이 없는 기본 아바타에도180ms local weapon pose를 제공한다.
+- `avatarArt.ts`는 현재 manifest/frame의 읽기 accessor, `playerSprites.ts`는 실제 frame foot·위치·방향·scale·alpha·visibility·depth 동기화 및 제거/scene 종료 정리를 담당한다.
+- `client/src/scenes/WorldScene.ts`: 이전 로컬 HTTP 기반 무기 추정과 중복 단검 icon 호출을 해제했다. 기존 WeaponVisualState/CombatEffects의 legacy export는 호환 테스트를 위해 남아 있으나 새 외형의 상태 근거로 사용하지 않는다.
+- 독립 검토에서 같은 행 actor 사이 장비 혼합과 공격 직후 방향 변경 시 옛 무기 pose 유지2건을 발견했다. actor별 좁은 depth 구간과 swing 취소를 적용했다. shutdown 중 반복 rank 재계산도 방지했다.
+- `server/src/rooms/equipmentAppearance.verification.test.ts` 신규6개. 기존 armorEquip/equipmentSlots/entryPass의 grand-plaza 장비조회0 기대값을 공개 외형 hydration1회로 갱신했으며 portal 소지품조회0 검증은 유지했다.
+
+### 검증
+
+- `npx tsx --test --test-timeout=90000 server/src/rooms/equipmentAppearance.verification.test.ts server/src/rooms/equipmentSlots-verification.test.ts server/src/rooms/armorEquip-verification.test.ts`: **32/32 PASS**. 신규6개는 전5room·재접속·late hydration·같은 계정 구독·성공/실패·잘못된 key·Encoder/Decoder 및 실제2client socket의 장착/해제·시야제외/재진입·비공개 verdict 미유출을 검증한다.
+- 최초 전체 검사에서 entryPass의 기존 무전투방 장비조회0 기대값1건이 실패했다. 위 새 계약으로 기대값만 수정한 뒤 해당 파일 **9/9 PASS**. 담당 coder 재호출은 thread limit로 거절되어 main이 이 작은 fixture만 수정했고 독립 reviewer가 검토했다.
+- `npm test` 최종 **1193/1193 PASS**(shared26+server1167), 실패·skip0, 서버37.64초. 로그 `%TEMP%/ksc-equipped-appearance-all-tests-final.log`.
+- `npm run typecheck`: shared/server/client PASS. UI 최종수정 후 client typecheck 및 `npm run build`: PASS,94modules,4.28초. 기존500KB chunk 경고 유지.
+- 실제 Phaser screenshot의 기본 아바타/legacy32px×3장비조합×4방향을 main·tester·reviewer가 직접 확인했다. 세 무기의 길이·형태와 갑옷 차이를 구분할 수 있고 머리·손·발이 보인다.
+- `client/e2e`에서 `npx playwright test tests/equipped-appearance.spec.ts tests/avatar-manifest.spec.ts tests/classic-combat-status.spec.ts tests/heritage-monsters.spec.ts tests/pass-g-combat-loot.spec.ts --output=test-results/equipment-appearance-final`: **50/50 PASS**,1.1분. 신규9개는 실제 renderer의 장착/해제·24조합·보호영역·예측이동 중 외형patch·warp·local공격·동일위치 actor 겹침·교체100회/종료·fallback을 검증했다.
+- 첫 browser 회귀41/50 통과 후 기존4개 spec의 오래된 지역명·atlas 실패route·depth기대값·HTTP무기추정·전리품 경험치 표시 fixture를 현재 계약으로 교정했다. 기본 geometry/실제 frame·가격과 무관한 기존 drop확률·공격 입력 검증은 유지했다. 첫 신규7개 실행의 보호영역/manifest 확인2건도 실제 frame기준으로 교정했다.
+- `npx tsc --noEmit -p client/e2e/tsconfig.json` PASS. Screenshot3개는 `client/e2e/test-results/equipment-appearance-final/` 아래 조합·겹침·fallback PNG로 보존(Git 제외). 독립 tester는3개를 직접 확인했고 main은 조합·겹침을 직접 확인했다. 테스트용2567/5173 LISTEN 해제 확인.
+- 독립 reviewer가 시각결함2건 수정 delta와 server/state privacy 및 entryPass fixture를 승인했다. `git diff --check` PASS.
+
+### 한계
+
+- 원격 idle/walk와 장비 변경은 replicated state로 표시한다. 원격 빈 공격/skill별 attack pose 신호는 추가하지 않았다.
+- 전용 hand-painted native 장비 atlas가 아닌 원본 code-native overlay이며 완전한24skin 맞춤 원화나 원작 품질 재현 완료가 아니다.
+- 무전투방도 장비 복원 조회1회가 필요하다.500CCU 성능 PoC를 수행한 것은 아니다. DB schema/query/정산은 변경하지 않아 PostgreSQL opt-in2suite는 환경변수 미설정으로 이번에 실행하지 않았다.
+- 기존 다중 process cache 동기화·직접 room 입장 조건 우회·장시간 플레이·사용자 시각 승인·운영 배포는 별도다.
+- 시각 검증은 Windows/Chromium의 실제 Phaser·배포 atlas fixture이며 실제 서버2client 검증과 분리한 증거다. 다른OS/500CCU 및 실제 계정 장시간 플레이는 이번 검증 범위 밖이다.
