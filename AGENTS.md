@@ -1,5 +1,7 @@
 # Repository Rules
 
+- **At session start, read `docs/open-concerns.md` first.** It lists 5 open concerns awaiting a user decision; do not resolve any of them without that decision.
+
 - Perform all work, commits, and pushes on `main`. Do not create branches.
 - Before repository work, fetch `origin` and inspect status and divergence from `origin/main`.
 - Preserve all existing local edits. Sync `main` with `origin/main` before starting; never discard work to force synchronization.

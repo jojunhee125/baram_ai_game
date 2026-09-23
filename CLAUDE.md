@@ -2,6 +2,7 @@
 
 ## Current State References (2026-09-23)
 
+- **Read `docs/open-concerns.md` FIRST.** It lists 5 open concerns awaiting a user decision (doc-rule conflict, security re-review trigger, etc.). Do not resolve any of them without that decision.
 - Read `PROJECT_MEMORY.md`, `docs/roadmap.md` and `docs/implementation-2026-09-23-parallel-code-bundle.md` for current implementation, verification limits and Git delivery status.
 - The approved A+B+C+D+I bundle is implemented; R02/R06/R07 are partial. New party/trade/crafting work requires its own scope authorization. The user authorized documentation/memory synchronization and commit/push; deployment remains separate.
 - Current user-provided AGENTS.md instructions take precedence over historical rules below. Every implementation task must create or update a Markdown implementation record in the repository's `docs/` with actual changes, checks and remaining limits.
