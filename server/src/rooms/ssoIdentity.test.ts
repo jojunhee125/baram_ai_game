@@ -137,9 +137,9 @@ describe("deriveSsoUserId", () => {
     }
   });
 
-  it("accepts an uppercase UUID unchanged — Postgres normalises on storage, so this must not", () => {
+  it("normalises an uppercase UUID for consistent memory and Postgres account keys", () => {
     const upper = SUB.toUpperCase();
-    assert.equal(deriveSsoUserId(jwtWithClaims({ sub: upper })), upper);
+    assert.equal(deriveSsoUserId(jwtWithClaims({ sub: upper })), SUB.toLowerCase());
   });
 
   it("does not read the version and variant nibbles, because the uuid column does not either", () => {

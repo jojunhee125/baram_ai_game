@@ -43,6 +43,7 @@ import { ObjectPanel } from "../ui/objectPanel";
 import { PlayerVitals } from "../ui/playerVitals";
 import { QuestTracker } from "../ui/questTracker";
 import { SkillBar } from "../ui/skillBar";
+import { SocialPanel } from "../ui/socialPanel";
 import { PortalDenialBanner } from "../ui/portalDenialBanner";
 import { ChatBubbles } from "../world/chatBubbles";
 import { createAvatarArt, type AvatarArt } from "../world/avatarArt";
@@ -163,6 +164,7 @@ export class WorldScene extends Phaser.Scene {
   private characterMenu: CharacterMenu | null = null;
   private classPicker: ClassPicker | null = null;
   private skillBar: SkillBar | null = null;
+  private socialPanel: SocialPanel | null = null;
   private skillKeys: SkillKeys | null = null;
   private landmarkPanel: LandmarkPanel | null = null;
   private vitals: PlayerVitals | null = null;
@@ -319,14 +321,27 @@ export class WorldScene extends Phaser.Scene {
     this.classPicker = new ClassPicker((classKey) => this.connection.sendChooseClass(classKey));
     this.skillBar = new SkillBar((skillKey, nonce) => this.cast(skillKey, nonce));
     this.skillKeys = new SkillKeys((index) => this.skillBar?.castSlot(index) ?? false);
+    this.socialPanel = new SocialPanel(this.connection);
 
     this.connection.attach({
+      onPartyChanged: (event) => this.socialPanel?.applyParty(event),
+      onPartyInvited: (event) => this.socialPanel?.applyInvitation(event),
+      onPartyDenied: (event) => this.socialPanel?.applyPartyDenied(event),
+      onTradeChanged: (event) => this.socialPanel?.applyTrade(event),
+      onTradeDenied: (event) => this.socialPanel?.applyTradeDenied(event),
+      onCraftingRecipes: (event) => this.socialPanel?.applyRecipes(event),
+      onCraftResult: (event) => this.socialPanel?.applyCraftResult(event),
+      onInventoryInvalidated: () => {
+        this.inventoryPanel?.invalidate();
+        this.socialPanel?.inventoryChanged();
+      },
       onPlayerAdd: (sessionId, snapshot) => this.addPlayer(sessionId, snapshot),
       onPlayerChange: (sessionId, snapshot) => this.changePlayer(sessionId, snapshot),
       onPlayerRemove: (sessionId) => {
         this.bubbles.remove(sessionId);
         this.nameTags.remove(sessionId);
         this.players.remove(sessionId);
+        this.socialPanel?.playersChanged();
       },
       onMonsterAdd: (monsterId, snapshot) => {
         const sprite = this.monsters.add(monsterId, snapshot);
@@ -351,6 +366,7 @@ export class WorldScene extends Phaser.Scene {
       onBossTelegraph: (event) => this.bossTelegraphs.show(event),
       onBossTelegraphCancelled: (event) => this.bossTelegraphs.remove(event.monsterId),
       onItemGranted: (event) => {
+        this.socialPanel?.inventoryChanged();
         this.toasts?.show(event);
         // The bag is the one window that stays open in a fight, so a pickup lands in it live
         // rather than waiting for the next read.
@@ -363,6 +379,7 @@ export class WorldScene extends Phaser.Scene {
         this.objectPanel?.resolveShopAttempt(event.itemKey);
       },
       onItemRemoved: (event) => {
+        this.socialPanel?.inventoryChanged();
         this.toasts?.showRemoved(event);
         this.inventoryPanel?.applyItemRemoved(event);
         this.objectPanel?.applyItemRemoved(event);
@@ -381,6 +398,7 @@ export class WorldScene extends Phaser.Scene {
         }
       },
       onEquipmentChanged: (event) => {
+        this.socialPanel?.inventoryChanged();
         this.inventoryPanel?.applyEquipmentChange(event);
         this.objectPanel?.applyEquipmentChange(event);
       },
@@ -402,6 +420,7 @@ export class WorldScene extends Phaser.Scene {
         this.objectPanel?.applyQuestUpdate(state);
       },
       onCurrencyChanged: (event) => {
+        this.socialPanel?.applyBalance(event.balance);
         this.inventoryPanel?.applyCurrencyChange(event);
         // The join-time sync is not a reward — it announces nothing, `itemToasts.ts`'s own
         // `showCurrency` doc comment.
@@ -415,6 +434,7 @@ export class WorldScene extends Phaser.Scene {
       onSkillDenied: (event) => this.applySkillDenied(event),
       onPlayerHealed: (event) => this.applyPlayerHealed(event),
       onLeave: () => {
+        this.socialPanel?.destroy();
         // Not the leave we asked for; that one never reaches here (RoomConnection.leaving).
         // This is a drop mid-hop, which leave() then early-returns on — the hop still lands, so
         // a "connection lost" modal would be a lie. abandonTransition() reports it via hasLeft,
@@ -460,6 +480,8 @@ export class WorldScene extends Phaser.Scene {
     this.buildMinimap();
     this.regionGuide = new RegionGuide(this.mapKey);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.socialPanel?.destroy();
+      this.socialPanel = null;
       this.regionGuide?.destroy();
       this.regionGuide = null;
     });
@@ -847,6 +869,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private addPlayer(sessionId: string, snapshot: PlayerSnapshot): void {
+    this.socialPanel?.playersChanged();
     const sprite = this.players.add(sessionId, snapshot);
     this.nameTags.add(sessionId, sprite, `Lv.${snapshot.level} ${snapshot.nickname}`);
     if (sessionId === this.connection.sessionId) {
@@ -858,6 +881,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private changePlayer(sessionId: string, snapshot: PlayerSnapshot): void {
+    this.socialPanel?.playersChanged();
     // Our own patches go through the predictor, which decides whether the server has
     // anything new to say; applying them directly would undo every predicted step.
     if (this.localPlayer && sessionId === this.connection.sessionId) {
@@ -923,18 +947,14 @@ export class WorldScene extends Phaser.Scene {
    * One cast leaving this client, if the world is in a state to take one — {@link swing}'s own two
    * gates, for its own reasons.
    *
-   * An ally-target skill names *ourselves* as the target. That is the whole of R05-c's targeting:
-   * picking someone else needs a way to point at them, and the party frame that would provide it
-   * is R08's — so 치유 heals the caster today, which is both a legitimate use of the skill and the
-   * only one the interface can currently express. The server accepts any ally in range, so no
-   * contract is narrowed here, only the UI's reach.
+   * Ally skills use the selected party member, falling back to the caster when no ally is selected.
    */
   private cast(skillKey: SkillKey, nonce: string): boolean {
     if (this.transitioning || !this.localPlayer) {
       return false;
     }
     const targetSessionId =
-      SKILL_DEFINITIONS[skillKey].target === "ally" ? this.connection.sessionId : undefined;
+      SKILL_DEFINITIONS[skillKey].target === "ally" ? this.socialPanel?.healingTarget ?? this.connection.sessionId : undefined;
     this.connection.sendUseSkill(skillKey, nonce, targetSessionId);
     // No optimistic cooldown or ring here, unlike {@link swing}'s arc: a swing gets no reply when
     // it hits nothing, but every `skill:use` is answered — `skill:used` or `skill:denied` — so

@@ -148,6 +148,11 @@ import {
 } from "./questDefinitions";
 import { SHOPS_BY_NPC, type ShopDefinition } from "./shopDefinitions";
 import { deriveSsoNickname, deriveSsoUserId } from "./ssoIdentity";
+import { CraftingSystem } from "./craftingSystem";
+import { PartyRewards, splitPartyExp } from "./partyRewards";
+import { PartySystem } from "./partySystem";
+import { subscribeEconomy, type SocialActor, type SocialHost } from "./socialRuntime";
+import { TradeSystem } from "./tradeSystem";
 
 type RoomClient = MetaverseRoomOptions["client"];
 
@@ -253,6 +258,17 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
    * inside a neighbour loop multiplies the per-move cost by the room population again.
    */
   private readonly clientsBySession = new Map<string, RoomClient>();
+  private readonly socialHost: SocialHost = {
+    actor: (sessionId) => this.socialActor(sessionId),
+    send: (sessionId, type, payload) => { this.clientsBySession.get(sessionId)?.send(type, payload); },
+  };
+  private readonly parties = new PartySystem(this.socialHost, (sessionId) => this.partyRewards.remove(sessionId));
+  private readonly partyRewards = new PartyRewards(this.socialHost, this.parties);
+  private trades: TradeSystem | null = null;
+  private crafting: CraftingSystem | null = null;
+  private socialInterval: { clear(): void } | null = null;
+  private readonly economySubscriptions = new Map<string, () => void>();
+  private readonly currencySyncVersions = new Map<string, number>();
   private readonly equipmentSubscriptions = new Map<string, () => void>();
   /** Sessions already told about the current throttled burst, so one burst yields one notice. */
   private readonly moveThrottleNotified = new Set<string>();
@@ -364,6 +380,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.currencyStore = options.currencyStore ?? null;
     this.settlementStore = options.settlementStore ?? null;
     this.classStore = options.classStore ?? null;
+    this.trades = new TradeSystem(this.socialHost, options.tradeStore ?? null);
+    this.crafting = new CraftingSystem(this.socialHost, this.settlementStore);
     this.adminOwnerKeys = options.adminOwnerKeys ?? new Set();
     this.setPatchRate(PATCH_RATE_MS);
     this.maxMessagesPerSecond = MAX_MESSAGES_PER_SECOND;
@@ -440,6 +458,21 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     this.onMessage(ClientMessage.UseSkill, (client: RoomClient, message: UseSkillRequest) => {
       this.handleUseSkill(client, message);
     });
+    this.onMessage(ClientMessage.CreateParty, (client: RoomClient) => this.parties.create(client.sessionId, Date.now()));
+    this.onMessage(ClientMessage.InviteParty, (client: RoomClient, message: unknown) => this.parties.invite(client.sessionId, message, Date.now()));
+    this.onMessage(ClientMessage.RespondPartyInvite, (client: RoomClient, message: unknown) => this.parties.respond(client.sessionId, message, Date.now()));
+    this.onMessage(ClientMessage.LeaveParty, (client: RoomClient) => this.parties.leave(client.sessionId, Date.now()));
+    this.onMessage(ClientMessage.RequestTrade, (client: RoomClient, message: unknown) => this.trades?.request(client.sessionId, message, Date.now()));
+    this.onMessage(ClientMessage.RespondTrade, (client: RoomClient, message: unknown) => this.trades?.respond(client.sessionId, message, Date.now()));
+    this.onMessage(ClientMessage.UpdateTradeOffer, (client: RoomClient, message: unknown) => this.trades?.offer(client.sessionId, message, Date.now()));
+    this.onMessage(ClientMessage.ConfirmTrade, (client: RoomClient, message: unknown) => this.trades?.confirm(client.sessionId, message, Date.now()));
+    this.onMessage(ClientMessage.CancelTrade, (client: RoomClient, message: unknown) => this.trades?.cancel(client.sessionId, message, Date.now()));
+    this.onMessage(ClientMessage.CraftItem, (client: RoomClient, message: unknown) => this.crafting?.craft(client.sessionId, message, Date.now()));
+    this.socialInterval = this.clock.setInterval(() => {
+      const now = Date.now();
+      this.parties.tick(now);
+      this.trades?.tick(now);
+    }, 250);
 
     // Last, and only where there is something to simulate. A room with no monster *rows* stays
     // purely message-driven, which is what it was before this feature existed. Colyseus disposes
@@ -680,6 +713,25 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     client.view = new StateView();
     this.viewedBySession.set(client.sessionId, new Set());
     this.clientsBySession.set(client.sessionId, client);
+    this.trades?.join(client.sessionId);
+    client.send(ServerMessage.PartyChanged, { party: null });
+    this.crafting?.join(client.sessionId);
+    if (client.userData.ownerKey !== null) {
+      const socialOwner = client.userData.ownerKey;
+      const joinedSession = client.userData;
+      this.economySubscriptions.set(client.sessionId, subscribeEconomy(socialOwner, async (reason) => {
+        if (this.clientsBySession.get(client.sessionId) !== client || client.userData !== joinedSession) return;
+        client.send(ServerMessage.InventoryInvalidated, { reason });
+        const version = (this.currencySyncVersions.get(client.sessionId) ?? 0) + 1;
+        this.currencySyncVersions.set(client.sessionId, version);
+        const balance = await this.currencyStore?.getBalance(socialOwner);
+        if (balance === undefined || this.clientsBySession.get(client.sessionId) !== client ||
+            client.userData !== joinedSession || this.currencySyncVersions.get(client.sessionId) !== version) return;
+        const delta = balance - joinedSession.currencyBalance;
+        joinedSession.currencyBalance = balance;
+        client.send(ServerMessage.CurrencyChanged, { balance, delta, reason } satisfies CurrencyChanged);
+      }));
+    }
 
     this.refreshViewsAround(client.sessionId, null, spawnTile);
     if (this.hasMonsters) {
@@ -956,12 +1008,13 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     if (store === null) {
       return;
     }
+    const version = this.currencySyncVersions.get(sessionId) ?? 0;
     const balance = await store.getBalance(ownerKey);
     // Re-resolved after the await, exactly as every other hydration here does: the session may
     // have left the room, or walked into another one, while the store was answering.
     const client = this.clientsBySession.get(sessionId);
     const session = client?.userData;
-    if (!client || !session) {
+    if (!client || !session || (this.currencySyncVersions.get(sessionId) ?? 0) !== version) {
       return;
     }
     session.currencyBalance = balance;
@@ -1214,6 +1267,10 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
           deny("no-target");
           return;
         }
+        if (targetSessionId !== client.sessionId && !this.parties.sameParty(client.sessionId, targetSessionId)) {
+          deny("no-target");
+          return;
+        }
         if (chebyshevDistance(player, targetPlayer) > definition.rangeInTiles) {
           deny("out-of-range");
           return;
@@ -1231,6 +1288,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
           Math.min(Math.round(targetMaxHp * definition.effect.healFractionOfTargetMaxHp), targetMaxHp - targetSession.hp),
         );
         targetSession.hp += healAmount;
+        this.partyRewards.heal(client.sessionId, targetSessionId, healAmount, now);
         const healed: PlayerHealed = {
           targetSessionId,
           healAmount,
@@ -1391,7 +1449,24 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       : Math.min(newMaxHp, session.hp + newMaxHp - oldMaxHp);
   }
 
+  private socialActor(sessionId: string): SocialActor | undefined {
+    const session = this.clientsBySession.get(sessionId)?.userData;
+    const player = this.state.players.get(sessionId);
+    if (session === undefined || player === undefined) return;
+    return {
+      sessionId, ownerKey: session.ownerKey, nickname: session.nickname, playerClass: session.playerClass,
+      hp: Math.max(0, session.hp), maxHp: this.totalMaxHp(session), mp: session.mp, maxMp: this.totalMaxMp(session),
+      level: player.level, tileX: player.tileX, tileY: player.tileY,
+    };
+  }
+
   onLeave(client: RoomClient): void {
+    this.parties.remove(client.sessionId);
+    this.trades?.remove(client.sessionId);
+    this.crafting?.remove(client.sessionId);
+    this.economySubscriptions.get(client.sessionId)?.();
+    this.economySubscriptions.delete(client.sessionId);
+    this.currencySyncVersions.delete(client.sessionId);
     this.equipmentSubscriptions.get(client.sessionId)?.();
     this.equipmentSubscriptions.delete(client.sessionId);
     this.progressSubscriptions.get(client.sessionId)?.unsubscribe?.();
@@ -1419,6 +1494,14 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
   }
 
   onDispose(): void {
+    this.socialInterval?.clear();
+    this.parties.dispose();
+    this.partyRewards.clear();
+    this.trades?.dispose();
+    this.crafting?.dispose();
+    for (const unsubscribe of this.economySubscriptions.values()) unsubscribe();
+    this.economySubscriptions.clear();
+    this.currencySyncVersions.clear();
     for (const unsubscribe of this.equipmentSubscriptions.values()) {
       unsubscribe();
     }
@@ -1906,6 +1989,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     if (!client || !session) {
       return;
     }
+    this.currencySyncVersions.set(sessionId, (this.currencySyncVersions.get(sessionId) ?? 0) + 1);
     session.currencyBalance = outcome.balance;
     client.send(ServerMessage.CurrencyChanged, {
       balance: outcome.balance,
@@ -2089,6 +2173,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       return;
     }
     if (outcome.balance !== undefined) {
+      this.currencySyncVersions.set(client.sessionId, (this.currencySyncVersions.get(client.sessionId) ?? 0) + 1);
       session.currencyBalance = outcome.balance;
       client.send(ServerMessage.CurrencyChanged, {
         balance: outcome.balance,
@@ -2198,6 +2283,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       return;
     }
     if (outcome.balance !== undefined) {
+      this.currencySyncVersions.set(client.sessionId, (this.currencySyncVersions.get(client.sessionId) ?? 0) + 1);
       session.currencyBalance = outcome.balance;
       client.send(ServerMessage.CurrencyChanged, {
         balance: outcome.balance,
@@ -2460,6 +2546,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       return;
     }
 
+    if (runtime.hp <= 0) return;
+    this.partyRewards.damage(monsterId, client.sessionId, Math.min(damage, runtime.hp), now);
     runtime.hp -= damage;
     // Overwritten on every hit, not only the killing one: the last person to connect is who the
     // drops belong to, and holding the account as well as the session is what makes the grant
@@ -2487,6 +2575,9 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     if (hpRemaining > 0) {
       return;
     }
+    const finisher = this.socialActor(client.sessionId);
+    const recipients = finisher === undefined ? [lastHit] : this.partyRewards.consume(monsterId, finisher, monster, now);
+    const expShares = splitPartyExp(runtime.type.expReward, recipients.length);
     this.killMonster(monsterId, now);
     const grants = rollLoot(runtime.type.loot, () => this.random());
     // Deliberately not awaited, here or anywhere the tick can reach: a database round trip that
@@ -2494,11 +2585,14 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     // say truthfully — `ItemGranted` is the one message that has to wait for the store.
     void this.awardLoot(lastHit, grants);
     // Same fire-and-forget principle, same last-hit rule (design-phase-w-level-system.md §11-5).
-    void this.awardExp(lastHit, monsterId, runtime.type.expReward, now);
+    recipients.forEach((recipient, index) => {
+      const amount = expShares[index]!;
+      if (amount > 0) void this.awardExp(recipient, monsterId, amount, now);
+    });
     // And again for quest objectives (roadmap R03). Synchronous itself — it only decides which
     // quests this kill could possibly touch — and each store call it starts is its own
     // fire-and-forget, for the two calls above's reason.
-    this.advanceQuests(lastHit, runtime.type.kind);
+    for (const recipient of recipients) this.advanceQuests(recipient, runtime.type.kind);
   }
 
   /**
@@ -2959,6 +3053,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
     from: TilePosition | null,
     to: TilePosition | null,
   ): void {
+    if (to !== null) this.trades?.moved(sessionId, Date.now());
     const anchor = to ?? from;
     if (anchor === null) {
       return;
@@ -3138,6 +3233,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
    * The view refresh finds nobody at `onCreate`, since the room has no clients yet.
    */
   private spawnMonster(monsterId: string, runtime: MonsterRuntime): void {
+    this.partyRewards.reset(monsterId);
     const { at, kind } = runtime.definition;
     this.state.monsters.set(
       monsterId,
@@ -3287,6 +3383,7 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       // full-heal, not a kill, so `respawnAt` and the DB record are both left untouched.
       if (runtime.combat !== null && runtime.combat.wipeResetAt !== null && now >= runtime.combat.wipeResetAt) {
         runtime.hp = runtime.type.maxHp;
+        this.partyRewards.reset(monsterId);
         runtime.combat.wipeResetAt = null;
       }
 
@@ -3478,6 +3575,8 @@ export class MetaverseRoom extends Room<MetaverseRoomOptions> {
       return;
     }
     this.leaveBossCombat(sessionId, now);
+    this.partyRewards.remove(sessionId);
+    this.trades?.remove(sessionId);
     session.hp = this.totalMaxHp(session);
     // MP refills the same way HP does on death (roadmap R05-b, `docs/decisions.md` 2026-09-18
     // R05-b 미결 2) — death is a same-room home warp, not a room change, so without this an

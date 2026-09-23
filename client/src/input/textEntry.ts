@@ -10,6 +10,7 @@ export function isTextEntry(node: Element | null): boolean {
   return (
     node instanceof HTMLInputElement ||
     node instanceof HTMLTextAreaElement ||
+    node instanceof HTMLSelectElement ||
     (node instanceof HTMLElement && node.isContentEditable)
   );
 }

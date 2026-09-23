@@ -65,6 +65,9 @@ function fakePool(db: FakeDatabase): { pool: Pool; queries: RecordedQuery[] } {
         snapshot = null;
         return Promise.resolve({ rows: [] });
       }
+      if (text === "LOCK TABLE inventory_item IN ROW EXCLUSIVE MODE") {
+        return Promise.resolve({ rows: [] });
+      }
       if (text === "ROLLBACK") {
         if (snapshot !== null) {
           db.currencyByOwner = snapshot.currencyByOwner;

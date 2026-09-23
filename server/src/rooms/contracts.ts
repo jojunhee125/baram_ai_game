@@ -17,6 +17,8 @@ import {
   type RoomState,
   type SkillKey,
   type TilePosition,
+  type TradeOffer,
+  type TradeItemAmount,
 } from "@zep-test/shared";
 
 /**
@@ -94,6 +96,7 @@ export interface RoomCreateOptions {
    * a room with no `inventoryStore` already makes for drops.
    */
   settlementStore?: SettlementStore;
+  tradeStore?: TradeStore;
   /**
    * Where an account's chosen class is filed (roadmap R05-a, `docs/r05-classes-and-skills.md`
    * D1), injected the same way and for the same reason as {@link currencyStore}/{@link
@@ -123,6 +126,38 @@ export interface RoomCreateOptions {
 /** A registered room type. The `name` is the matchmaking name clients join by. */
 export interface RoomDefinition extends RoomCreateOptions {
   name: string;
+}
+
+export interface AtomicTradeParticipant {
+  ownerKey: string;
+  offer: TradeOffer;
+}
+
+export interface AtomicTradeRequest {
+  tradeId: string;
+  first: AtomicTradeParticipant;
+  second: AtomicTradeParticipant;
+}
+
+export interface AtomicTradeParticipantResult {
+  ownerKey: string;
+  balance: number;
+  items: readonly TradeItemAmount[];
+}
+
+export type AtomicTradeOutcome = {
+  ok: true;
+  participants: readonly AtomicTradeParticipantResult[];
+} | {
+  ok: false;
+  reason: "insufficient-balance" | "insufficient-item" | "equipped-item" | "bag-full"
+    | "restricted-item" | "invalid-offer" | "conflict";
+  ownerKey?: string;
+  itemKey?: string;
+};
+
+export interface TradeStore {
+  exchange(request: AtomicTradeRequest): Promise<AtomicTradeOutcome>;
 }
 
 /**

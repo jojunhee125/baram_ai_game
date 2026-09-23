@@ -264,11 +264,19 @@ describe(
 
     assertProgressStoreContract("PostgresProgressStore on a real server", () => {
       const inner = new PostgresProgressStore(pool);
-      const ownerKey = randomUUID();
+      const ownerKeys = new Map<string, string>();
+      const isolatedOwner = (owner: string): string => {
+        let key = ownerKeys.get(owner);
+        if (key === undefined) {
+          key = randomUUID();
+          ownerKeys.set(owner, key);
+        }
+        return key;
+      };
       return {
-        getExp: () => inner.getExp(ownerKey),
-        grantExp: (_owner, amount) => inner.grantExp(ownerKey, amount),
-        applyDeathPenalty: (_owner, floor) => inner.applyDeathPenalty(ownerKey, floor),
+        getExp: (owner) => inner.getExp(isolatedOwner(owner)),
+        grantExp: (owner, amount) => inner.grantExp(isolatedOwner(owner), amount),
+        applyDeathPenalty: (owner, floor) => inner.applyDeathPenalty(isolatedOwner(owner), floor),
       };
     });
 

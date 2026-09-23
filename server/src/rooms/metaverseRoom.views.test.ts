@@ -618,7 +618,11 @@ describe("MetaverseRoom — home warp view maintenance", () => {
         FAR_FROM_HOME,
         "a request one millisecond inside the window must not move the player",
       );
-      assert.equal(warper.sent.length, 1, "and must send nothing at all — not even a rejection");
+      assert.equal(
+        warper.sent.filter(({ type }) => type !== ServerMessage.PartyChanged && type !== ServerMessage.CraftingRecipes).length,
+        1,
+        "and must send nothing at all — not even a rejection",
+      );
 
       clock += 1;
       room["handleReturnHome"](asRoomClient(warper));

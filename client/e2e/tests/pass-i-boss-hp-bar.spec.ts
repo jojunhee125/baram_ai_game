@@ -199,6 +199,36 @@ test("보스 HP바는 화면 상단에 고정되고 다른 HUD와 겹치지 않�
   expect(centreOffset).toBeLessThan(2);
 });
 
+test("좁거나 높이가 낮은 화면에서도 보스 이름과 HP가 읽히고 조작 버튼과 겹치지 않는다", async () => {
+  await joinRoom(client.page, "hunting-ground");
+  await waitForCanvasReady(client.page);
+  await client.page.evaluate(() => {
+    document.querySelector<HTMLElement>("#boss-vitals-name")!.textContent = "거대 다람쥐";
+    document.querySelector<HTMLElement>("#boss-vitals-count")!.textContent = "4996 / 5000";
+  });
+  await revealBossBar(client.page);
+  for (const viewport of [{ width: 400, height: 800 }, { width: 1200, height: 480 }]) {
+    await client.page.setViewportSize(viewport);
+    const stage = (await client.page.locator(".stage").boundingBox())!;
+    const bar = (await client.page.locator("#boss-vitals").boundingBox())!;
+    const controls = (await client.page.locator(".hud__controls").boundingBox())!;
+    expect(stage.width).toBeLessThan(480);
+    expect(bar.width).toBeGreaterThan(240);
+    expect(bar.x).toBeGreaterThanOrEqual(stage.x);
+    expect(bar.x + bar.width).toBeLessThanOrEqual(stage.x + stage.width);
+    expect(bar.y).toBeGreaterThanOrEqual(controls.y + controls.height);
+    expect(bar.y + bar.height).toBeLessThanOrEqual(stage.y + stage.height);
+    for (const selector of ["#boss-vitals-name", "#boss-vitals-count"]) {
+      const label = client.page.locator(selector);
+      await expect(label).toBeVisible();
+      const bounds = (await label.boundingBox())!;
+      expect(bounds.x).toBeGreaterThanOrEqual(bar.x);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(bar.x + bar.width);
+      expect(await label.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    }
+  }
+});
+
 test("사냥터를 떠나면 보스 HP바가 새 room에 남지 않는다", async () => {
   await joinRoom(client.page, "hunting-ground");
   await waitForCanvasReady(client.page);
@@ -209,9 +239,9 @@ test("사냥터를 떠나면 보스 HP바가 새 room에 남지 않는다", asyn
   await revealBossBar(client.page);
   await expect(bar).toBeVisible();
 
-  // 랜드마크 패널(T)의 "마을 광장" 행 = 다른 room으로의 hop, 즉 씬 재시작 경로.
+  // 랜드마크 패널(T)의 남문 마을 행으로 이동하여 씬 재시작을 검증한다.
   await tapKey(client.page, "KeyT");
-  await client.page.getByRole("button", { name: "마을 광장", exact: true }).click();
+  await client.page.getByRole("button", { name: "남문 마을", exact: true }).click();
   // 도착 판정은 room 고유 신호로 한다 — 확률표 내용은 room별이라 "몬스터 없음" 문구가 곧
   // "사냥터를 떠났다"는 뜻이다.
   await tapKey(client.page, "KeyL");

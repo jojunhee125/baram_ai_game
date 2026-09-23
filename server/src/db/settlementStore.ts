@@ -401,6 +401,7 @@ export class PostgresSettlementStore implements SettlementStore {
       ...(effects.itemDebits ?? []).map((debit) => ({ ...debit, kind: "debit" as const })),
     ].sort((left, right) => compareItemKeyAscending(left.itemKey, right.itemKey));
     if (sortedOps.length > 0) {
+      await client.query("LOCK TABLE inventory_item IN ROW EXCLUSIVE MODE");
       const inventoryStore = new PostgresInventoryStore(client);
       for (const { itemKey, quantity, kind } of sortedOps) {
         if (kind === "grant") {

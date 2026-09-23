@@ -30,16 +30,29 @@ describe(
   () => {
     let pool: Pool;
     let store: PostgresQuestStore;
+    let adminPool: Pool;
+    const schema = `quest_test_${randomUUID().replaceAll("-", "")}`;
 
     before(async () => {
-      pool = new Pool({ connectionString: REAL_DATABASE_URL, max: 8 });
+      adminPool = new Pool({ connectionString: REAL_DATABASE_URL, max: 1 });
+      await adminPool.query(`CREATE SCHEMA "${schema}"`);
+      pool = new Pool({
+        connectionString: REAL_DATABASE_URL,
+        max: 8,
+        options: `-c search_path=${schema}`,
+      });
       await runMigrations(pool);
       resetDatabaseStatus();
     });
 
     after(async () => {
-      await pool.end();
-      resetDatabaseStatus();
+      try {
+        await pool?.end();
+        await adminPool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+      } finally {
+        await adminPool?.end();
+        resetDatabaseStatus();
+      }
     });
 
     /** Raw read past the store's own interface, for the columns `QuestRow` deliberately omits. */
@@ -164,6 +177,97 @@ describe(
       assert.equal(result, null);
       const row = await readRow(owner, quest);
       assert.equal(row, undefined, "no row must exist for a quest that was never accepted");
+    });
+
+    it("acceptAfter rejects missing and partially completed prerequisites without creating a row", async () => {
+      store = new PostgresQuestStore(pool);
+      const owner = randomUUID();
+      const quest = "second-hunt";
+      const prerequisite = "first-hunt";
+
+      assert.equal(await store.acceptAfter(owner, quest, prerequisite), null);
+      assert.equal(await readRow(owner, quest), undefined);
+      await store.accept(owner, prerequisite);
+      await store.recordKill(owner, prerequisite, 2);
+
+      assert.equal(await store.acceptAfter(owner, quest, prerequisite), null);
+      assert.equal(await readRow(owner, quest), undefined);
+      assert.deepEqual(await store.list(owner), [
+        { questId: prerequisite, killCount: 1, completed: false, settled: false },
+      ]);
+    });
+
+    it("acceptAfter accepts a completed prerequisite even before its reward is settled", async () => {
+      store = new PostgresQuestStore(pool);
+      const owner = randomUUID();
+      const prerequisite = "first-hunt";
+      await store.accept(owner, prerequisite);
+      await store.recordKill(owner, prerequisite, 1);
+      const beforePrerequisite = await readRow(owner, prerequisite);
+
+      assert.deepEqual(await store.acceptAfter(owner, "second-hunt", prerequisite), {
+        questId: "second-hunt", killCount: 0, completed: false, settled: false,
+      });
+      assert.deepEqual(await readRow(owner, prerequisite), beforePrerequisite);
+      assert.equal((await store.list(owner)).find((row) => row.questId === prerequisite)?.settled, false);
+    });
+
+    it("concurrent acceptAfter calls create one row and preserve progress and settlement on replay", async () => {
+      store = new PostgresQuestStore(pool);
+      const owner = randomUUID();
+      const quest = "second-hunt";
+      const prerequisite = "first-hunt";
+      await store.accept(owner, prerequisite);
+      await store.recordKill(owner, prerequisite, 1);
+
+      const accepted = await Promise.all(
+        Array.from({ length: 16 }, () => store.acceptAfter(owner, quest, prerequisite)),
+      );
+      for (const row of accepted) {
+        assert.deepEqual(row, { questId: quest, killCount: 0, completed: false, settled: false });
+      }
+      const count = await pool.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM quest_progress WHERE owner_key = $1 AND quest_id = $2",
+        [owner, quest],
+      );
+      assert.equal(count.rows[0]?.n, 1);
+
+      await store.recordKill(owner, quest, 2);
+      const beforeProgress = await readRow(owner, quest);
+      const replayed = await Promise.all(
+        Array.from({ length: 16 }, () => store.acceptAfter(owner, quest, prerequisite)),
+      );
+      for (const row of replayed) {
+        assert.deepEqual(row, { questId: quest, killCount: 1, completed: false, settled: false });
+      }
+      assert.deepEqual(await readRow(owner, quest), beforeProgress);
+
+      await store.recordKill(owner, quest, 2);
+      await store.markSettled(owner, quest);
+      const beforeCompleted = await readRow(owner, quest);
+      assert.deepEqual(await store.acceptAfter(owner, quest, prerequisite), {
+        questId: quest, killCount: 2, completed: true, settled: true,
+      });
+      assert.deepEqual(await readRow(owner, quest), beforeCompleted);
+    });
+
+    it("acceptAfter requires the exact prerequisite belonging to the requesting owner", async () => {
+      store = new PostgresQuestStore(pool);
+      const owner = randomUUID();
+      const otherOwner = randomUUID();
+      const quest = "second-hunt";
+      const prerequisite = "first-hunt";
+      await store.accept(otherOwner, prerequisite);
+      await store.recordKill(otherOwner, prerequisite, 1);
+      await store.accept(owner, "unrelated-hunt");
+      await store.recordKill(owner, "unrelated-hunt", 1);
+
+      assert.equal(await store.acceptAfter(owner, quest, prerequisite), null);
+      assert.equal(await readRow(owner, quest), undefined);
+      assert.deepEqual(await store.acceptAfter(otherOwner, quest, prerequisite), {
+        questId: quest, killCount: 0, completed: false, settled: false,
+      });
+      assert.equal(await readRow(owner, quest), undefined);
     });
   },
 );

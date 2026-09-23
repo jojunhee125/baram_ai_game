@@ -170,7 +170,7 @@ describe("GET /api/inventory", () => {
     const { status, items } = await readInventory(tokenHeader(SUB_A));
     assert.equal(status, 200);
     assert.deepEqual(items, [
-      { itemKey: first.key, name: first.name, icon: first.icon, quantity: 3, equipped: false, sellValue: first.sellValue },
+      { itemKey: first.key, name: first.name, icon: first.icon, quantity: 3, equipped: false, tradeable: true, sellValue: first.sellValue },
     ]);
     assert.deepEqual(store.reads, [SUB_A], "the sub claim is the key it looked under");
   });

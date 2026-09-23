@@ -60,6 +60,10 @@ function asRoomClient(client: FakeClient): RoomClient {
   return client as unknown as RoomClient;
 }
 
+function combatMessages(client: FakeClient): SentMessage[] {
+  return client.sent.filter(({ type }) => type !== ServerMessage.PartyChanged && type !== ServerMessage.CraftingRecipes);
+}
+
 const OPEN_CENTRE: TilePosition = { tileX: 78, tileY: 70 };
 
 const FIXTURE_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
@@ -381,7 +385,7 @@ describe("VERIFY handleAttack", () => {
       place(room, "attacker", OPEN_CENTRE);
       face(room, "attacker", Direction.Right);
       attack(room, attacker, 0);
-      assert.equal(attacker.sent.length, 0, "an empty swing is answered with nothing");
+      assert.equal(combatMessages(attacker).length, 0, "an empty swing is answered with nothing");
       assert.equal(room["monsterRuntimes"].get("m")?.hp, 8);
     } finally {
       dispose(room);
@@ -392,7 +396,7 @@ describe("VERIFY handleAttack", () => {
       const attacker = join(bare, "attacker");
       assert.equal(bare["hasMonsters"], false, "precondition: no monsters were built");
       attack(bare, attacker, 0);
-      assert.equal(attacker.sent.length, 0, "and no monster index was reached for");
+      assert.equal(combatMessages(attacker).length, 0, "and no monster index was reached for");
     } finally {
       dispose(bare);
     }
@@ -591,7 +595,7 @@ describe("VERIFY monster damage, death and recovery", () => {
       room["tick"](1000 + COMBAT_EXIT_MS + MONSTER_TICK_MS * 2);
       assert.equal(hurt.userData.hp, PLAYER_MAX_HP, "and never goes past it");
 
-      assert.equal(hurt.sent.length, 0, "recovery is silent — the client draws the same curve");
+      assert.equal(combatMessages(hurt).length, 0, "recovery is silent — the client draws the same curve");
       assert.equal(whole.userData.hp, PLAYER_MAX_HP, "a never-hit player is left alone");
     } finally {
       dispose(room);

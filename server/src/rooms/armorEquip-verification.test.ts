@@ -741,16 +741,10 @@ describe(
     });
 
     it(
-      "FIXED: one session's equip receives applied:false when it loses the database race to a sibling session (previously received no verdict at all)",
+      "queued same-account equips publish each committed state once to both sessions and converge on the database slot",
       async () => {
-        // `ITEM_DEFINITIONS` ships exactly one row with `.equipment` today (`leather-armor`), so
-        // `handleEquipItem`'s own catalogue gate makes a *second* real equipment item unreachable
-        // through a live client message right now — there is nothing else a client could ever
-        // legitimately name. That gate is a business rule about which `itemKey`s are equipment,
-        // orthogonal to the concurrency mechanism under test here, so this drives
-        // `settleEquipRequest` directly (the same private method `handleEquipItem` calls into)
-        // with a second, synthetic equipment-shaped item — exactly what today's code will do the
-        // moment the catalogue grows a second row, which the roadmap's later phases plan to add.
+        // Exercise persistence and session synchronization through the existing fixture seam.
+        // Catalog validation is covered separately; this second stack isolates slot contention.
         const store = new PostgresInventoryStore(pool);
         const ownerKey = randomUUID();
         await store.add(ownerKey, "leather-armor", 1);
@@ -761,8 +755,12 @@ describe(
           // Two sessions, same SSO account — exactly what two browser tabs for one login produce.
           const tabA = join(room, "tabA", ownerKey);
           const tabB = join(room, "tabB", ownerKey);
-          // Neither tab's join-time hydration is awaited before the race; both start at
-          // equipCacheVersions.armor 0 independently, since each session owns its own cache.
+          const outcomes: { itemKey: string; applied: boolean }[] = [];
+          const runEquip = async (itemKey: string): Promise<boolean> => {
+            const applied = await store.equip(ownerKey, itemKey, "armor");
+            outcomes.push({ itemKey, applied });
+            return applied;
+          };
 
           // Awaited directly (not fire-and-forget + `flush()`, which this file's other tests use):
           // those races are between in-process promises with no real latency, so a handful of
@@ -773,13 +771,13 @@ describe(
             room["settleEquipRequest"](
               asRoomClient(tabA),
               "armor",
-              () => store.equip(ownerKey, "leather-armor", "armor"),
+              () => runEquip("leather-armor"),
               "leather-armor",
             ),
             room["settleEquipRequest"](
               asRoomClient(tabB),
               "armor",
-              () => store.equip(ownerKey, "phantom-second-armor", "armor"),
+              () => runEquip("phantom-second-armor"),
               "phantom-second-armor",
             ),
           ]);
@@ -791,22 +789,22 @@ describe(
           const changedA = sentOfType<EquipmentChanged>(tabA, ServerMessage.EquipmentChanged);
           const changedB = sentOfType<EquipmentChanged>(tabB, ServerMessage.EquipmentChanged);
 
-          assert.equal(changedA.length, 1, "tabA must receive exactly one verdict for its one request");
-          assert.equal(changedB.length, 1, "tabB must receive exactly one verdict for its one request — " +
-            "the loser is no longer left silent by a swallowed unique_violation");
-
-          const winnerChanged = changedA[0]!.applied ? changedA[0]! : changedB[0]!;
-          const loserChanged = changedA[0]!.applied ? changedB[0]! : changedA[0]!;
-          assert.equal(winnerChanged.applied, true);
-          assert.equal(loserChanged.applied, false, "the loser's equip() call reported false, not an exception");
-          assert.equal(equippedRows[0]?.itemKey, winnerChanged.itemKey);
-
-          const loserSession = changedA[0]!.applied ? tabB.userData : tabA.userData;
-          assert.equal(
-            loserSession?.equipRequestPendingSlots.has("armor"),
-            false,
-            "the losing session's pending flag is cleared same as any other settled request",
-          );
+          assert.deepEqual(outcomes, [
+            { itemKey: "leather-armor", applied: true },
+            { itemKey: "phantom-second-armor", applied: false },
+          ], "the conflicting store operation resolves false instead of throwing");
+          const committed = outcomes.filter((outcome) => outcome.applied);
+          const expectedChanges = committed.map(({ itemKey }) => ({ slot: "armor", itemKey, applied: true }));
+          // These are account subscription updates, not private request verdicts. Even a tab
+          // whose own write declines must receive the successful sibling's canonical state.
+          assert.deepEqual(changedA, expectedChanges, "tabA receives each committed state exactly once");
+          assert.deepEqual(changedB, expectedChanges, "tabB receives each committed state exactly once");
+          const finalItem = committed.at(-1)!.itemKey;
+          assert.equal(equippedRows[0]?.itemKey, finalItem);
+          for (const tab of [tabA, tabB]) {
+            assert.equal(tab.userData?.equippedItemKeys.armor, finalItem, "every session converges on the persisted equipment");
+            assert.equal(tab.userData?.equipRequestPendingSlots.has("armor"), false, "every settled request clears its pending flag");
+          }
         } finally {
           dispose(room);
         }

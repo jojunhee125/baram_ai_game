@@ -53,7 +53,7 @@ export function deriveSsoUserId(accessToken: string | null): string | null {
     console.warn(`[zep-test] sub claim is not a UUID, so nothing can be filed under it: ${trimmed}`);
     return null;
   }
-  return trimmed;
+  return trimmed.toLowerCase();
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

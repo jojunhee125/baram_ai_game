@@ -17,7 +17,7 @@ import { TiledMapLoader } from "./game/tiledMap";
 import { markReady, markUnhealthy } from "./http/readiness";
 import { configureHttpRoutes } from "./http/routes";
 import { observeWebSocketUpgrade } from "./http/wsAuthProbe";
-import type { CollisionMap } from "./rooms/contracts";
+import type { CollisionMap, TradeStore } from "./rooms/contracts";
 import { ROOM_DEFINITIONS } from "./rooms/definitions";
 import { INTERACTABLE_DEFINITIONS } from "./rooms/interactableDefinitions";
 import { ITEM_DEFINITIONS, MAX_DISTINCT_ITEMS } from "./rooms/itemDefinitions";
@@ -56,6 +56,7 @@ export function createGameServer(
   currencyStore?: CurrencyStore,
   settlementStore?: SettlementStore,
   classStore?: ClassStore,
+  tradeStore?: TradeStore,
 ): Server {
   // Has to be set explicitly: the 8 KB default is nowhere near one patch of a 500-view room.
   // Every client's view is appended to one shared buffer, so a patch needs the sum of all 500
@@ -125,6 +126,7 @@ export function createGameServer(
       currencyStore,
       settlementStore,
       classStore,
+      tradeStore,
       adminOwnerKeys,
     });
   }

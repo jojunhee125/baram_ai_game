@@ -27,6 +27,7 @@ import {
   type ExpGranted,
   type JoinOptions,
   type MonsterHit,
+  type PartyInvited,
   type PlayerHealed,
   type PlayerHit,
   type SkillDenied,
@@ -130,6 +131,16 @@ function sentOfType<T>(client: FakeClient, type: string): T[] {
 
 function asRoomClient(client: FakeClient): RoomClient {
   return client as unknown as RoomClient;
+}
+
+function formParty(room: MetaverseRoom, leader: FakeClient, member: FakeClient): void {
+  const now = Date.now();
+  room["parties"].create(leader.sessionId, now);
+  room["parties"].invite(leader.sessionId, { targetSessionId: member.sessionId }, now);
+  const invitation = sentOfType<PartyInvited>(member, ServerMessage.PartyInvited).at(-1);
+  assert.ok(invitation);
+  room["parties"].respond(member.sessionId, { inviteId: invitation.inviteId, accept: true }, now);
+  assert.equal(room["parties"].sameParty(leader.sessionId, member.sessionId), true);
 }
 
 const OPEN_CENTRE: TilePosition = { tileX: 78, tileY: 70 };
@@ -1131,6 +1142,7 @@ describe("VERIFY R05-b skill execution contract (docs/r05-classes-and-skills.md 
       const caster = join(room, "cleric", undefined, `owner-${PlayerClassKey.Cleric}`);
       const ally = join(room, "hurt-ally", undefined, "owner-ally");
       await flush();
+      formParty(room, caster, ally);
       place(room, "cleric", OPEN_CENTRE);
       place(room, "hurt-ally", { tileX: OPEN_CENTRE.tileX + 2, tileY: OPEN_CENTRE.tileY });
       const allySession = asRoomClient(ally).userData!;
@@ -1162,6 +1174,7 @@ describe("VERIFY R05-b skill execution contract (docs/r05-classes-and-skills.md 
       const caster = join(room, "cleric2", undefined, `owner-${PlayerClassKey.Cleric}`);
       const ally = join(room, "almost-full", undefined, "owner-almost-full");
       await flush();
+      formParty(room, caster, ally);
       place(room, "cleric2", OPEN_CENTRE);
       place(room, "almost-full", { tileX: OPEN_CENTRE.tileX + 1, tileY: OPEN_CENTRE.tileY });
       const allySession = asRoomClient(ally).userData!;
@@ -1178,6 +1191,25 @@ describe("VERIFY R05-b skill execution contract (docs/r05-classes-and-skills.md 
   });
 
   // -- denial reasons -------------------------------------------------------------------------------
+
+  it("denies healing a nearby nonparty player without spending MP", async () => {
+    const room = await classRoom(PlayerClassKey.Cleric);
+    try {
+      const caster = join(room, "cleric-nonparty", undefined, `owner-${PlayerClassKey.Cleric}`);
+      const stranger = join(room, "stranger", undefined, "owner-stranger");
+      await flush();
+      place(room, caster.sessionId, OPEN_CENTRE);
+      place(room, stranger.sessionId, OPEN_CENTRE);
+      const target = asRoomClient(stranger).userData!;
+      target.hp = 40;
+      const mp = asRoomClient(caster).userData!.mp;
+      useSkill(room, caster, SkillKey.Heal, stranger.sessionId);
+      assert.equal(target.hp, 40);
+      assert.equal(asRoomClient(caster).userData!.mp, mp);
+      assert.equal(sentOfType<SkillDenied>(caster, ServerMessage.SkillDenied).at(-1)?.reason, "no-target");
+      assert.equal(sentOfType<PlayerHealed>(stranger, ServerMessage.PlayerHealed).length, 0);
+    } finally { dispose(room); }
+  });
 
   it("denies no-class before ever looking at the skill key, and stamps no cooldown", async () => {
     const room = await createRoom([], { classStore: new InMemoryClassStore() });
@@ -1296,6 +1328,7 @@ describe("VERIFY R05-b skill execution contract (docs/r05-classes-and-skills.md 
       const caster = join(room, "cleric4", undefined, `owner-${PlayerClassKey.Cleric}`);
       const ally = join(room, "far-ally", undefined, "owner-far-ally");
       await flush();
+      formParty(room, caster, ally);
       place(room, "cleric4", OPEN_CENTRE);
       place(room, "far-ally", { tileX: OPEN_CENTRE.tileX + 5, tileY: OPEN_CENTRE.tileY }); // heal's range is 3
       const session = asRoomClient(caster).userData!;
@@ -1318,6 +1351,7 @@ describe("VERIFY R05-b skill execution contract (docs/r05-classes-and-skills.md 
       const caster = join(room, "cleric5", undefined, `owner-${PlayerClassKey.Cleric}`);
       const ally = join(room, "downed-ally", undefined, "owner-downed-ally");
       await flush();
+      formParty(room, caster, ally);
       place(room, "cleric5", OPEN_CENTRE);
       place(room, "downed-ally", OPEN_CENTRE);
       asRoomClient(ally).userData!.hp = 0;

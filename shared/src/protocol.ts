@@ -104,6 +104,16 @@ export const ClientMessage = {
    * SkillDenied} answer to the attempt it refuses.
    */
   UseSkill: "skill:use",
+  CreateParty: "party:create",
+  InviteParty: "party:invite",
+  RespondPartyInvite: "party:respond",
+  LeaveParty: "party:leave",
+  RequestTrade: "trade:request",
+  RespondTrade: "trade:respond",
+  UpdateTradeOffer: "trade:offer",
+  ConfirmTrade: "trade:confirm",
+  CancelTrade: "trade:cancel",
+  CraftItem: "craft:item",
 } as const;
 
 export type ClientMessage = (typeof ClientMessage)[keyof typeof ClientMessage];
@@ -260,7 +270,158 @@ export interface UseSkillRequest {
   nonce: string;
 }
 
+export interface InvitePartyRequest {
+  targetSessionId: string;
+}
+
+export interface RespondPartyInviteRequest {
+  inviteId: string;
+  accept: boolean;
+}
+
+export interface PartyMemberView {
+  sessionId: string;
+  nickname: string;
+  playerClass: PlayerClassKey | null;
+  hp: number;
+  maxHp: number;
+  mp: number;
+  maxMp: number;
+  level: number;
+}
+
+export interface PartyView {
+  partyId: string;
+  leaderSessionId: string;
+  members: readonly PartyMemberView[];
+}
+
+export interface PartyChanged {
+  party: PartyView | null;
+}
+
+export interface PartyInvited {
+  inviteId: string;
+  partyId: string;
+  inviterSessionId: string;
+  inviterNickname: string;
+  expiresAt: number;
+}
+
+export interface PartyDenied {
+  action: "create" | "invite" | "respond" | "leave";
+  reason: "invalid-request" | "already-in-party" | "not-in-party" | "not-leader"
+    | "party-full" | "unavailable" | "same-owner" | "expired" | "rate-limited";
+}
+
+export interface TradeItemAmount {
+  itemKey: string;
+  quantity: number;
+  name?: string;
+}
+
+export interface TradeOffer {
+  currency: number;
+  items: readonly TradeItemAmount[];
+}
+
+export interface RequestTradeRequest {
+  targetSessionId: string;
+}
+
+export interface RespondTradeRequest {
+  tradeId: string;
+  accept: boolean;
+}
+
+export interface UpdateTradeOfferRequest {
+  tradeId: string;
+  revision: number;
+  offer: TradeOffer;
+}
+
+export interface ConfirmTradeRequest {
+  tradeId: string;
+  revision: number;
+}
+
+export interface CancelTradeRequest {
+  tradeId: string;
+}
+
+export interface TradeParticipantView {
+  sessionId: string;
+  nickname: string;
+  offer: TradeOffer;
+  confirmed: boolean;
+}
+
+export type TradeDenialReason = "invalid-request" | "unavailable" | "auth-required"
+  | "same-owner" | "busy" | "out-of-range" | "expired" | "stale-revision" | "settling"
+  | "insufficient-balance" | "insufficient-item" | "equipped-item" | "bag-full"
+  | "restricted-item" | "invalid-offer" | "conflict" | "storage-error" | "rate-limited";
+
+export interface TradeChanged {
+  tradeId: string;
+  revision: number;
+  phase: "invited" | "negotiating" | "settling" | "completed" | "cancelled";
+  initiatorSessionId: string;
+  participants: readonly TradeParticipantView[];
+  expiresAt: number;
+  reason?: TradeDenialReason | "declined" | "cancelled" | "disconnected";
+}
+
+export interface TradeDenied {
+  action: "request" | "respond" | "offer" | "confirm" | "cancel";
+  reason: TradeDenialReason;
+  tradeId?: string;
+}
+
+export interface CraftingIngredientView extends TradeItemAmount {
+  name: string;
+}
+
+export interface CraftingRecipeView {
+  recipeId: string;
+  name: string;
+  ingredients: readonly CraftingIngredientView[];
+  currencyCost: number;
+  output: CraftingIngredientView;
+}
+
+export interface CraftingRecipes {
+  recipes: readonly CraftingRecipeView[];
+}
+
+export interface CraftItemRequest {
+  recipeId: string;
+  nonce: string;
+}
+
+export interface CraftResult {
+  recipeId: string;
+  nonce: string;
+  ok: boolean;
+  reason?: "invalid-request" | "unknown-recipe" | "auth-required" | "unavailable"
+    | "insufficient-balance" | "insufficient-item" | "equipped-item" | "bag-full"
+    | "storage-error" | "rate-limited";
+}
+
+export interface InventoryInvalidated {
+  reason: "trade" | "craft";
+}
+
 export interface ClientMessagePayload {
+  [ClientMessage.CreateParty]: undefined;
+  [ClientMessage.InviteParty]: InvitePartyRequest;
+  [ClientMessage.RespondPartyInvite]: RespondPartyInviteRequest;
+  [ClientMessage.LeaveParty]: undefined;
+  [ClientMessage.RequestTrade]: RequestTradeRequest;
+  [ClientMessage.RespondTrade]: RespondTradeRequest;
+  [ClientMessage.UpdateTradeOffer]: UpdateTradeOfferRequest;
+  [ClientMessage.ConfirmTrade]: ConfirmTradeRequest;
+  [ClientMessage.CancelTrade]: CancelTradeRequest;
+  [ClientMessage.CraftItem]: CraftItemRequest;
   [ClientMessage.Move]: MoveRequest;
   [ClientMessage.Chat]: ChatRequest;
   [ClientMessage.QuizAnswer]: QuizAnswerRequest;
@@ -333,6 +494,14 @@ export const ServerMessage = {
   SkillDenied: "skill:denied",
   /** roadmap R05-b — an ally-heal skill restored HP, sent to both the caster and the target. */
   PlayerHealed: "player:healed",
+  PartyChanged: "party:changed",
+  PartyInvited: "party:invited",
+  PartyDenied: "party:denied",
+  TradeChanged: "trade:changed",
+  TradeDenied: "trade:denied",
+  CraftingRecipes: "craft:recipes",
+  CraftResult: "craft:result",
+  InventoryInvalidated: "inventory:invalidated",
 } as const;
 
 export type ServerMessage = (typeof ServerMessage)[keyof typeof ServerMessage];
@@ -789,7 +958,7 @@ export interface CurrencyChanged {
   balance: number;
   /** How much `balance` moved by this message; 0 for the join-time sync. */
   delta: number;
-  reason: "quest" | "sync" | "shop-buy" | "shop-sell";
+  reason: "quest" | "sync" | "shop-buy" | "shop-sell" | "trade" | "craft";
 }
 
 /**
@@ -929,6 +1098,14 @@ export interface PlayerHealed {
 }
 
 export interface ServerMessagePayload {
+  [ServerMessage.PartyChanged]: PartyChanged;
+  [ServerMessage.PartyInvited]: PartyInvited;
+  [ServerMessage.PartyDenied]: PartyDenied;
+  [ServerMessage.TradeChanged]: TradeChanged;
+  [ServerMessage.TradeDenied]: TradeDenied;
+  [ServerMessage.CraftingRecipes]: CraftingRecipes;
+  [ServerMessage.CraftResult]: CraftResult;
+  [ServerMessage.InventoryInvalidated]: InventoryInvalidated;
   [ServerMessage.Chat]: ChatBroadcast;
   [ServerMessage.MoveRejected]: MoveRejected;
   [ServerMessage.PortalEntered]: PortalEntered;

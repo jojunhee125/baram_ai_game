@@ -226,6 +226,10 @@ export class InventoryPanel {
     return panelOpen;
   }
 
+  invalidate(): void {
+    if (panelOpen && !this.destroyed) this.refresh();
+  }
+
   /**
    * Folds one drop into an open bag, so a pickup shows up without a second `GET /api/inventory`.
    * `ItemGranted.total` is the amount held afterwards, which is exactly what a row displays.

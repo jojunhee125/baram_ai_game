@@ -50,6 +50,9 @@ import {
   type UseItemRequest,
   type UseSkillRequest,
   type WarpToLandmarkRequest,
+  type PartyChanged, type PartyInvited, type PartyDenied,
+  type TradeChanged, type TradeDenied, type TradeOffer,
+  type CraftingRecipes, type CraftResult, type InventoryInvalidated,
 } from "@zep-test/shared";
 import { resolveJoinOptions } from "./identity";
 
@@ -108,6 +111,14 @@ export interface InteractableMarkerPosition extends TilePosition {
 }
 
 export interface RoomEvents {
+  onPartyChanged?(event: PartyChanged): void;
+  onPartyInvited?(event: PartyInvited): void;
+  onPartyDenied?(event: PartyDenied): void;
+  onTradeChanged?(event: TradeChanged): void;
+  onTradeDenied?(event: TradeDenied): void;
+  onCraftingRecipes?(event: CraftingRecipes): void;
+  onCraftResult?(event: CraftResult): void;
+  onInventoryInvalidated?(event: InventoryInvalidated): void;
   onPlayerAdd?(sessionId: string, player: PlayerSnapshot): void;
   onPlayerChange?(sessionId: string, player: PlayerSnapshot): void;
   onPlayerRemove?(sessionId: string): void;
@@ -238,6 +249,7 @@ export class RoomConnection {
   private readonly pendingCurrencyChanges: CurrencyChanged[] = [];
   /** {@link pendingCurrencyChanges}'s own queue and reason, against the join-time `class:changed` sync. */
   private readonly pendingClassChanges: ClassChanged[] = [];
+  private pendingSocial: (() => void)[] = [];
 
   private constructor(
     private readonly room: Room<unknown, RoomState>,
@@ -266,6 +278,7 @@ export class RoomConnection {
     this.bindQuestUpdates();
     this.bindCurrencyChanges();
     this.bindClassChanges();
+    this.bindSocialMessages();
   }
 
   /**
@@ -301,6 +314,8 @@ export class RoomConnection {
     this.replayPendingQuestUpdates();
     this.replayPendingCurrencyChanges();
     this.replayPendingClassChanges();
+    const pendingSocial = this.pendingSocial.splice(0);
+    queueMicrotask(() => pendingSocial.forEach((deliver) => deliver()));
   }
 
   get sessionId(): string {
@@ -328,6 +343,34 @@ export class RoomConnection {
 
   sendChat(text: string): void {
     this.room.send(ClientMessage.Chat, { text } satisfies ChatRequest);
+  }
+
+  createParty(): void { this.room.send(ClientMessage.CreateParty); }
+  inviteParty(targetSessionId: string): void { this.room.send(ClientMessage.InviteParty, { targetSessionId }); }
+  respondParty(inviteId: string, accept: boolean): void { this.room.send(ClientMessage.RespondPartyInvite, { inviteId, accept }); }
+  leaveParty(): void { this.room.send(ClientMessage.LeaveParty); }
+  requestTrade(targetSessionId: string): void { this.room.send(ClientMessage.RequestTrade, { targetSessionId }); }
+  respondTrade(tradeId: string, accept: boolean): void { this.room.send(ClientMessage.RespondTrade, { tradeId, accept }); }
+  updateTrade(tradeId: string, revision: number, offer: TradeOffer): void {
+    this.room.send(ClientMessage.UpdateTradeOffer, { tradeId, revision, offer });
+  }
+  confirmTrade(tradeId: string, revision: number): void { this.room.send(ClientMessage.ConfirmTrade, { tradeId, revision }); }
+  cancelTrade(tradeId: string): void { this.room.send(ClientMessage.CancelTrade, { tradeId }); }
+  craftItem(recipeId: string, nonce: string): void { this.room.send(ClientMessage.CraftItem, { recipeId, nonce }); }
+
+  private bindSocialMessages(): void {
+    const deliver = (callback: () => void): void => {
+      if (this.attached) callback();
+      else this.pendingSocial.push(callback);
+    };
+    this.room.onMessage(ServerMessage.PartyChanged, (event: PartyChanged) => deliver(() => this.events.onPartyChanged?.(event)));
+    this.room.onMessage(ServerMessage.PartyInvited, (event: PartyInvited) => deliver(() => this.events.onPartyInvited?.(event)));
+    this.room.onMessage(ServerMessage.PartyDenied, (event: PartyDenied) => deliver(() => this.events.onPartyDenied?.(event)));
+    this.room.onMessage(ServerMessage.TradeChanged, (event: TradeChanged) => deliver(() => this.events.onTradeChanged?.(event)));
+    this.room.onMessage(ServerMessage.TradeDenied, (event: TradeDenied) => deliver(() => this.events.onTradeDenied?.(event)));
+    this.room.onMessage(ServerMessage.CraftingRecipes, (event: CraftingRecipes) => deliver(() => this.events.onCraftingRecipes?.(event)));
+    this.room.onMessage(ServerMessage.CraftResult, (event: CraftResult) => deliver(() => this.events.onCraftResult?.(event)));
+    this.room.onMessage(ServerMessage.InventoryInvalidated, (event: InventoryInvalidated) => deliver(() => this.events.onInventoryInvalidated?.(event)));
   }
 
   /**

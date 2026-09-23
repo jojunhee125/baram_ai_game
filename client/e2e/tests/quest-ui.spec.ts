@@ -39,34 +39,32 @@ test("안내 NPC 패널에서 첫 사냥을 수락하면 패널이 진행 중으
   await joinRoom(client.page, "plaza");
   await waitForCanvasReady(client.page);
 
-  // The same BFS'd walk to (29,8) npc-movement-block-fix.spec.ts uses.
-  await holdKey(client.page, "ArrowUp", 160);
-  await client.page.waitForTimeout(80);
-  await holdKey(client.page, "ArrowLeft", 280);
-  await client.page.waitForTimeout(80);
-  await holdKey(client.page, "ArrowUp", 1350);
-  await client.page.waitForTimeout(80);
-  // Shorter than STEP_TWEEN_MS (120ms), so the hold can only produce the one step onto the NPC
-  // tile. A second step would land on the door trigger at (31,8) and hop rooms out from under the
-  // panel this test is about — which is exactly what a 160ms hold did under full-suite load.
-  await holdKey(client.page, "ArrowRight", 100);
-  // Asserted rather than assumed: overshooting is the one failure that would otherwise look like
-  // a broken panel instead of a walk that went one tile too far.
-  await expect(client.page.getByLabel("현재 좌표")).toHaveText("30, 8");
+  for (let step = 0; step < 12; step += 1) {
+    const [x, y] = (await client.page.getByLabel("현재 좌표").innerText()).split(",").map(Number);
+    if (x === 29 && y === 22) break;
+    const key = x! > 29 ? "ArrowLeft" : x! < 29 ? "ArrowRight"
+      : y! < 22 ? "ArrowDown" : "ArrowUp";
+    await holdKey(client.page, key, 65);
+    await client.page.waitForTimeout(180);
+  }
+  await expect(client.page.getByLabel("현재 좌표")).toHaveText("29, 22");
 
   await expect(client.page.locator("#object-panel")).toBeVisible();
+  const quest = client.page.locator(".object__quest").filter({
+    has: client.page.locator(".object__quest-title", { hasText: /^첫 사냥$/ }),
+  });
   // The quest rides on the NPC panel payload, so it is drawn with the panel rather than fetched.
-  await expect(client.page.locator(".object__quest-title")).toHaveText("첫 사냥");
-  await expect(client.page.locator(".object__quest-status")).toHaveText("아직 수락하지 않았습니다.");
+  await expect(quest.locator(".object__quest-title")).toHaveText("첫 사냥");
+  await expect(quest.locator(".object__quest-status")).toHaveText("아직 수락하지 않았습니다.");
   // Nothing is tracked before an accept — the tracker holds accepted quests only.
   await expect(client.page.locator("#quest-tracker")).toBeHidden();
 
-  await client.page.locator(".object__quest-accept").click();
+  await quest.locator(".object__quest-accept").click();
 
   // Both readings come from the server's own `quest:updated`, never from the click: the button
   // draws no accepted state itself, so these passing means the round trip landed.
-  await expect(client.page.locator(".object__quest-status")).toHaveText("진행 중 · 0 / 3");
-  await expect(client.page.locator(".object__quest-accept")).toBeHidden();
+  await expect(quest.locator(".object__quest-status")).toHaveText("진행 중 · 0 / 3");
+  await expect(quest.locator(".object__quest-accept")).toBeHidden();
   await expect(client.page.locator("#quest-tracker")).toBeVisible();
   await expect(client.page.locator(".quests__title")).toHaveText("첫 사냥");
   await expect(client.page.locator(".quests__count")).toHaveText("0 / 3");

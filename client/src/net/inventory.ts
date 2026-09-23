@@ -22,6 +22,7 @@ export interface InventoryItem {
   icon: string;
   quantity: number;
   equipped: boolean;
+  tradeable?: boolean;
   equipment?: EquipmentMetadata;
   /** Present only on equipment rows; its absence is what tells a row apart from a possession. */
   damageReductionRatio?: number;
@@ -118,6 +119,7 @@ function isInventoryItem(row: unknown): row is InventoryItem {
     typeof item.quantity === "number" &&
     Number.isFinite(item.quantity) &&
     typeof item.equipped === "boolean" &&
+    (typeof item.tradeable === "boolean" || item.tradeable === undefined) &&
     (typeof item.damageReductionRatio === "number" || item.damageReductionRatio === undefined) &&
     (typeof item.sellValue === "number" || item.sellValue === undefined) &&
     (typeof item.consumable === "boolean" || item.consumable === undefined)

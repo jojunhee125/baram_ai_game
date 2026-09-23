@@ -30,6 +30,8 @@ import {
   type SettlementStore,
 } from "./db/settlementStore";
 import { markDatabaseOk } from "./db/status";
+import { InMemoryTradeStore, PostgresTradeStore } from "./db/tradeStore";
+import type { TradeStore } from "./rooms/contracts";
 import { createGameServer, resolveAdminOwnerKeys, resolvePort } from "./server";
 
 const databaseUrl = resolveDatabaseUrl(process.env.DATABASE_URL);
@@ -41,6 +43,7 @@ let questStore: QuestStore;
 let currencyStore: CurrencyStore;
 let settlementStore: SettlementStore;
 let classStore: ClassStore;
+let tradeStore: TradeStore;
 
 if (databaseUrl === null) {
   // A supported mode, not a misconfiguration: KAD always injects the URL, and everything
@@ -66,6 +69,7 @@ if (databaseUrl === null) {
   // `InMemorySettlementStore`'s own reason: a settled quest reward has to show up in the same
   // balance/bag this room's other paths (a bag open, a hunting-ground drop) already read and write.
   settlementStore = new InMemorySettlementStore(memoryCurrencyStore, memoryInventoryStore);
+  tradeStore = new InMemoryTradeStore(memoryCurrencyStore, memoryInventoryStore);
   classStore = new InMemoryClassStore();
   console.log(
     "[zep-test] DATABASE_URL is not set; profiles, bags, boss timers, EXP, quests, currency and classes live in this process only",
@@ -87,6 +91,7 @@ if (databaseUrl === null) {
   questStore = new PostgresQuestStore(pool);
   currencyStore = new PostgresCurrencyStore(pool);
   settlementStore = new PostgresSettlementStore(pool);
+  tradeStore = new PostgresTradeStore(pool);
   classStore = new PostgresClassStore(pool);
   console.log(
     applied.length === 0
@@ -107,6 +112,7 @@ await createGameServer(
   currencyStore,
   settlementStore,
   classStore,
+  tradeStore,
 ).listen(port);
 console.log(
   `[zep-test] listening on port ${port} — client at /, matchmaking at /matchmake, health at /api/health`,

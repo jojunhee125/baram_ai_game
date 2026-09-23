@@ -14,6 +14,7 @@ body { background: #18130f; }
 .object__shop-stats { display: block; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
 .app { padding: 8px; }
 .stage {
+  container: game-stage / inline-size;
   --sidebar-width: 260px;
   --footer-height: 184px;
   --header-height: 28px;
@@ -84,7 +85,21 @@ body { background: #18130f; }
   font-size: 11px;
 }
 .hud__icon { display: none; }
-.boss-vitals { left: 50%; top: calc(var(--header-height) + 44px); }
+.boss-vitals {
+  left: 50%;
+  top: calc(var(--header-height) + 44px);
+  width: min(400px, calc(100% - 480px));
+  transform: translateX(-50%);
+  animation: none;
+}
+@container game-stage (max-width: 560px) {
+  .boss-vitals {
+    top: calc(var(--header-height) + var(--space-8) * 3 + var(--space-4));
+    left: var(--space-2);
+    width: calc(100% - var(--space-4));
+    transform: none;
+  }
+}
 .notice { top: calc(var(--header-height) + 8px); }
 .toasts { right: 8px; bottom: calc(var(--footer-height) + 8px); }
 .chat__log, .chat__input, .vitals, .boss-vitals, .minimap, .quests,

@@ -252,6 +252,7 @@ function presentInventory(rows: readonly InventoryRow[]): readonly {
   icon: string;
   quantity: number;
   equipped: boolean;
+  tradeable: boolean;
   damageReductionRatio?: number;
   equipment?: EquipmentMetadata;
   sellValue?: number;
@@ -270,6 +271,7 @@ function presentInventory(rows: readonly InventoryRow[]): readonly {
       icon: definition.icon,
       quantity: row.quantity,
       equipped: row.equipped,
+      tradeable: definition.possession !== true && !row.equipped,
       ...(definition.equipment === undefined ? {} : { equipment: equipmentMetadata(definition) }),
       damageReductionRatio: definition.equipment?.stats.damageReduction,
       // roadmap R04-c (design `docs/r04-settlement.md` §9 D11): `sellValue` travels as-is
