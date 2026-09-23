@@ -14,7 +14,7 @@ import { configureHttpRoutes } from "./routes";
  * Its own express app on an ephemeral port, like routes.test.ts: the fixed ports in this
  * workspace are already contended and must never be reused by a test file.
  */
-const HUNTING_GROUND = "hunting-ground";
+const HUNTING_GROUND = "buyeo-novice";
 
 interface LootTableMonsterPayload {
   kind: string;
@@ -93,3 +93,9 @@ describe("GET /api/loot-table/:roomName", () => {
     assert.ok(monsters.length > 0);
   });
 });
+
+for (const room of ["buyeo-novice", "buyeo-rat-cave", "buyeo-snake-cave", "buyeo-bear-cave", "buyeo-deer-cave", "buyeo-pig-cave", "buyeo-fox-cave"]) it(`${room}: HTTP publishes the live resolver table`, async () => {
+ const {status, monsters} = await getLootTable(room);
+ assert.equal(status,200); assert.deepEqual(monsters,buildLootTableView(room)); assert.ok(monsters.length > 0);
+});
+it("retired hunting rooms expose no active drops", async () => { for (const room of ["hunting-ground","hunting-den","hunting-forest","hunting-wetland","hunting-quarry","hunting-frost","hunting-ruins"]) assert.deepEqual((await getLootTable(room)).monsters, []); });

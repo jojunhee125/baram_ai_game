@@ -1,4 +1,5 @@
 import type { EquipmentMetadata } from "@zep-test/shared";
+import { LEGACY_PROGRESSION_ITEMS, PROGRESSION_ITEMS } from "./progressionDefinitions";
 import type { ItemDefinition } from "./contracts";
 
 export function equipmentMetadata(definition: ItemDefinition): EquipmentMetadata | undefined {
@@ -23,7 +24,7 @@ export function equipmentMetadata(definition: ItemDefinition): EquipmentMetadata
  * Larger than ITEM_DEFINITIONS is deliberate for now: with the catalogue this small, a full bag
  * would be unreachable and the capacity path would never be exercised outside its tests.
  */
-export const MAX_DISTINCT_ITEMS = 24;
+export const MAX_DISTINCT_ITEMS = 96;
 
 /**
  * The largest `quantity` one shop message may name (roadmap R04-c). **Not** a stack cap — the
@@ -152,4 +153,6 @@ export const ITEM_DEFINITIONS: readonly ItemDefinition[] = [
     key: "mystic-cloak", name: "신비한 숲 망토", icon: "leather-armor", sellValue: 110,
     equipment: { slot: "cloak", requirement: { minLevel: 7, classes: ["shaman", "cleric"] }, stats: { damageReduction: 0.13 } },
   },
+  ...LEGACY_PROGRESSION_ITEMS,
+  ...PROGRESSION_ITEMS,
 ];

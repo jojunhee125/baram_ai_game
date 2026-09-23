@@ -18,7 +18,7 @@ import { MONSTER_SPAWN_DEFINITIONS, MONSTER_TYPES, MonsterKind, monsterTypesForR
   validateMonsterSpawnDefinitions } from "./monsterDefinitions";
 import { PORTAL_DEFINITIONS } from "./portalDefinitions";
 
-const FOREST = "hunting-forest";
+const FOREST = "buyeo-snake-cave";
 type Client = Parameters<MetaverseRoom["onJoin"]>[0];
 
 class ForestAuditRoom extends MetaverseRoom {
@@ -62,26 +62,26 @@ async function fixture(name = FOREST, data = stores(), owner = randomUUID()) {
 }
 
 it("forest resolution leaves existing regional tables and monster populations unchanged", () => {
-  const names = [undefined, "hunting-ground", "hunting-den", "unknown"];
+  const names = [undefined, "buyeo-novice", "buyeo-rat-cave", "unknown"];
   const before = names.map((name) => JSON.stringify([...monsterTypesForRoom(name)]));
   for (let i = 0; i < 100; i++) {
     const forest = monsterTypesForRoom(FOREST);
-    assert.deepEqual([...forest.keys()], [MonsterKind.Rabbit, MonsterKind.Deer]);
-    assert.equal(forest.get(MonsterKind.Rabbit)!.expReward, 45);
-    assert.equal(forest.get(MonsterKind.Deer)!.expReward, 70);
+    assert.deepEqual([...forest.keys()], [MonsterKind.Snake, MonsterKind.Python, MonsterKind.KingPython]);
+    assert.equal(forest.get(MonsterKind.Snake)!.expReward, 45);
+    assert.equal(forest.get(MonsterKind.Python)!.expReward, 65);
   }
   assert.deepEqual(names.map((name) => JSON.stringify([...monsterTypesForRoom(name)])), before);
-  assert.equal(MONSTER_SPAWN_DEFINITIONS.filter((row) => row.room === "hunting-ground").length, 21);
-  assert.equal(MONSTER_SPAWN_DEFINITIONS.filter((row) => row.room === "hunting-den").length, 11);
+  assert.equal(MONSTER_SPAWN_DEFINITIONS.filter((row) => row.room === "buyeo-novice").length, 8);
+  assert.equal(MONSTER_SPAWN_DEFINITIONS.filter((row) => row.room === "buyeo-rat-cave").length, 8);
   const spawns = MONSTER_SPAWN_DEFINITIONS.filter((row) => row.room === FOREST);
   assert.equal(spawns.length, 8);
-  assert.equal(spawns.filter((row) => row.kind === MonsterKind.Rabbit).length, 4);
-  assert.equal(spawns.filter((row) => row.kind === MonsterKind.Deer).length, 4);
+  assert.equal(spawns.filter((row) => row.kind === MonsterKind.Snake).length, 3);
+  assert.equal(spawns.filter((row) => row.kind === MonsterKind.Python).length, 3);
   assert.ok(spawns.every((row) => !row.persistentRespawn));
 });
 
 it("ambush never steps across positions, target distances, cooldowns, and all AI states", () => {
-  const type = monsterTypesForRoom(FOREST).get(MonsterKind.Rabbit)!;
+  const type = monsterTypesForRoom(FOREST).get(MonsterKind.Snake)!;
   const base: MonsterSnapshot = { id: "forest-audit", state: MonsterAiState.Idle,
     tileX: 22, tileY: 12, spawn: { tileX: 22, tileY: 12 }, wanderRadiusTiles: 0,
     nextStepAt: 0, nextAttackAt: 1000, respawnAt: 1000 };
@@ -117,7 +117,7 @@ it("ambush never steps across positions, target distances, cooldowns, and all AI
 
 it("forest and den maps keep every walkable tile connected and all arrivals outside monster aggro", async () => {
   const loader = new TiledMapLoader();
-  for (const name of [FOREST, "hunting-den"]) {
+  for (const name of [FOREST, "buyeo-rat-cave"]) {
     const definition = ROOM_DEFINITIONS.find((row) => row.name === name)!;
     const map = await loader.load(definition.mapKey);
     const key = (x: number, y: number) => `${x},${y}`;
@@ -160,18 +160,18 @@ it("forest and den maps keep every walkable tile connected and all arrivals outs
   }
 });
 
-for (const kind of [MonsterKind.Rabbit, MonsterKind.Deer]) {
+for (const kind of [MonsterKind.Snake, MonsterKind.Python]) {
   it(`forest ${kind}: actual death awards the displayed EXP, loot, and live sale metadata`, async () => {
     const f = await fixture();
     try {
       const player = await f.join();
       const [id, runtime] = [...f.room["monsterRuntimes"]].find(([, row]) => row.type.kind === kind)!;
       const type = monsterTypesForRoom(FOREST).get(kind)!;
-      assert.equal(runtime.hp, kind === MonsterKind.Rabbit ? 96 : 140);
+      assert.equal(runtime.hp, kind === MonsterKind.Snake ? 100 : 140);
       f.room["applyMonsterDamage"](player.client, player.client.userData!, id, type.maxHp, Date.now());
       await flush();
       assert.equal(f.room.state.monsters.has(id), false);
-      assert.equal(await f.data.progressStore.getExp(f.owner), kind === MonsterKind.Rabbit ? 45 : 70);
+      assert.equal(await f.data.progressStore.getExp(f.owner), kind === MonsterKind.Snake ? 45 : 65);
       const actual = (await f.data.inventoryStore.list(f.owner)).map(({ itemKey, quantity }) => ({ itemKey, quantity }));
       assert.deepEqual(actual.sort((a, b) => a.itemKey.localeCompare(b.itemKey)),
         type.loot.map(({ itemKey, quantity }) => ({ itemKey, quantity })).sort((a, b) => a.itemKey.localeCompare(b.itemKey)));
@@ -190,12 +190,13 @@ for (const kind of [MonsterKind.Rabbit, MonsterKind.Deer]) {
   });
 }
 
-it("a dropped cloak reduces damage by 10%, persists on rejoin, refuses worn sale, and loses its bonus after sale", async () => {
+it("a saved legacy cloak reduces damage by 10%, persists on rejoin, refuses worn sale, and loses its bonus after sale", async () => {
   const f = await fixture();
   let later: Awaited<ReturnType<typeof fixture>> | undefined;
   try {
+    await f.data.inventoryStore.add(f.owner, "forest-cloak", 1);
     const player = await f.join();
-    const [id, runtime] = [...f.room["monsterRuntimes"]].find(([, row]) => row.type.kind === MonsterKind.Rabbit)!;
+    const [id, runtime] = [...f.room["monsterRuntimes"]].find(([, row]) => row.type.kind === MonsterKind.Snake)!;
     f.room["applyMonsterDamage"](player.client, player.client.userData!, id, runtime.hp, Date.now());
     await flush();
     f.room["handleEquipItem"](player.client, { itemKey: "forest-cloak", slot: "cloak" });
@@ -225,43 +226,32 @@ it("a dropped cloak reduces damage by 10%, persists on rejoin, refuses worn sale
   } finally { later?.room.onDispose(); f.room.onDispose(); }
 });
 
-it("forest entry portal checks possession, both portal arrivals work, and the exit needs no pass", async () => {
-  const den = await fixture("hunting-den");
+it("snake cave supports both directions without a legacy entry pass", async () => {
+  const den = await fixture("buyeo-rat-cave");
   const forest = await fixture(FOREST, den.data, den.owner);
   try {
-    const denied = await den.join({ viaPortal: "hunting-forest-south-door" });
-    den.room["handleMove"](denied.client, { dir: Direction.Right });
-    assert.ok(denied.messages.some((row) => row.type === ServerMessage.PortalDenied));
-    assert.ok(!denied.messages.some((row) => row.type === ServerMessage.PortalEntered));
-    await den.data.inventoryStore.grantOnce(den.owner, "entry-pass");
-    const allowed = await den.join({ viaPortal: "hunting-forest-south-door" });
+    const allowed = await den.join({ viaPortal: "buyeo-snake-cave-south-door" });
     den.room["handleMove"](allowed.client, { dir: Direction.Right });
     assert.deepEqual(allowed.messages.find((row) => row.type === ServerMessage.PortalEntered)?.payload,
-      { portalId: "hunting-den-forest-door", toRoom: FOREST });
-    const arrival = await forest.join({ viaPortal: "hunting-den-forest-door" });
+      { portalId: "buyeo-rat-cave-snake-door", toRoom: FOREST });
+    const arrival = await forest.join({ viaPortal: "buyeo-rat-cave-snake-door" });
     const player = forest.room.state.players.get(arrival.client.sessionId)!;
     assert.deepEqual([player.tileX, player.tileY], [31, 26]);
     await den.data.inventoryStore.remove(den.owner, "entry-pass", 1);
     forest.room["handleMove"](arrival.client, { dir: Direction.Down });
     assert.deepEqual(arrival.messages.find((row) => row.type === ServerMessage.PortalEntered)?.payload,
-      { portalId: "hunting-forest-south-door", toRoom: "hunting-den" });
-    const back = await den.join({ viaPortal: "hunting-forest-south-door" });
+      { portalId: "buyeo-snake-cave-south-door", toRoom: "buyeo-rat-cave" });
+    const back = await den.join({ viaPortal: "buyeo-snake-cave-south-door" });
     const returned = den.room.state.players.get(back.client.sessionId)!;
     assert.deepEqual([returned.tileX, returned.tileY], [46, 25]);
   } finally { forest.room.onDispose(); den.room.onDispose(); }
 });
 
-it("forest landmark denies missing possession and concurrent admitted joins respect the capacity of 20", async () => {
+it("snake cave landmark is open and concurrent joins respect capacity 20", async () => {
   const f = await fixture();
   try {
-    const denied = f.client();
-    await assert.rejects(f.room.onJoin(denied.client, {
-      nickname: "forest-audit", avatarSkin: 0, arriveAtLandmark: "landmark-hunting-forest",
-    }), /requires item "entry-pass"/);
-    assert.equal(f.room.state.players.size, 0);
-    await f.data.inventoryStore.grantOnce(f.owner, "entry-pass");
     const outcomes = await Promise.allSettled(Array.from({ length: 25 }, () => f.join({
-      arriveAtLandmark: "landmark-hunting-forest",
+      arriveAtLandmark: "landmark-buyeo-snake-cave",
     })));
     assert.equal(outcomes.filter((row) => row.status === "fulfilled").length, 20);
     assert.equal(outcomes.filter((row) => row.status === "rejected").length, 5);
@@ -274,14 +264,14 @@ it("boot refuses ambush wander radius or aggro radius that disagrees with statio
   const loader = new TiledMapLoader();
   const maps = new Map(await Promise.all(ROOM_DEFINITIONS.map(async (row) =>
     [row.name, await loader.load(row.mapKey)] as const)));
-  const altered = MONSTER_SPAWN_DEFINITIONS.map((row) => row.id === "hf-rabbit-01"
+  const altered = MONSTER_SPAWN_DEFINITIONS.map((row) => row.id === "buyeo-snake-cave-snake-1"
     ? { ...row, wanderRadiusTiles: 1 } : row);
   const result = validateMonsterSpawnDefinitions(altered, MONSTER_TYPES, ITEM_DEFINITIONS,
     maps, PORTAL_DEFINITIONS, INTERACTABLE_DEFINITIONS, monsterTypesForRoom);
-  assert.ok(result.errors.some((error) => /hf-rabbit-01.*wanderRadiusTiles 0/.test(error)));
+  assert.ok(result.errors.some((error) => /buyeo-snake-cave-snake-1.*wanderRadiusTiles 0/.test(error)));
   const resolve = (name: string | undefined) => {
     const types = new Map(monsterTypesForRoom(name));
-    if (name === FOREST) types.set(MonsterKind.Rabbit, { ...types.get(MonsterKind.Rabbit)!, aggroRadiusTiles: 2 });
+    if (name === FOREST) types.set(MonsterKind.Snake, { ...types.get(MonsterKind.Snake)!, aggroRadiusTiles: 2 });
     return types;
   };
   const invalidType = validateMonsterSpawnDefinitions(MONSTER_SPAWN_DEFINITIONS, MONSTER_TYPES,

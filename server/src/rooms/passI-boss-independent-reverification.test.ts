@@ -1,3 +1,4 @@
+import { LegacyBossRoom, MONSTER_SPAWN_DEFINITIONS, MONSTER_TYPES } from "./__fixtures__/legacyBoss";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
@@ -11,14 +12,12 @@ import {
 import type { BossStateStore } from "../db/bossStateStore";
 import type { InventoryRow, InventoryStore } from "../db/inventoryStore";
 import type { LandmarkIndex, RoomCreateOptions, SpawnArea } from "./contracts";
-import { ROOM_DEFINITIONS } from "./definitions";
-import { LANDMARK_DEFINITIONS } from "./landmarkDefinitions";
+import { ROOM_DEFINITIONS } from "./__fixtures__/legacyBoss";
+import { LANDMARK_DEFINITIONS } from "./__fixtures__/legacyBoss";
 import { MetaverseRoom } from "./metaverseRoom";
-import { PORTAL_DEFINITIONS } from "./portalDefinitions";
+import { PORTAL_DEFINITIONS } from "./__fixtures__/legacyBoss";
 import {
   BOSS_RESPAWN_MS,
-  MONSTER_SPAWN_DEFINITIONS,
-  MONSTER_TYPES,
   MonsterKind,
   type MonsterSpawnDefinition,
   type MonsterType,
@@ -218,7 +217,7 @@ function asRoomClient(client: FakeClient): RoomClient {
   return client as unknown as RoomClient;
 }
 
-class ProbeRoom extends MetaverseRoom {
+class ProbeRoom extends LegacyBossRoom {
   fixtureSpawns: readonly MonsterSpawnDefinition[] = [];
   fixtureTypes: ReadonlyMap<MonsterKind, MonsterType> = FIXTURE_TYPES;
   fixtureLandmark: LandmarkIndex | null = null;

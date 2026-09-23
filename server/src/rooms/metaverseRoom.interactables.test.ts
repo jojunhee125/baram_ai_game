@@ -47,7 +47,7 @@ if (plazaDefinition === undefined) {
 }
 const plaza = plazaDefinition;
 
-const huntingGroundDefinition = ROOM_DEFINITIONS.find((definition) => definition.name === "hunting-ground");
+const huntingGroundDefinition = ROOM_DEFINITIONS.find((definition) => definition.name === "buyeo-novice");
 if (huntingGroundDefinition === undefined) {
   throw new Error("ROOM_DEFINITIONS has no hunting-ground row");
 }
@@ -58,7 +58,7 @@ const NOTICE = definitionFor("plaza-notice-board", InteractableKind.Notice) as N
 const QUIZ = definitionFor("plaza-quiz-stand", InteractableKind.Quiz) as QuizInteractable;
 const NPC = definitionFor("plaza-hunting-ground-npc", InteractableKind.Npc) as NpcInteractable;
 const SHOP_NPC = definitionFor("plaza-shop-npc", InteractableKind.Npc) as NpcInteractable;
-const RETURN_NPC = definitionFor("hunting-ground-return-npc", InteractableKind.Npc) as NpcInteractable;
+const RETURN_NPC = definitionFor("buyeo-novice-camp-npc", InteractableKind.Npc) as NpcInteractable;
 /** Read from the shop table rather than repeated here (roadmap R04-c) — the panel quotes it verbatim. */
 const SHOP = (() => {
   const shop = SHOPS_BY_NPC.get(SHOP_NPC.id);
@@ -227,7 +227,14 @@ async function walkTo(
     detours(target, roomName),
     map,
   )) {
+    const at = room.state.players.get(client.sessionId)!;
+    const delta = STEPS.find(step => step.dir === dir)!;
+    const expected = { tileX: at.tileX + delta.dx, tileY: at.tileY + delta.dy };
     client.send(ClientMessage.Move, { dir });
+    await waitUntil(() => {
+      const current = room.state.players.get(client.sessionId);
+      return current?.tileX === expected.tileX && current.tileY === expected.tileY;
+    }, `acknowledged step to ${expected.tileX},${expected.tileY}`);
     await sleep(MOVE_COOLDOWN_MS);
   }
   await waitUntil(() => {
@@ -515,7 +522,10 @@ describe("MetaverseRoom — entering an object", () => {
         // player would hold them still while one is hitting them (see the row's own comment).
         blocksMovement: false,
         quests: undefined,
-        shop: undefined,
+        shop: { listings: SHOPS_BY_NPC.get(RETURN_NPC.id)!.listings.map(listing => {
+ const item = ITEM_DEFINITIONS.find(row => row.key === listing.itemKey)!;
+ return { itemKey: item.key, name: item.name, icon: item.icon, price: listing.price };
+ }) },
       },
     ]);
   });

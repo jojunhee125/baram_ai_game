@@ -8,6 +8,7 @@ import {
   LEVEL_CAP,
   PLAYER_ATTACK_DAMAGE,
   PLAYER_MAX_HP,
+  PROGRESSION_REGIONS,
   cumulativeExpForLevel,
   levelForExp,
 } from "../shared/src/index.ts";
@@ -18,7 +19,7 @@ import {
 } from "../server/src/rooms/monsterDefinitions.ts";
 import { SHOP_DEFINITIONS } from "../server/src/rooms/shopDefinitions.ts";
 
-const ROOM_NAMES = ["hunting-ground", "hunting-den", "hunting-forest"];
+const ROOM_NAMES = PROGRESSION_REGIONS.map((region) => region.roomId);
 const ITEM_BY_KEY = new Map(ITEM_DEFINITIONS.map((item) => [item.key, item]));
 const HERB = ITEM_BY_KEY.get("herb");
 const HERB_BUY_PRICE = SHOP_DEFINITIONS.flatMap((shop) => shop.listings)
@@ -34,11 +35,12 @@ export function parseOptions(args) {
     classKey: "all",
     room: "all",
     equipmentKeys: [],
+    consumableKey: "herb",
     minutes: 30,
     searchSeconds: 5,
     json: false,
   };
-  const valued = new Set(["--level", "--class", "--room", "--equipment", "--minutes", "--search-seconds"]);
+  const valued = new Set(["--level", "--class", "--room", "--equipment", "--consumable", "--minutes", "--search-seconds"]);
   for (let index = 0; index < args.length; index += 1) {
     const option = args[index];
     if (option === "--json") {
@@ -74,6 +76,9 @@ export function parseOptions(args) {
           throw new Error("--equipment needs comma-separated item keys without blanks");
         }
         break;
+      case "--consumable":
+        options.consumableKey = value;
+        break;
       case "--minutes":
         options.minutes = parseInteger(value, option, 1, 1440);
         break;
@@ -83,7 +88,15 @@ export function parseOptions(args) {
     }
   }
   validateEquipment(options.equipmentKeys, options.level, selectedClasses(options.classKey));
+  consumableModel(options.consumableKey);
   return options;
+}
+
+function consumableModel(key) {
+  const item = ITEM_BY_KEY.get(key);
+  const price = SHOP_DEFINITIONS.flatMap((shop) => shop.listings).find((row) => row.itemKey === key)?.price;
+  if (item?.consumable === undefined || price === undefined) throw new Error(`Unknown purchasable healing consumable: ${key}`);
+  return { item, price };
 }
 
 function parseInteger(value, option, minimum, maximum) {
@@ -102,17 +115,20 @@ function selectedClasses(classKey) {
 }
 
 function validateEquipment(keys, level, classes) {
-  const slots = new Set();
+  const slots = new Map();
+  const distinctKeys = new Set();
   for (const key of keys) {
     const item = ITEM_BY_KEY.get(key);
     if (item?.equipment === undefined) {
       throw new Error(`Unknown equipment item: ${key}`);
     }
     const { slot, requirement } = item.equipment;
-    if (slots.has(slot)) {
+    if (distinctKeys.has(key)) throw new Error(`The same equipment item cannot occupy two slots: ${key}`);
+    distinctKeys.add(key);
+    if ((slots.get(slot) ?? 0) >= (slot === "ring" ? 2 : 1)) {
       throw new Error(`Only one item may occupy the ${slot} slot`);
     }
-    slots.add(slot);
+    slots.set(slot, (slots.get(slot) ?? 0) + 1);
     if (level < (requirement?.minLevel ?? 1)) {
       throw new Error(`${key} requires level ${requirement.minLevel}`);
     }
@@ -140,6 +156,7 @@ function equipmentStats(keys) {
 export function projectRows(options) {
   validateEquipment(options.equipmentKeys, options.level, selectedClasses(options.classKey));
   const gear = equipmentStats(options.equipmentKeys);
+  const healing = consumableModel(options.consumableKey ?? "herb");
   const durationMs = options.minutes * 60_000;
   const searchMs = options.searchSeconds * 1000;
   const rooms = options.room === "all" ? ROOM_NAMES : [options.room];
@@ -178,16 +195,16 @@ export function projectRows(options) {
         let expectedHerbDrops = 0;
         for (const loot of monster.loot) {
           const expectedQuantity = loot.chance * loot.quantity;
-          if (loot.itemKey === "herb") {
+          if (loot.itemKey === healing.item.key) {
             expectedHerbDrops += expectedQuantity;
           } else {
             expectedLootCurrency += expectedQuantity * (ITEM_BY_KEY.get(loot.itemKey)?.sellValue ?? 0);
           }
         }
-        const herbsNeeded = damageTaken / HERB.consumable.healAmount;
+        const herbsNeeded = damageTaken / healing.item.consumable.healAmount;
         const netCurrencyPerKill = expectedLootCurrency +
-          Math.max(0, expectedHerbDrops - herbsNeeded) * (HERB.sellValue ?? 0) -
-          Math.max(0, herbsNeeded - expectedHerbDrops) * HERB_BUY_PRICE;
+          Math.max(0, expectedHerbDrops - herbsNeeded) * (healing.item.sellValue ?? 0) -
+          Math.max(0, herbsNeeded - expectedHerbDrops) * healing.price;
         const projectedExp = projectedKills === null ? null : projectedKills * monster.expReward;
         rows.push({
           classKey, level: options.level, room, monster: kind, spawnCount,
@@ -215,7 +232,7 @@ export function renderReport(options) {
     combat: "Auto attacks only, first player hit at time zero; monster first retaliates after its cooldown; lethal player hit wins a tie",
     cycle: `${options.searchSeconds}s search between kills plus one attack cooldown per player hit; single-kind focus in each independent row`,
     capacity: "Kills bounded by time and spawn count times respawn opportunities; no other players or downtime",
-    economy: "Expected loot sale proceeds less herbs needed to replace all damage; fractional expectations, no passive recovery, quests or death penalty",
+    economy: `Expected loot sale proceeds less ${options.consumableKey ?? "herb"} needed to replace all damage; fractional expectations, no passive recovery, quests or death penalty`,
     exclusions: "Skills, movement AI, misses, in-fight healing, inventory limits and gear changes are excluded",
   };
   if (options.json) {
@@ -247,8 +264,9 @@ export function renderReport(options) {
 export const HELP = `Usage: npx tsx tools/balance-growth.mjs [options]
   --level 1..${LEVEL_CAP}             Starting level (default 3)
   --class all|warrior|rogue|shaman|cleric  (default all)
-  --room all|hunting-ground|hunting-den|hunting-forest  (default all)
+  --room all|${ROOM_NAMES.join("|")}  (default all)
   --equipment key,key       Equipped item keys (default none)
+  --consumable key          Healing consumable sold in a shop (default herb)
   --minutes 1..1440         Projection duration (default 30)
   --search-seconds 0..3600  Time between fights (default 5)
   --json                    Machine-readable report

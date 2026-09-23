@@ -2,9 +2,16 @@ import Phaser from "phaser";
 import { Direction } from "@zep-test/shared";
 import type { AvatarAttachmentFrame } from "./avatarArt";
 
+const LEGACY_EQUIPMENT = [
+  { prefix: "wetland", color: 0x6f9a58 }, { prefix: "quarry", color: 0xb98959 },
+  { prefix: "frost", color: 0x77b9ce }, { prefix: "ruin", color: 0xaa86cc },
+] as const;
+
 export const EQUIPMENT_SWING_MS = 180;
-export const WEAPON_APPEARANCE_KEYS = ["old-dagger", "hunting-blade", "iron-blade"] as const;
-export const ARMOR_APPEARANCE_KEYS = ["leather-armor", "padded-armor", "reinforced-armor"] as const;
+export const WEAPON_APPEARANCE_KEYS = ["old-dagger", "hunting-blade", "iron-blade",
+  ...LEGACY_EQUIPMENT.flatMap(region => ["sword", "dagger", "staff", "charm"].map(kind => `${region.prefix}-${kind}`))] as const;
+export const ARMOR_APPEARANCE_KEYS = ["leather-armor", "padded-armor", "reinforced-armor",
+  ...LEGACY_EQUIPMENT.map(region => `${region.prefix}-armor`)] as const;
 
 const WEAPONS: Record<string, readonly string[]> = {
   "old-dagger": [
@@ -46,6 +53,27 @@ const ARMOR_PALETTES: Record<string, Record<string, string>> = {
   "reinforced-armor": { o: "#30353c", a: "#818e94", h: "#c9d3ca", s: "#4d5b65", b: "#564737", g: "#d0af6d" },
 };
 const WEAPON_PALETTE = { o: "#34343b", s: "#e0e5d7", m: "#8d9ba3", b: "#75513b", g: "#c4a36b" };
+const PROGRESSION_WEAPON_PALETTES: Record<string, Record<string, string>> = {};
+for (const region of LEGACY_EQUIPMENT) {
+  const accent = `#${region.color.toString(16).padStart(6, "0")}`;
+  const shapes: Record<string, readonly string[]> = {
+    sword: WEAPONS["iron-blade"]!,
+    dagger: WEAPONS["old-dagger"]!,
+    staff: ["...ooo...", "..ogmgo..", ".ogssmgo.", ".omssgmo.", "..ogmgo..", "...ooo...",
+      "...obo...", "...obo...", "...obo...", "...ogo...", "...obo...", "...obo...",
+      "...obo...", "...obo...", "...ogo...", "...obo...", "...obo...", "...obo...", "...ooo..."],
+    charm: [".ooooooo.", ".ogggggo.", ".ossssso.", ".ossmsso.", ".osmmsso.",
+      ".ossmsso.", ".ossssso.", ".ogggggo.", ".ooooooo.", "..obobo..", "..ogogo..", "...o.o..."],
+  };
+  for (const [kind, rows] of Object.entries(shapes)) {
+    const key = `${region.prefix}-${kind}`;
+    WEAPONS[key] = rows;
+    PROGRESSION_WEAPON_PALETTES[key] = { ...WEAPON_PALETTE, g: accent, m: accent };
+  }
+  ARMOR_PALETTES[`${region.prefix}-armor`] = {
+    o: "#30313c", a: accent, h: "#dce4d9", s: "#4d5265", b: "#52453d", g: "#dbbc7e",
+  };
+}
 const DIRECTIONS = [Direction.Down, Direction.Left, Direction.Right, Direction.Up] as const;
 const textureKey = (kind: string, key: string, facing?: Direction): string => `equipment:${kind}:${key}${facing === undefined ? "" : `:${facing}`}`;
 
@@ -64,7 +92,7 @@ function drawTexture(scene: Phaser.Scene, key: string, rows: readonly string[], 
 }
 
 function prepareTextures(scene: Phaser.Scene): void {
-  for (const [key, rows] of Object.entries(WEAPONS)) drawTexture(scene, textureKey("weapon", key), rows, WEAPON_PALETTE);
+  for (const [key, rows] of Object.entries(WEAPONS)) drawTexture(scene, textureKey("weapon", key), rows, PROGRESSION_WEAPON_PALETTES[key] ?? WEAPON_PALETTE);
   for (const [key, palette] of Object.entries(ARMOR_PALETTES)) {
     for (const facing of DIRECTIONS) {
       let rows = facing === Direction.Down ? ARMOR_FRONT : facing === Direction.Up ? ARMOR_BACK : ARMOR_SIDE;

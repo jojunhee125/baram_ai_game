@@ -1,5 +1,6 @@
 import { InteractableKind } from "@zep-test/shared";
 import type { InteractableDefinition } from "./contracts";
+import { PROGRESSION_QUESTS } from "./progressionDefinitions";
 // Imported as a value, not just as a type — `contracts.ts`'s own note on `InteractableKind`: the
 // objective below names a kind, and the kind table is where that name has to come from.
 import { MonsterKind, type MonsterSpawnDefinition } from "./monsterDefinitions";
@@ -83,51 +84,28 @@ export interface QuestReward {
   currencyDelta: number;
 }
 
-/**
- * The authored table. One row, which is the whole of R03's "퀘스트 1개": the guide NPC already
- * standing at the plaza's north gate (`plaza-hunting-ground-npc`, the one that tells you the
- * hunting ground is through there) now also has something to ask for, so the first quest needs no
- * new NPC, no new art and no map change.
- *
- * Squirrel rather than rabbit or deer: it is the kind the hunting ground is full of
- * (`MONSTER_SPAWN_DEFINITIONS` places 14 of them), it dies in exactly three hits by design, and it
- * is the only kind reachable without the hunting-den entry pass.
- */
 export const QUEST_DEFINITIONS: readonly QuestDefinition[] = [
   {
-    id: "first-hunt",
-    giverObjectId: "plaza-hunting-ground-npc",
-    title: "첫 사냥",
-    summary:
-      "남문 밖 초보 사냥터에서 다람쥐 세 마리를 잡아 보세요. 보상 50전으로 남문 잡화상의 낡은 단검(40전)을 살 수 있습니다.",
-    objectiveText: "사냥터에서 다람쥐 3마리 처치",
-    objective: { kind: MonsterKind.Squirrel, count: 3 },
-    completionText: "첫 사냥을 마쳤군요! 남문 잡화상에서 낡은 단검을 사고 가방에서 장착하세요. 전리품을 팔아 갑옷을 마련하면 사냥굴에 도전할 수 있습니다.",
-    // 화폐만, 소액(`docs/decisions.md` 2026-09-17) — R04-c 상점이 아직 없어 아이템은 쓸 데가 없다.
+    id: "first-hunt", giverObjectId: "plaza-hunting-ground-npc", title: "첫 사냥",
+    summary: "부여 왕초보사냥터에서 다람쥐 세 마리를 잡아 보세요. 보상 50전으로 남문 상점의 낡은 단검(40전)을 살 수 있습니다.",
+    objectiveText: "부여 왕초보사냥터에서 다람쥐 3마리 처치",
+    objective: { kind: MonsterKind.Squirrel, room: "buyeo-novice", count: 3 },
+    completionText: "첫 사냥을 마쳤군요! 장비를 준비하고 길목의 각 사냥터에서 새로운 의뢰를 받으세요.",
     reward: { currencyDelta: 50 },
   },
   {
-    id: "den-trial",
-    giverObjectId: "plaza-hunting-ground-npc",
-    prerequisiteQuestId: "first-hunt",
-    title: "사냥굴 조사",
-    summary: "첫 사냥을 마쳤다면 사냥굴로 들어가 사슴을 처치하세요.",
-    objectiveText: "사냥굴에서 사슴 3마리 처치",
-    objective: { kind: MonsterKind.Deer, room: "hunting-den", count: 3 },
-    completionText: "사냥굴 조사를 마쳤습니다. 다음은 숲입니다.",
-    reward: { currencyDelta: 90 },
+    id: "den-trial", giverObjectId: "buyeo-rat-cave-camp-npc", prerequisiteQuestId: "first-hunt",
+    title: "쥐굴 조사", summary: "부여 쥐굴의 쥐를 처치하세요.", objectiveText: "부여 쥐굴에서 쥐 3마리 처치",
+    objective: { kind: MonsterKind.Rat, room: "buyeo-rat-cave", count: 3 },
+    completionText: "쥐굴 조사를 마쳤습니다. 안쪽 길은 뱀굴로 이어집니다.", reward: { currencyDelta: 90 },
   },
   {
-    id: "forest-trial",
-    giverObjectId: "plaza-hunting-ground-npc",
-    prerequisiteQuestId: "den-trial",
-    title: "숲의 위협",
-    summary: "사냥굴을 돌파했다면 숲의 사슴을 처치하세요.",
-    objectiveText: "사냥숲에서 사슴 4마리 처치",
-    objective: { kind: MonsterKind.Deer, room: "hunting-forest", count: 4 },
-    completionText: "숲의 위협을 잠재웠습니다.",
-    reward: { currencyDelta: 140 },
+    id: "forest-trial", giverObjectId: "buyeo-bear-cave-camp-npc", prerequisiteQuestId: "first-hunt",
+    title: "곰굴의 위협", summary: "부여 곰굴의 곰을 처치하세요.", objectiveText: "부여 곰굴에서 곰 4마리 처치",
+    objective: { kind: MonsterKind.Bear, room: "buyeo-bear-cave", count: 4 },
+    completionText: "곰굴의 위협을 잠재웠습니다.", reward: { currencyDelta: 140 },
   },
+  ...PROGRESSION_QUESTS,
 ];
 
 /** `QUEST_DEFINITIONS` by id — the lookup `handleAcceptQuest` does on every request. */

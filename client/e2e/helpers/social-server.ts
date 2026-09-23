@@ -20,3 +20,5 @@ await inventory.add("abcdef12-3456-4789-abcd-abcdefabcdef", "den-fur", 4);
 const server = createGameServer(undefined, inventory, undefined, undefined, undefined, new Set(), currency,
   new InMemorySettlementStore(currency, inventory), classes, new InMemoryTradeStore(currency, inventory));
 await server.listen(2567, "127.0.0.1");
+
+await inventory.add("abcdef12-3456-4789-abcd-abcdefabcdef", "bear-hide", 3);

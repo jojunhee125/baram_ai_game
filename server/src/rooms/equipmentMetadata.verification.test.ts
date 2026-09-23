@@ -14,7 +14,8 @@ import { ITEM_DEFINITIONS } from "./itemDefinitions";
 import { MetaverseRoom } from "./metaverseRoom";
 import { SHOP_DEFINITIONS } from "./shopDefinitions";
 
-const EXPECTED: Readonly<Record<string, EquipmentMetadata>> = {
+const EXPECTED: Record<string, EquipmentMetadata> = {
+  "strength-helmet-1": { slot: "helmet", attackDamage: 2, damageReduction: 0.16, requirement: { minLevel: 10 } },
   "old-dagger": { slot: "weapon", attackDamage: 2, damageReduction: 0 },
   "hunting-blade": { slot: "weapon", attackDamage: 6, damageReduction: 0 },
   "iron-blade": { slot: "weapon", attackDamage: 10, damageReduction: 0 },
@@ -27,12 +28,31 @@ const EXPECTED: Readonly<Record<string, EquipmentMetadata>> = {
   "mystic-cloak": { slot: "cloak", attackDamage: 0, damageReduction: 0.13, requirement: { minLevel: 7, classes: ["shaman", "cleric"] } },
 };
 
+for (const [tier, prefix] of ["wetland", "quarry", "frost", "ruin"].entries()) {
+  const minLevel = [10, 15, 20, 25][tier]!;
+  const attacks = [[16, 14, 13, 18], [24, 22, 20, 28], [34, 31, 28, 39], [46, 42, 38, 52]][tier]!;
+  const classes = ["warrior", "rogue", "shaman", "cleric"] as const;
+  for (const [index, suffix] of ["sword", "dagger", "staff", "charm"].entries()) {
+    EXPECTED[`${prefix}-${suffix}`] = { slot: "weapon", attackDamage: attacks[index]!, damageReduction: 0, requirement: { minLevel, classes: [classes[index]!] } };
+  }
+  EXPECTED[`${prefix}-armor`] = { slot: "armor", attackDamage: 0, damageReduction: [0.32, 0.36, 0.4, 0.44][tier]!, requirement: { minLevel } };
+  EXPECTED[`${prefix}-helmet`] = { slot: "helmet", attackDamage: 0, damageReduction: [0.16, 0.18, 0.2, 0.22][tier]!, requirement: { minLevel } };
+  if (tier % 2 === 0) {
+    EXPECTED[`${prefix}-boots`] = { slot: "shoes", attackDamage: 0, damageReduction: tier === 0 ? 0.04 : 0.06, requirement: { minLevel } };
+    EXPECTED[`${prefix}-cloak`] = { slot: "cloak", attackDamage: 0, damageReduction: tier === 0 ? 0.14 : 0.18, requirement: { minLevel } };
+  } else {
+    EXPECTED[`${prefix}-ring`] = { slot: "ring", attackDamage: tier === 1 ? 1 : 2, damageReduction: tier === 1 ? 0.02 : 0.03, requirement: { minLevel } };
+    EXPECTED[`${prefix}-necklace`] = { slot: "necklace", attackDamage: 0, damageReduction: tier === 1 ? 0.06 : 0.08, requirement: { minLevel } };
+  }
+}
+
 interface InventoryView {
   itemKey: string;
   name: string;
   icon: string;
   quantity: number;
   equipped: boolean;
+  equippedSlot?: string;
   damageReductionRatio?: number;
   sellValue?: number;
   consumable?: boolean;
@@ -115,13 +135,15 @@ it("inventory HTTP reports all normalized gear values and preserves equipped fla
   for (const definition of ITEM_DEFINITIONS) await f.inventory.add(f.owner, definition.key, 2);
   await f.inventory.equip(f.owner, "iron-blade", "weapon");
   await f.inventory.equip(f.owner, "forest-cloak", "cloak");
+  await f.inventory.equip(f.owner, "quarry-ring", "ring2");
   const before = await f.inventory.list(f.owner);
   const items = await f.readInventory();
   assert.deepEqual(items.map((row) => row.itemKey), ITEM_DEFINITIONS.map((row) => row.key));
   for (const row of items) {
     assertMetadataAndLegacy(row);
     assert.equal(row.quantity, 2);
-    assert.equal(row.equipped, row.itemKey === "iron-blade" || row.itemKey === "forest-cloak");
+    assert.equal(row.equipped, row.itemKey === "iron-blade" || row.itemKey === "forest-cloak" || row.itemKey === "quarry-ring");
+    assert.equal(row.equippedSlot, row.itemKey === "iron-blade" ? "weapon" : row.itemKey === "forest-cloak" ? "cloak" : row.itemKey === "quarry-ring" ? "ring2" : undefined);
   }
   assert.deepEqual(await f.inventory.list(f.owner), before, "metadata reads cannot change equipment or assets");
 });

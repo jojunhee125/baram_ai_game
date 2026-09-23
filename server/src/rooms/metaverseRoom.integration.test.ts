@@ -40,8 +40,8 @@ if (definition === undefined) {
 const plaza = definition;
 
 /** The round trip through plaza: the door out of it, and the door back into it. */
-const outbound = PORTAL_DEFINITIONS.find((portal) => portal.from.room === plaza.name);
-const inbound = PORTAL_DEFINITIONS.find((portal) => portal.to.room === plaza.name);
+const outbound = PORTAL_DEFINITIONS.find((portal) => portal.id === "plaza-south-door");
+const inbound = PORTAL_DEFINITIONS.find((portal) => portal.id === "buyeo-novice-south-door");
 const [firstDoorTile] = outbound?.from.tiles ?? [];
 if (outbound === undefined || inbound === undefined || firstDoorTile === undefined) {
   throw new Error(`PORTAL_DEFINITIONS has no round trip through "${plaza.name}"`);

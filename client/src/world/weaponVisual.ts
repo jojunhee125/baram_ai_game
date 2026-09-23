@@ -1,9 +1,11 @@
-import type { EquipmentChanged } from "@zep-test/shared";
+import { type EquipmentChanged } from "@zep-test/shared";
 import { loadInventory } from "../net/inventory";
+import { WEAPON_APPEARANCE_KEYS } from "./equipmentAppearance";
 import { ITEM_ICON_ORDER } from "../ui/inventoryPanel";
 
 export const OLD_DAGGER_ITEM_KEY = "old-dagger";
-const BLADE_ITEM_KEYS: ReadonlySet<string> = new Set([OLD_DAGGER_ITEM_KEY, "hunting-blade", "iron-blade"]);
+const BLADE_ITEM_KEYS: ReadonlySet<string> = new Set([OLD_DAGGER_ITEM_KEY, "hunting-blade", "iron-blade",
+  ...WEAPON_APPEARANCE_KEYS]);
 
 /** Phaser texture key for the canvas copy of items.png (WorldScene.preload()). The bag window
  * loads the same file as a CSS background instead — the two never share a loader. */

@@ -1,12 +1,14 @@
 import { MONSTER_SPAWN_DEFINITIONS, monsterTypesForRoom, type MonsterKind } from "./monsterDefinitions";
 import { ITEM_DEFINITIONS } from "./itemDefinitions";
+import { PROGRESSION_MONSTER_NAMES } from "@zep-test/shared";
 
 /**
  * Korean display name per kind. Kept apart from `monsterDefinitions.ts` on purpose: that file is
  * this pass's frozen surface (read-only per the assignment) and carries no display string today —
  * only `kind` crosses the wire (design §5.2), and nothing needed a name until this panel.
  */
-export const MONSTER_DISPLAY_NAMES: Readonly<Record<MonsterKind, string>> = {
+export const MONSTER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  ...PROGRESSION_MONSTER_NAMES,
   squirrel: "다람쥐",
   rabbit: "토끼",
   deer: "사슴",
@@ -61,7 +63,7 @@ export function buildLootTableView(roomName: string): readonly LootTableMonsterV
     }
     views.push({
       kind,
-      name: MONSTER_DISPLAY_NAMES[kind],
+      name: MONSTER_DISPLAY_NAMES[kind] ?? kind,
       expReward: type.expReward,
       drops: type.loot.map((entry) => {
         const item = itemsByKey.get(entry.itemKey)!;

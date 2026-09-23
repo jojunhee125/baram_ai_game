@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { ColyseusTestServer } from "@colyseus/testing";
 import type { RoomState } from "@zep-test/shared";
-import { createGameServer } from "../server";
-import { ROOM_DEFINITIONS } from "./definitions";
-import { LANDMARK_DEFINITIONS } from "./landmarkDefinitions";
+import { createLegacyGameServer as createGameServer } from "./__fixtures__/legacyBoss";
+import { ROOM_DEFINITIONS } from "./__fixtures__/legacyBoss";
+import { LANDMARK_DEFINITIONS } from "./__fixtures__/legacyBoss";
 
 /**
  * Pass T deep verification for Phase M, item 4's `onJoin` matrix — but through the real matchmaker
@@ -87,7 +87,7 @@ after(async () => {
   await testServer.shutdown();
 });
 
-describe("MetaverseRoom — onJoin arriveAtLandmark through the real matchmaker (Pass T)", () => {
+describe("MetaverseRoom — onJoin arriveAtLandmark through the real matchmaker with archived gated fixtures (Pass T)", () => {
   it("lands a fresh join on plaza's own home tile via landmark-plaza, with no coordinate drift", async () => {
     const room = (await testServer.createRoom<RoomState>("plaza", {})) as AnyRoom;
     const client = await testServer.connectTo(room, {

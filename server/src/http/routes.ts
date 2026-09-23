@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import type { IncomingHttpHeaders } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AVATAR_SKIN_COUNT, type EquipmentMetadata } from "@zep-test/shared";
+import { AVATAR_SKIN_COUNT, type EquipmentMetadata, type EquipmentSlot } from "@zep-test/shared";
 import express, {
   type Application,
   type Request,
@@ -252,6 +252,7 @@ function presentInventory(rows: readonly InventoryRow[]): readonly {
   icon: string;
   quantity: number;
   equipped: boolean;
+  equippedSlot?: EquipmentSlot;
   tradeable: boolean;
   damageReductionRatio?: number;
   equipment?: EquipmentMetadata;
@@ -271,6 +272,7 @@ function presentInventory(rows: readonly InventoryRow[]): readonly {
       icon: definition.icon,
       quantity: row.quantity,
       equipped: row.equipped,
+      ...(row.equippedSlot === undefined ? {} : { equippedSlot: row.equippedSlot }),
       tradeable: definition.possession !== true && !row.equipped,
       ...(definition.equipment === undefined ? {} : { equipment: equipmentMetadata(definition) }),
       damageReductionRatio: definition.equipment?.stats.damageReduction,

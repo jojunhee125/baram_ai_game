@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { PROGRESSION_REGIONS } from "@zep-test/shared";
 import type { RoomCreateOptions, SpawnArea } from "./contracts";
 import { ROOM_DEFINITIONS } from "./definitions";
 import { MetaverseRoom } from "./metaverseRoom";
@@ -81,11 +82,9 @@ async function assertSpawnNeverLandsOnATrigger(roomName: string): Promise<void> 
 }
 
 describe("DIAGNOSTIC — a room's spawn square never draws its own portal trigger tile", () => {
-  it("hunting-ground: every offset the spread square can draw clears both doors", async () => {
-    await assertSpawnNeverLandsOnATrigger("hunting-ground");
-  });
-
-  it("hunting-den: every offset the spread square can draw clears its door", async () => {
-    await assertSpawnNeverLandsOnATrigger("hunting-den");
-  });
+  for (const region of PROGRESSION_REGIONS) {
+    it(`${region.roomId}: every spawn offset clears all portal triggers`, async () => {
+      await assertSpawnNeverLandsOnATrigger(region.roomId);
+    });
+  }
 });

@@ -317,7 +317,7 @@ describe("crafting settlement", () => {
   it("consumes the authored materials/currency atomically and replays a nonce without duplicate output", async () => {
     const f = fixture(); const owner = f.actors.get("s1")!.ownerKey!;
     const currency = new InMemoryCurrencyStore(); const inventory = new InMemoryInventoryStore();
-    await currency.credit(owner, 100); await inventory.add(owner, "padded-armor", 1); await inventory.add(owner, "den-fur", 3);
+    await currency.credit(owner, 100); await inventory.add(owner, "padded-armor", 1); await inventory.add(owner, "bear-hide", 3);
     const craft = new CraftingSystem(f.host, new InMemorySettlementStore(currency, inventory));
     const nonce = randomUUID();
     craft.join("s1");
@@ -336,7 +336,7 @@ describe("crafting settlement", () => {
   it("rejects invalid nonce, guest, unknown recipe and equipped ingredient without asset loss", async () => {
     const f = fixture(); const owner = f.actors.get("s1")!.ownerKey!;
     const currency = new InMemoryCurrencyStore(); const inventory = new InMemoryInventoryStore();
-    await currency.credit(owner, 100); await inventory.add(owner, "padded-armor", 1); await inventory.add(owner, "den-fur", 3);
+    await currency.credit(owner, 100); await inventory.add(owner, "padded-armor", 1); await inventory.add(owner, "bear-hide", 3);
     await inventory.equip(owner, "padded-armor", "armor");
     const craft = new CraftingSystem(f.host, new InMemorySettlementStore(currency, inventory));
     craft.craft("s1", { recipeId: "reinforced-armor", nonce: "invalid" }, 1000);
@@ -349,6 +349,6 @@ describe("crafting settlement", () => {
     craft.craft("s1", { recipeId: "reinforced-armor", nonce: randomUUID() }, 3000); await flush();
     assert.equal(f.latest<CraftResult>("s1", ServerMessage.CraftResult).reason, "equipped-item");
     assert.equal(await currency.getBalance(owner), 100);
-    assert.equal(inventory.peekBag(owner).get("den-fur"), 3);
+    assert.equal(inventory.peekBag(owner).get("bear-hide"), 3);
   });
 });

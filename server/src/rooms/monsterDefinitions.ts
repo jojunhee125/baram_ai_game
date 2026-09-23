@@ -1,4 +1,5 @@
-import type { TilePosition } from "@zep-test/shared";
+import { PROGRESSION_REGIONS, type TilePosition } from "@zep-test/shared";
+import { PROGRESSION_MONSTERS, PROGRESSION_SPAWNS } from "./progressionDefinitions";
 import type {
   CollisionMap,
   InteractableDefinition,
@@ -17,6 +18,17 @@ export const MonsterKind = {
   Rabbit: "rabbit",
   Deer: "deer",
   Boss: "boss",
+  FemaleDeer: "female-deer", Rat: "rat", Bat: "bat", Snake: "snake", Python: "python", KingPython: "king-python",
+  Bear: "bear", Pyeongung: "pyeongung", Tiger: "tiger", BlueDeer: "blue-deer", RedDeer: "red-deer",
+  WildBoar: "wild-boar", ForestBoar: "forest-boar", BlackFox: "black-fox", WhiteFox: "white-fox", Gumiho: "gumiho",
+  MarshSlime: "marsh-slime",
+  ReedSerpent: "reed-serpent",
+  CaveBat: "cave-bat",
+  RockBoar: "rock-boar",
+  SnowWolf: "snow-wolf",
+  FrostGolem: "frost-golem",
+  RuinSentinel: "ruin-sentinel",
+  CursedFlame: "cursed-flame",
 } as const;
 
 export type MonsterKind = (typeof MonsterKind)[keyof typeof MonsterKind];
@@ -91,126 +103,7 @@ export interface MonsterType {
   isBoss?: boolean;
 }
 
-/**
- * Per-kind rules. Every duration is an integer multiple of MONSTER_TICK_MS (200) — otherwise a
- * deadline rounds up to the next tick and this table quietly stops describing what happens.
- *
- * Derived from constants that are already fixed, not picked:
- *  - player damage 4 every 600ms -> 6.67 DPS, player HP 100
- *  - a walking player covers a tile per STEP_TWEEN_MS (120ms) = 8.3 tiles/s
- *  - the viewport shows 8 tiles above the player, so aggro must stay <= 8 or monsters charge in
- *    from off screen
- *
- * `damage` was retuned twice. Phase A (2026-09-03, from 2/3 to 7/10) paired the bump with
- * PLAYER_MAX_HP's 30->100 and COMBAT_EXIT_MS's 5000->2000, fixing "recovery is structurally 0"
- * without leaning on a cheaper monster. Later the same day, live play at hunting-ground (the
- * "왕초보 사냥터") reported that result as too punishing regardless — rabbit's 800ms cooldown sits
- * close enough to the player's own 600ms that every exchange read as a race the player was
- * already losing — so damage was nerfed again, 7/10 -> 5/7 (squirrel/rabbit), roughly -30% DPS
- * on both kinds. Cooldowns and HP are unchanged; only the per-hit number moved.
- *
- * The result: solo TTK against a player is now ~24s (squirrel) / ~11.4s (rabbit) — softer than
- * Phase A's 18s/8s — against a 2s out-of-combat recovery. One monster still can never kill a
- * player alone; several at once can. That is the difficulty a starter field wants.
- */
-export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
-  [
-    MonsterKind.Squirrel,
-    {
-      kind: MonsterKind.Squirrel,
-      /** Exactly three hits (4x3). The beginner monster has to be countable. */
-      maxHp: 12,
-      /** Nerfed from 7 (live-play feedback, 2026-09-03) — see the table's own comment above. */
-      damage: 5,
-      attackCooldownMs: 1200,
-      wanderStepIntervalMs: 1600,
-      /** 1.67 tiles/s, a fifth of a walking player: you can always stroll away from a squirrel. */
-      chaseStepIntervalMs: 600,
-      aggroRadiusTiles: 2,
-      leashRadiusTiles: 8,
-      respawnDelayMs: 8000,
-      /**
-       * 1 is the floor — `validateMonsterSpawnDefinitions` requires a positive integer, so the
-       * lowest monster in the game cannot be made cheaper than this. Was 4 until 2026-09-17
-       * (decisions.md "왕초보 사냥터 EXP·레벨 곡선 8배 하향"): 4 against the old 10 EXP first level
-       * meant three squirrels to reach level 2, and the starter field is the one place that must
-       * not pay well. The other half of the 8x lives in `expToNextLevel` (shared/src/leveling.ts),
-       * because this number had nowhere lower to go.
-       */
-      expReward: 1,
-      loot: [
-        { itemKey: "acorn", chance: 0.6, quantity: 1 },
-        { itemKey: "copper-coin", chance: 0.25, quantity: 1 },
-        { itemKey: "herb", chance: 0.08, quantity: 1 },
-        { itemKey: "entry-pass", chance: 0.15, quantity: 1 },
-      ],
-    },
-  ],
-  [
-    MonsterKind.Rabbit,
-    {
-      kind: MonsterKind.Rabbit,
-      /**
-       * Still five hits: 19/4 rounds up to 5, same as the clean 4x5 this was before the 2026-09-03
-       * -1 tweak — unmistakably a different fight from the squirrel's three either way.
-       */
-      maxHp: 19,
-      /** Nerfed from 10 (live-play feedback, 2026-09-03) — see the table's own comment above. */
-      damage: 7,
-      attackCooldownMs: 800,
-      wanderStepIntervalMs: 1200,
-      /** 2.5 tiles/s. Still a third of a player's pace, so fleeing always works. */
-      chaseStepIntervalMs: 400,
-      aggroRadiusTiles: 2,
-      leashRadiusTiles: 10,
-      respawnDelayMs: 12000,
-      /** squirrel(1) < rabbit(2) < deer(3) « boss(600), the hits-to-kill ordering §4.1 asks for. Was 7 (2026-09-17 retune). */
-      expReward: 2,
-      loot: [
-        { itemKey: "carrot", chance: 0.55, quantity: 1 },
-        { itemKey: "copper-coin", chance: 0.35, quantity: 1 },
-        { itemKey: "herb", chance: 0.12, quantity: 1 },
-        { itemKey: "old-dagger", chance: 0.03, quantity: 1 },
-      ],
-    },
-  ],
-  [
-    MonsterKind.Deer,
-    {
-      kind: MonsterKind.Deer,
-      /** Seven hits (4x7) — 3 (squirrel) / 5 (rabbit) / 7 (deer) keeps the odd-hit-count sequence. */
-      maxHp: 28,
-      /**
-       * Rabbit's value, reused rather than invented: the den's threat ceiling stays unchanged.
-       * Tracks Rabbit's own 10->7 live-play nerf (2026-09-03) for the same reason.
-       */
-      damage: 7,
-      /**
-       * Squirrel's cadence (DPS 5.83 post-nerf), not rabbit's (8.75) — a body this much tankier
-       * hitting as often as the rabbit would be a net increase in the den's danger, so the
-       * cadence stays low.
-       */
-      attackCooldownMs: 1200,
-      /** Slower than either existing kind: the big-bodied grazer among two smaller, quicker ones. */
-      wanderStepIntervalMs: 2000,
-      /** Squirrel's value, reused: 1.67 tiles/s, a fifth of a walking player, so fleeing always works. */
-      chaseStepIntervalMs: 600,
-      aggroRadiusTiles: 2,
-      /** Rabbit's value, reused. */
-      leashRadiusTiles: 10,
-      /** Continues the den's respawn arithmetic (8000, 12000, +4000). */
-      respawnDelayMs: 16000,
-      /** squirrel(1) < rabbit(2) < deer(3) « boss(600). Was 11 (2026-09-17 retune). */
-      expReward: 3,
-      loot: [
-        { itemKey: "herb", chance: 0.5, quantity: 1 },
-        { itemKey: "copper-coin", chance: 0.3, quantity: 1 },
-        { itemKey: "carrot", chance: 0.15, quantity: 1 },
-        { itemKey: "old-dagger", chance: 0.05, quantity: 1 },
-        { itemKey: "leather-armor", chance: 0.03, quantity: 1 },
-      ],
-    },
-  ],
+export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map<MonsterKind, MonsterType>([
   [
     MonsterKind.Boss,
     {
@@ -247,96 +140,16 @@ export const MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
       loot: [{ itemKey: "golden-helmet", chance: 0.25, quantity: 1 }],
     },
   ],
+  ...PROGRESSION_MONSTERS,
 ]);
 
-const FIELD_MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map(
-  [...MONSTER_TYPES].map(([kind, type]) => [
-    kind,
-    kind === MonsterKind.Squirrel ? { ...type, behavior: "timid", fleeStepIntervalMs: 1000 } : type,
-  ]),
-);
-
-const DEN_MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map(
-  [...MONSTER_TYPES].map(([kind, type]) => {
-    switch (kind) {
-      case MonsterKind.Rabbit:
-        return [kind, {
-          ...type,
-          maxHp: 48,
-          damage: 9,
-          expReward: 20,
-          behavior: "aggressive",
-          aggroRadiusTiles: 3,
-          loot: [
-            { itemKey: "den-fur", chance: 0.75, quantity: 1 },
-            { itemKey: "copper-coin", chance: 0.25, quantity: 1 },
-            { itemKey: "herb", chance: 0.1, quantity: 1 },
-            { itemKey: "hunting-blade", chance: 0.03, quantity: 1 },
-          ],
-        }];
-      case MonsterKind.Deer:
-        return [kind, {
-          ...type,
-          maxHp: 80,
-          damage: 13,
-          expReward: 32,
-          behavior: "aggressive",
-          aggroRadiusTiles: 3,
-          loot: [
-            { itemKey: "antler", chance: 0.7, quantity: 1 },
-            { itemKey: "copper-coin", chance: 0.35, quantity: 1 },
-            { itemKey: "herb", chance: 0.15, quantity: 1 },
-            { itemKey: "reinforced-armor", chance: 0.03, quantity: 1 },
-            { itemKey: "iron-blade", chance: 0.02, quantity: 1 },
-          ],
-        }];
-      case MonsterKind.Boss:
-        return [kind, {
-          ...type,
-          loot: [
-            { itemKey: "golden-helmet", chance: 0.25, quantity: 1 },
-            { itemKey: "iron-blade", chance: 0.5, quantity: 1 },
-          ],
-        }];
-      default:
-        return [kind, type];
-    }
-  }),
-);
-
-const FOREST_MONSTER_TYPES: ReadonlyMap<MonsterKind, MonsterType> = new Map([
-  [MonsterKind.Rabbit, {
-    ...MONSTER_TYPES.get(MonsterKind.Rabbit)!,
-    maxHp: 96, damage: 20, expReward: 45, behavior: "ambush",
-    attackCooldownMs: 1600, aggroRadiusTiles: 1,
-    loot: [
-      { itemKey: "forest-resin", chance: 0.8, quantity: 1 },
-      { itemKey: "copper-coin", chance: 0.3, quantity: 1 },
-      { itemKey: "herb", chance: 0.15, quantity: 1 },
-      { itemKey: "forest-cloak", chance: 0.02, quantity: 1 },
-      { itemKey: "mystic-cloak", chance: 0.01, quantity: 1 },
-    ],
-  }],
-  [MonsterKind.Deer, {
-    ...MONSTER_TYPES.get(MonsterKind.Deer)!,
-    maxHp: 140, damage: 17, expReward: 70, behavior: "aggressive",
-    aggroRadiusTiles: 3, chaseStepIntervalMs: 400,
-    loot: [
-      { itemKey: "ancient-bark", chance: 0.75, quantity: 1 },
-      { itemKey: "copper-coin", chance: 0.4, quantity: 1 },
-      { itemKey: "herb", chance: 0.2, quantity: 1 },
-      { itemKey: "forest-cloak", chance: 0.04, quantity: 1 },
-      { itemKey: "veteran-blade", chance: 0.015, quantity: 1 },
-    ],
-  }],
-]);
+const REGION_MONSTER_TYPES = new Map(PROGRESSION_REGIONS.map((region) => [
+  region.roomId as string,
+  new Map(region.monsterKinds.map((kind) => [kind as MonsterKind, PROGRESSION_MONSTERS.get(kind as MonsterKind)!])),
+]));
 
 export function monsterTypesForRoom(roomName: string | undefined): ReadonlyMap<MonsterKind, MonsterType> {
-  if (roomName === "hunting-forest") return FOREST_MONSTER_TYPES;
-  if (roomName === "hunting-ground") {
-    return FIELD_MONSTER_TYPES;
-  }
-  return roomName === "hunting-den" ? DEN_MONSTER_TYPES : MONSTER_TYPES;
+  return roomName === undefined ? MONSTER_TYPES : REGION_MONSTER_TYPES.get(roomName) ?? MONSTER_TYPES;
 }
 
 /**
@@ -372,101 +185,8 @@ export interface MonsterSpawnDefinition {
   persistentRespawn?: boolean;
 }
 
-/**
- * Every hunting room's monster placement, one contiguous table across both rooms. hunting-ground
- * holds 20 rows + a boss, hunting-den (Phase E) holds 10 more + a boss - 32 total, the PoC #3
- * population cap as of Phase I (design-phase-i-boss-monster.md §5; both bosses were added inside
- * the range PoC #3 already measured safe, so the cap moved from 30 to 32 without a new load test).
- *
- * Nothing spawns at y >= 25 in hunting-ground or y >= 24 in hunting-den. Someone coming through a
- * room's entrance door must not arrive into a fight already in progress, and with the wander
- * radii added no monster's resting range reaches the entrance either. That is a property of this
- * table rather than of a boot check, so keep it when adding rows. A monster dragged to a door by
- * a player is inside its leash and is working as intended.
- *
- * hunting-ground's difficulty runs south to north: squirrels at the y23-24 entrance band, rabbits
- * at the y10 far edge. hunting-den was rabbits only at launch (`docs/design-phase-e-second-hunting-ground.md`
- * §4); Phase S (`docs/roadmap.md` row S) added deer, interleaved 5:5 with the rabbits so no corner
- * of the room reads as "the strong part". Coordinates were checked against the actual map file of their own room (walkable, inside
- * the interior, clear of the portal tiles, and at least 6 tiles from the arrival and player spawn).
- */
-export const MONSTER_SPAWN_DEFINITIONS: readonly MonsterSpawnDefinition[] = [
-  { id: "hf-rabbit-01", room: "hunting-forest", kind: MonsterKind.Rabbit, at: { tileX: 22, tileY: 12 }, wanderRadiusTiles: 0 },
-  { id: "hf-rabbit-02", room: "hunting-forest", kind: MonsterKind.Rabbit, at: { tileX: 41, tileY: 12 }, wanderRadiusTiles: 0 },
-  { id: "hf-rabbit-03", room: "hunting-forest", kind: MonsterKind.Rabbit, at: { tileX: 22, tileY: 19 }, wanderRadiusTiles: 0 },
-  { id: "hf-rabbit-04", room: "hunting-forest", kind: MonsterKind.Rabbit, at: { tileX: 41, tileY: 19 }, wanderRadiusTiles: 0 },
-  { id: "hf-deer-01", room: "hunting-forest", kind: MonsterKind.Deer, at: { tileX: 27, tileY: 12 }, wanderRadiusTiles: 1 },
-  { id: "hf-deer-02", room: "hunting-forest", kind: MonsterKind.Deer, at: { tileX: 36, tileY: 12 }, wanderRadiusTiles: 1 },
-  { id: "hf-deer-03", room: "hunting-forest", kind: MonsterKind.Deer, at: { tileX: 25, tileY: 18 }, wanderRadiusTiles: 1 },
-  { id: "hf-deer-04", room: "hunting-forest", kind: MonsterKind.Deer, at: { tileX: 38, tileY: 18 }, wanderRadiusTiles: 1 },
-  // -- Southern band, nearest the entrance; all squirrels --
-  { id: "hg-squirrel-01", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 19, tileY: 24 }, wanderRadiusTiles: 2 },
-  { id: "hg-squirrel-02", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 24, tileY: 23 }, wanderRadiusTiles: 2 },
-  { id: "hg-squirrel-03", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 29, tileY: 24 }, wanderRadiusTiles: 2 },
-  { id: "hg-squirrel-04", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 41, tileY: 24 }, wanderRadiusTiles: 2 },
-  { id: "hg-squirrel-05", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 46, tileY: 23 }, wanderRadiusTiles: 2 },
-  { id: "hg-squirrel-06", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 51, tileY: 24 }, wanderRadiusTiles: 2 },
-  // -- Middle band --
-  { id: "hg-squirrel-07", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 18, tileY: 19 }, wanderRadiusTiles: 2 },
-  { id: "hg-squirrel-08", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 23, tileY: 20 }, wanderRadiusTiles: 2 },
-  { id: "hg-squirrel-09", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 28, tileY: 18 }, wanderRadiusTiles: 2 },
-  { id: "hg-squirrel-10", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 33, tileY: 20 }, wanderRadiusTiles: 2 },
-  { id: "hg-squirrel-11", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 44, tileY: 19 }, wanderRadiusTiles: 2 },
-  { id: "hg-squirrel-12", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 49, tileY: 20 }, wanderRadiusTiles: 2 },
-  // -- Northern band, the rabbit ground; the two squirrels at either end are the transition --
-  { id: "hg-squirrel-13", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 21, tileY: 14 }, wanderRadiusTiles: 2 },
-  { id: "hg-squirrel-14", room: "hunting-ground", kind: MonsterKind.Squirrel, at: { tileX: 52, tileY: 14 }, wanderRadiusTiles: 2 },
-  { id: "hg-rabbit-01", room: "hunting-ground", kind: MonsterKind.Rabbit, at: { tileX: 26, tileY: 14 }, wanderRadiusTiles: 3 },
-  { id: "hg-rabbit-02", room: "hunting-ground", kind: MonsterKind.Rabbit, at: { tileX: 38, tileY: 13 }, wanderRadiusTiles: 3 },
-  { id: "hg-rabbit-03", room: "hunting-ground", kind: MonsterKind.Rabbit, at: { tileX: 45, tileY: 15 }, wanderRadiusTiles: 3 },
-  // y = 10 rather than y = 9: a radius-3 wander box has 36 of 49 tiles walkable there against 29
-  // one row up, so these three scrape the boundary band far less.
-  { id: "hg-rabbit-04", room: "hunting-ground", kind: MonsterKind.Rabbit, at: { tileX: 22, tileY: 10 }, wanderRadiusTiles: 3 },
-  { id: "hg-rabbit-05", room: "hunting-ground", kind: MonsterKind.Rabbit, at: { tileX: 35, tileY: 10 }, wanderRadiusTiles: 3 },
-  { id: "hg-rabbit-06", room: "hunting-ground", kind: MonsterKind.Rabbit, at: { tileX: 49, tileY: 10 }, wanderRadiusTiles: 3 },
-  // -- hunting-den, Phase E's second room. Launched rabbits-only (`docs/design-phase-e-second-hunting-ground.md`
-  // §4); Phase S (`docs/roadmap.md` row S) swapped in deer at every other spawn point — interleaved
-  // 5:5, not clustered, so the room doesn't read as having a "harder" corner. 20 + 10 = 30, the
-  // PoC #3 population cap, reached exactly. The regional aggro-3 variant narrows ordinary wander
-  // to 1 and moves hd-rabbit-04 to (25,19), keeping the complete arrival spread outside aggro.
-  //
-  // Nothing spawns at y >= 24, for hunting-ground's own reason: a player arriving through the
-  // south door must not land in a fight already in progress. Coordinates were checked against
-  // the actual `assets/maps/hunting-den.json` (walkable, inside the interior, clear of the
-  // portal tiles). hd-rabbit-08 (now hd-deer-04, same position) was moved from the design's
-  // placeholder (32, 18) to (35, 18): the placeholder sat on the trail (map x 31-32, the
-  // full-height dirt path connecting both doors), which the design flagged as a coder judgement
-  // call rather than something the boot validator would catch.
-  { id: "hd-rabbit-01", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 21, tileY: 12 }, wanderRadiusTiles: 1 },
-  { id: "hd-deer-01", room: "hunting-den", kind: MonsterKind.Deer, at: { tileX: 27, tileY: 11 }, wanderRadiusTiles: 1 },
-  { id: "hd-rabbit-02", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 33, tileY: 13 }, wanderRadiusTiles: 1 },
-  { id: "hd-deer-02", room: "hunting-den", kind: MonsterKind.Deer, at: { tileX: 39, tileY: 11 }, wanderRadiusTiles: 1 },
-  { id: "hd-rabbit-03", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 44, tileY: 13 }, wanderRadiusTiles: 1 },
-  { id: "hd-deer-03", room: "hunting-den", kind: MonsterKind.Deer, at: { tileX: 20, tileY: 19 }, wanderRadiusTiles: 1 },
-  { id: "hd-rabbit-04", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 25, tileY: 19 }, wanderRadiusTiles: 1 },
-  { id: "hd-deer-04", room: "hunting-den", kind: MonsterKind.Deer, at: { tileX: 35, tileY: 18 }, wanderRadiusTiles: 1 },
-  { id: "hd-rabbit-05", room: "hunting-den", kind: MonsterKind.Rabbit, at: { tileX: 38, tileY: 20 }, wanderRadiusTiles: 1 },
-  { id: "hd-deer-05", room: "hunting-den", kind: MonsterKind.Deer, at: { tileX: 43, tileY: 19 }, wanderRadiusTiles: 1 },
-  // -- Bosses (Phase I, design-phase-i-boss-monster.md §3, §11.2). One per room, `wanderRadiusTiles`
-  // matched to rabbit/deer's own 3. Coordinates were checked against the actual map files
-  // (`assets/maps/hunting-ground.json` / `assets/maps/hunting-den.json`): each sits at least 6
-  // tiles (Chebyshev) from *every* tile a player can arrive on in its own room — portal trigger and
-  // arrival tiles, the room's whole join-spawn spread square, its `home` (the death-warp target,
-  // `metaverseRoom.ts`), and any landmark tile — and its wander box is fully open (hg-boss-01) or
-  // open but for two tiles (hd-boss-01: 28,16 and 28,17).
-  //
-  // The arrival set has to be the full one, not just the portals: hd-boss-01 launched at (31,20),
-  // which cleared every portal tile but stood 4 tiles from home (31,24) — inside wander(3) +
-  // aggro(2) = 5. A solo player killed there warps home and is re-aggroed on arrival, which
-  // cancels the §6.6 wipe reset the death just armed, so the boss keeps the group's damage
-  // forever. 6 is exactly that reach plus one: at 6 a freely wandering boss can never aggro a
-  // player standing on an arrival tile. `passI-boss-independent-reverification.test.ts` REVERIFY B
-  // asserts all three properties for every `persistentRespawn` row.
-  { id: "hg-boss-01", room: "hunting-ground", kind: MonsterKind.Boss, at: { tileX: 34, tileY: 16 }, wanderRadiusTiles: 3, persistentRespawn: true },
-  { id: "hd-boss-01", room: "hunting-den", kind: MonsterKind.Boss, at: { tileX: 31, tileY: 17 }, wanderRadiusTiles: 3, persistentRespawn: true },
-];
+export const MONSTER_SPAWN_DEFINITIONS: readonly MonsterSpawnDefinition[] = PROGRESSION_SPAWNS;
 
-/** Boot-validation outcome. Every error refuses boot; warnings are authoring smells only. */
 export interface MonsterValidation {
   errors: readonly string[];
   warnings: readonly string[];

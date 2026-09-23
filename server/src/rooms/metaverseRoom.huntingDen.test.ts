@@ -14,11 +14,12 @@ import {
   type RoomState,
 } from "@zep-test/shared";
 import { TiledMapLoader } from "../game/tiledMap";
-import { createGameServer } from "../server";
-import { ROOM_DEFINITIONS } from "./definitions";
+import { createLegacyGameServer as createGameServer } from "./__fixtures__/legacyBoss";
+import { ROOM_DEFINITIONS } from "./__fixtures__/legacyBoss";
 import { MetaverseRoom } from "./metaverseRoom";
-import { MONSTER_SPAWN_DEFINITIONS, MonsterKind } from "./monsterDefinitions";
-import { PORTAL_DEFINITIONS } from "./portalDefinitions";
+import { MonsterKind } from "./monsterDefinitions";
+import { MONSTER_SPAWN_DEFINITIONS } from "./__fixtures__/legacyBoss";
+import { PORTAL_DEFINITIONS } from "./__fixtures__/legacyBoss";
 
 /**
  * node:test runs each file in its own process and every suite that listens needs a port no

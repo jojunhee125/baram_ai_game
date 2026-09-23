@@ -1,5 +1,6 @@
 import Phaser from "phaser";
-import { TILE_SIZE_PX } from "@zep-test/shared";
+import { PROGRESSION_CONNECTIONS, PROGRESSION_REGIONS, TILE_SIZE_PX } from "@zep-test/shared";
+import { hasProgressionTerrain, paintProgressionTile } from "./progressionTerrain";
 
 export const HERITAGE_ENVIRONMENT = "heritage-environment";
 export const HERITAGE_TERRAIN_SOURCE = "heritage-terrain-source";
@@ -7,7 +8,7 @@ export const HERITAGE_TILESET = "heritage-tiles";
 export const CLASSIC_VILLAGE_SOURCE = "classic-village-ground";
 
 export function usesClassicTerrain(mapKey: string): boolean {
-  return mapKey === "plaza" || mapKey === "hunting-ground" || mapKey === "hunting-den" || mapKey === "hunting-forest";
+  return mapKey === "plaza" || mapKey === "hunting-ground" || mapKey === "hunting-den" || mapKey === "hunting-forest" || hasProgressionTerrain(mapKey);
 }
 
 const ENVIRONMENT_RECTS = [
@@ -22,7 +23,8 @@ const ENVIRONMENT_RECTS = [
 export function registerHeritageTerrain(scene: Phaser.Scene, mapKey = ""): string {
   const cave = mapKey === "hunting-den";
   const forest = mapKey === "hunting-forest";
-  const textureKey = forest ? "dangerous-forest-tiles" : cave ? "rock-cave-tiles" : usesClassicTerrain(mapKey) ? "classic-village-tiles" : HERITAGE_TILESET;
+  const progression = hasProgressionTerrain(mapKey);
+  const textureKey = progression ? `${mapKey}-tiles` : forest ? "dangerous-forest-tiles" : cave ? "rock-cave-tiles" : usesClassicTerrain(mapKey) ? "classic-village-tiles" : HERITAGE_TILESET;
   if (scene.textures.exists(textureKey)) return textureKey;
   const source = scene.textures.get(HERITAGE_TERRAIN_SOURCE).getSourceImage() as HTMLImageElement;
   const village = usesClassicTerrain(mapKey)
@@ -35,6 +37,11 @@ export function registerHeritageTerrain(scene: Phaser.Scene, mapKey = ""): strin
   const context = texture.getContext();
   context.imageSmoothingEnabled = false;
   for (let i = 0; i < 16; i++) {
+    if (progression) {
+      paintProgressionTile(context, mapKey, i);
+      texture.add(i, 0, (i % 8) * 32, Math.floor(i / 8) * 32, 32, 32);
+      continue;
+    }
     if (forest) {
       paintForestTile(context, i);
       texture.add(i, 0, (i % 8) * 32, Math.floor(i / 8) * 32, 32, 32);
@@ -147,7 +154,18 @@ export function drawHeritageEnvironment(
     drawWayfinding(scene, 31.5, 27.5, "초보 들판 ↓");
     drawWayfinding(scene, 46.5, 25.5, "위험한 숲 →");
   }
-  if (mapKey === "hunting-forest") drawWayfinding(scene, 31.5, 27.5, "바위 사냥굴 ↓");
+  if (mapKey === "hunting-forest") {
+    drawWayfinding(scene, 31.5, 27.5, "바위 사냥굴 ↓");
+    drawWayfinding(scene, 46.5, 24.5, "물안개 습지 →");
+  }
+  for (const connection of PROGRESSION_CONNECTIONS.filter(edge => edge.from.room === mapKey && mapKey !== "plaza")) {
+    const target = PROGRESSION_REGIONS.find(region => region.roomId === connection.to.room);
+    const tile = connection.from.tiles[0]!;
+    const north = tile.tileY <= 8;
+    const east = tile.tileX >= 47;
+    drawWayfinding(scene, tile.tileX + 0.5, tile.tileY + (north ? 1.5 : -0.5),
+      `${target?.name ?? "남문 마을"} ${north ? "↑" : east ? "→" : "↓"}`);
+  }
 }
 
 function paintForestTile(context: CanvasRenderingContext2D, tile: number): void {

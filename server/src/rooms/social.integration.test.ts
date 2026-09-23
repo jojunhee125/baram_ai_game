@@ -181,7 +181,7 @@ describe("social features across real authenticated WebSocket clients", { concur
     const room = await server.createRoom<MetaverseRoom>("plaza");
     const peer = await connect(room);
     await currency.credit(peer.owner, 30);
-    await inventory.add(peer.owner, "padded-armor", 2); await inventory.add(peer.owner, "den-fur", 6);
+    await inventory.add(peer.owner, "padded-armor", 2); await inventory.add(peer.owner, "bear-hide", 6);
     const request = { recipeId: "reinforced-armor", nonce: randomUUID() };
     assert.equal((await peer.send(C.CraftItem, request, S.CraftResult)).ok, true);
     await delay(260);
@@ -195,7 +195,7 @@ describe("social features across real authenticated WebSocket clients", { concur
   });
 
   it("restricts ally healing to party membership and shares contribution EXP/accepted quests only", async () => {
-    const room = await server.createRoom<MetaverseRoom>("hunting-ground");
+    const room = await server.createRoom<MetaverseRoom>("buyeo-novice");
     const healerId = randomUUID(); await classes.chooseOnce(healerId, "cleric");
     const first = await connect(room); const healer = await connect(room, healerId);
     const idle = await connect(room);

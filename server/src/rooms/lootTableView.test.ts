@@ -4,8 +4,7 @@ import { ITEM_DEFINITIONS } from "./itemDefinitions";
 import { buildLootTableView, MONSTER_DISPLAY_NAMES } from "./lootTableView";
 import { MONSTER_SPAWN_DEFINITIONS, MONSTER_TYPES, monsterTypesForRoom, type MonsterKind } from "./monsterDefinitions";
 
-/** hunting-ground is the one room with spawn rows of both kinds (see monsterDefinitions.ts). */
-const HUNTING_GROUND = "hunting-ground";
+const HUNTING_GROUND = "buyeo-novice";
 
 describe("buildLootTableView", () => {
   it("returns every monster kind with a spawn in the room, in MONSTER_TYPES order", async () => {
@@ -15,7 +14,7 @@ describe("buildLootTableView", () => {
       ),
     );
     const expectedKindOrder = [...MONSTER_TYPES.keys()].filter((kind) => kindsInRoom.has(kind));
-    assert.ok(expectedKindOrder.length >= 2, "hunting-ground must seed this test with 2+ kinds");
+    assert.ok(expectedKindOrder.length >= 2, "novice hunting must seed this test with 2+ kinds");
 
     const views = buildLootTableView(HUNTING_GROUND);
     assert.deepEqual(
@@ -29,7 +28,7 @@ describe("buildLootTableView", () => {
     const views = buildLootTableView(HUNTING_GROUND);
 
     for (const view of views) {
-      const type = MONSTER_TYPES.get(view.kind as MonsterKind)!;
+      const type = monsterTypesForRoom(HUNTING_GROUND).get(view.kind as MonsterKind)!;
       assert.equal(view.name, MONSTER_DISPLAY_NAMES[view.kind as MonsterKind]);
       assert.equal(view.expReward, type.expReward);
       assert.equal(view.drops.length, type.loot.length);
@@ -53,7 +52,7 @@ describe("buildLootTableView", () => {
   it("rounds chancePercent to one decimal place", async () => {
     const views = buildLootTableView(HUNTING_GROUND);
     for (const view of views) {
-      const type = MONSTER_TYPES.get(view.kind as MonsterKind)!;
+      const type = monsterTypesForRoom(HUNTING_GROUND).get(view.kind as MonsterKind)!;
       for (const [index, drop] of view.drops.entries()) {
         const entry = type.loot[index]!;
         // Computed by an independent path (toFixed rather than the implementation's
@@ -69,20 +68,19 @@ describe("buildLootTableView", () => {
     assert.deepEqual(buildLootTableView("plaza"), []);
   });
 
-  it("uses each room's effective loot and EXP without merging starter drops into the den", () => {
-    const denViews = buildLootTableView("hunting-den");
+  it("uses each room's effective loot and EXP without merging unrelated regional drops", () => {
+    const denViews = buildLootTableView("buyeo-rat-cave");
     for (const view of denViews) {
-      const type = monsterTypesForRoom("hunting-den").get(view.kind as MonsterKind)!;
+      const type = monsterTypesForRoom("buyeo-rat-cave").get(view.kind as MonsterKind)!;
       assert.equal(view.expReward, type.expReward);
       assert.deepEqual(view.drops.map((drop) => drop.itemKey), type.loot.map((entry) => entry.itemKey));
     }
-    const rabbit = denViews.find((view) => view.kind === "rabbit")!;
-    assert.equal(rabbit.expReward, 20);
-    assert.deepEqual(rabbit.drops.map((drop) => drop.itemKey), ["den-fur", "copper-coin", "herb", "hunting-blade"]);
+    const rat = denViews.find((view) => view.kind === "rat")!;
+    assert.deepEqual(rat.drops.map((drop) => drop.itemKey), ["rat-meat"]);
     const fieldRabbit = buildLootTableView(HUNTING_GROUND).find((view) => view.kind === "rabbit")!;
     assert.equal(fieldRabbit.expReward, 2);
-    assert.ok(fieldRabbit.drops.some((drop) => drop.itemKey === "carrot"));
-    assert.ok(!fieldRabbit.drops.some((drop) => drop.itemKey === "den-fur"));
+    assert.deepEqual(fieldRabbit.drops.map((drop) => drop.itemKey), ["rabbit-meat"]);
+    assert.deepEqual(buildLootTableView("hunting-den"), []);
   });
 
   it("returns an empty array for a room name that does not exist at all", async () => {

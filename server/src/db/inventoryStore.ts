@@ -116,6 +116,7 @@ export interface InventoryRow {
   itemKey: string;
   quantity: number;
   equipped: boolean;
+  equippedSlot?: EquipmentSlot;
 }
 
 /**
@@ -187,9 +188,9 @@ export class InMemoryInventoryStore implements InventoryStore {
     if (bag === undefined) {
       return Promise.resolve([]);
     }
-    const equippedKeys = new Set(this.equippedByOwner.get(ownerKey)?.values() ?? []);
+    const slotsByItem = new Map([...(this.equippedByOwner.get(ownerKey)?.entries() ?? [])].map(([slot, key]) => [key, slot]));
     return Promise.resolve(
-      [...bag].map(([itemKey, quantity]) => ({ itemKey, quantity, equipped: equippedKeys.has(itemKey) })),
+      [...bag].map(([itemKey, quantity]) => ({ itemKey, quantity, equipped: slotsByItem.has(itemKey), ...(slotsByItem.has(itemKey) ? { equippedSlot: slotsByItem.get(itemKey)! } : {}) })),
     );
   }
 
@@ -240,6 +241,9 @@ export class InMemoryInventoryStore implements InventoryStore {
       return Promise.resolve(false);
     }
     let slots = this.equippedByOwner.get(ownerKey);
+    if (slots !== undefined && [...slots].some(([otherSlot, key]) => key === itemKey && otherSlot !== slot)) {
+      return Promise.resolve(false);
+    }
     if (slots === undefined) {
       slots = new Map<EquipmentSlot, string>();
       this.equippedByOwner.set(ownerKey, slots);
@@ -340,14 +344,15 @@ export class PostgresInventoryStore implements InventoryStore {
     // `equipped_slot IS NOT NULL AS equipped` keeps `InventoryRow.equipped` a plain boolean (design
     // §3: list()'s own shape is unchanged by the slot expansion) while the underlying column is now
     // which slot, not whether.
-    const result = await this.query<{ item_key: string; quantity: number; equipped: boolean }>(
-      "SELECT item_key, quantity, equipped_slot IS NOT NULL AS equipped FROM inventory_item WHERE owner_key = $1",
+    const result = await this.query<{ item_key: string; quantity: number; equipped: boolean; equipped_slot: EquipmentSlot | null }>(
+      "SELECT item_key, quantity, equipped_slot IS NOT NULL AS equipped, equipped_slot FROM inventory_item WHERE owner_key = $1",
       [ownerKey],
     );
     return result.rows.map((row) => ({
       itemKey: row.item_key,
       quantity: row.quantity,
       equipped: row.equipped,
+      ...(row.equipped_slot == null ? {} : { equippedSlot: row.equipped_slot }),
     }));
   }
 
@@ -427,14 +432,18 @@ export class PostgresInventoryStore implements InventoryStore {
     try {
       const result = await this.executor.query<{ item_key: string }>(
         `WITH target AS (
-           SELECT 1 FROM inventory_item WHERE owner_key = $1 AND item_key = $2 FOR UPDATE
+           SELECT 1 FROM inventory_item WHERE owner_key = $1 AND item_key = $2
+             AND (equipped_slot IS NULL OR equipped_slot = $3) FOR UPDATE
          ),
          cleared AS (
            UPDATE inventory_item SET equipped_slot = NULL
            WHERE owner_key = $1 AND equipped_slot = $3 AND item_key <> $2 AND EXISTS (SELECT 1 FROM target)
+           RETURNING item_key
          )
          UPDATE inventory_item SET equipped_slot = $3
          WHERE owner_key = $1 AND item_key = $2 AND EXISTS (SELECT 1 FROM target)
+           AND (equipped_slot IS NULL OR equipped_slot = $3)
+           AND (SELECT count(*) FROM cleared) >= 0
          RETURNING item_key`,
         [ownerKey, itemKey, slot],
       );

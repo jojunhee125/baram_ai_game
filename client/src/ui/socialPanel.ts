@@ -1,5 +1,6 @@
 import {
   CLASS_DEFINITIONS,
+  PROGRESSION_REGIONS,
   type PartyChanged, type PartyInvited, type PartyDenied, type PartyView,
   type TradeChanged, type TradeDenied, type TradeOffer,
   type CraftingRecipes, type CraftResult, type CraftingRecipeView,
@@ -61,6 +62,7 @@ export class SocialPanel {
   private readonly nearbyBody = node("div");
   private readonly tradeBody = node("div");
   private readonly craftingBody = node("div");
+  private craftingRegion = "all";
   private party: PartyView | null = null;
   private invitation: PartyInvited | null = null;
   private trade: TradeChanged | null = null;
@@ -352,10 +354,23 @@ export class SocialPanel {
     this.craftingBody.replaceChildren();
     if (this.recipes === null) { this.craftingBody.append(node("p", "제작법을 불러오는 중입니다…")); return; }
     if (!this.recipes.length) { this.craftingBody.append(node("p", "현재 제작할 수 있는 물품이 없습니다."), button("가방 확인", () => void this.refreshInventory())); return; }
+    const filter = node("select");
+    filter.setAttribute("aria-label", "제작 지역");
+    for (const [value, text] of [["all", "모든 제작법"], ["base", "초보 장비"], ...PROGRESSION_REGIONS.map(region => [region.roomId, region.name])]) {
+      const option = node("option", text);
+      option.value = value!;
+      filter.append(option);
+    }
+    filter.value = this.craftingRegion;
+    filter.addEventListener("change", () => { this.craftingRegion = filter.value; this.renderCrafting(); });
+    this.craftingBody.append(filter);
     if (this.inventoryState === "loading") this.craftingBody.append(node("p", "가방을 확인 중입니다…"));
     if (this.inventoryState === "error") this.craftingBody.append(node("p", "재료를 확인하지 못했습니다."), button("재료 다시 읽기", () => void this.refreshInventory()));
     for (const recipe of this.recipes) {
+      const regionId = PROGRESSION_REGIONS.find(region => region.itemKeys.includes(recipe.output.itemKey))?.roomId ?? "base";
+      if (this.craftingRegion !== "all" && this.craftingRegion !== regionId) continue;
       const card = node("div", "", "social__recipe");
+      card.dataset.recipeId = recipe.recipeId;
       card.append(node("strong", recipe.name), node("p", `완성: ${recipe.output.name} × ${recipe.output.quantity}`));
       for (const ingredient of recipe.ingredients) card.append(node("p", `${ingredient.name} ${ingredient.quantity}개 / 보유 ${this.inventoryState === "ready" ? this.items.find((item) => item.itemKey === ingredient.itemKey)?.quantity ?? 0 : "확인 중"}`));
       card.append(node("p", `비용 ${recipe.currencyCost.toLocaleString()}전 / 보유 ${this.balance.toLocaleString()}전`));

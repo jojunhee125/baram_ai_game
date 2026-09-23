@@ -1,5 +1,6 @@
 import { InteractableKind } from "@zep-test/shared";
 import type { InteractableDefinition, ItemDefinition } from "./contracts";
+import { PROGRESSION_SHOPS } from "./progressionDefinitions";
 
 /**
  * One item one shop NPC sells, and what it costs there (roadmap R04-c, design
@@ -53,6 +54,7 @@ export const SHOP_DEFINITIONS: readonly ShopDefinition[] = [
       { itemKey: "iron-blade", price: 480 },
     ],
   },
+  ...PROGRESSION_SHOPS,
 ];
 
 /** `SHOP_DEFINITIONS` by npc, the `QUESTS_BY_GIVER` lookup shape — at most one shop per NPC today. */

@@ -351,7 +351,7 @@ describe("PostgresInventoryStore — the statements it sends", () => {
     assert.equal(queries.length, 1);
     assert.match(
       queries[0]?.sql ?? "",
-      /SELECT item_key, quantity, equipped_slot IS NOT NULL AS equipped FROM inventory_item WHERE owner_key = \$1/,
+      /SELECT item_key, quantity, equipped_slot IS NOT NULL AS equipped, equipped_slot FROM inventory_item WHERE owner_key = \$1/,
     );
     assert.deepEqual(queries[0]?.values, [OWNER]);
   });
@@ -577,6 +577,34 @@ describe("PostgresInventoryStore — against a real server", { skip: REAL_DATABA
 
   // The same assertions the in-memory store answers, so "two implementations, one contract" is
   // a fact about the shipped SQL rather than about a hand-written responder that agrees with it.
+  it("concurrent same-key rings use one slot and list returns the concrete slot from the same snapshot", async () => {
+    for (const quantity of [1, 2]) {
+      const owner = randomUUID();
+      const first = new PostgresInventoryStore(pool);
+      const second = new PostgresInventoryStore(pool);
+      await first.add(owner, "quarry-ring", quantity);
+      const result = await Promise.all([
+        first.equip(owner, "quarry-ring", "ring1"),
+        second.equip(owner, "quarry-ring", "ring2"),
+      ]);
+      assert.equal(result.filter(Boolean).length, 1);
+      const slot = result[0] ? "ring1" : "ring2";
+      const otherSlot = slot === "ring1" ? "ring2" : "ring1";
+      assert.deepEqual(await first.list(owner), [{ itemKey: "quarry-ring", quantity, equipped: true, equippedSlot: slot }]);
+      assert.deepEqual(await first.getEquippedSlots(owner), { [slot]: "quarry-ring" });
+      assert.equal(await second.equip(owner, "quarry-ring", otherSlot), false);
+      await first.add(owner, "ruin-ring", 1);
+      assert.equal(await second.equip(owner, "ruin-ring", otherSlot), true);
+      assert.deepEqual(await first.getEquippedSlots(owner), { [slot]: "quarry-ring", [otherSlot]: "ruin-ring" });
+      assert.equal(await first.unequip(owner, slot), true);
+      assert.equal(await first.equip(owner, "quarry-ring", otherSlot), true);
+      const rows = await first.list(owner);
+      assert.equal(rows.find((row) => row.itemKey === "ruin-ring")!.equipped, false);
+      assert.equal(rows.find((row) => row.itemKey === "ruin-ring")!.equippedSlot, undefined);
+      assert.equal(rows.find((row) => row.itemKey === "quarry-ring")!.equippedSlot, otherSlot);
+    }
+  });
+
   assertInventoryStoreContract("PostgresInventoryStore on a real server", () =>
     ownerScopedStore(pool),
   );
@@ -708,20 +736,7 @@ describe("PostgresInventoryStore — against a real server", { skip: REAL_DATABA
   });
 
   describe("PostgresInventoryStore.equip — concurrent equip of two different items into the same slot", () => {
-    it("the partial unique index lets exactly one row end up equipped, and the loser's call resolves false rather than rejecting", async () => {
-      // Phase F's own atomicity claim, forced rather than assumed: two genuinely concurrent
-      // connections racing `equip()` for two *different* items **into the same slot** on one
-      // owner — the only case `inventory_item_owner_equipped_slot_uidx` (design §2.1) can still
-      // contend on now that the index is `(owner_key, equipped_slot)` rather than `(owner_key)`.
-      // Both items are equipped into "armor" here regardless of their own catalogue slot, since
-      // this drives `InventoryStore.equip` directly and it enforces no slot-family match itself
-      // (that check lives in `MetaverseRoom.handleEquipItem`) — the point under test is the index,
-      // not the catalogue. The CTE's own "cleared" step only clears rows it can see in its own
-      // snapshot, so the real guarantee has to come from the index itself — this proves it does,
-      // and that `equip()` now catches the loser's own `23505` off that index and resolves `false`
-      // (Bug 1 fix) instead of letting it reject: an uncaught rejection there left
-      // `settleEquipRequest`'s catch block sending nothing at all to the losing session, which
-      // looked like a dropped click rather than a denied request.
+    it("one store serializes same-slot requests and both succeed with the last item equipped", async () => {
       const store = new PostgresInventoryStore(pool);
       for (let trial = 0; trial < 10; trial++) {
         const owner = randomUUID();
@@ -745,21 +760,30 @@ describe("PostgresInventoryStore — against a real server", { skip: REAL_DATABA
         assert.equal(rejected.length, 0, `trial ${trial}: neither concurrent equip() call may reject`);
 
         const values = (results as PromiseFulfilledResult<boolean>[]).map((r) => r.value);
-        assert.equal(
-          values.filter((value) => value === true).length,
-          1,
-          `trial ${trial}: exactly one concurrent equip() must report success`,
-        );
-        assert.equal(
-          values.filter((value) => value === false).length,
-          1,
-          `trial ${trial}: the loser must resolve false rather than throw`,
-        );
+        assert.deepEqual(values, [true, true], `trial ${trial}: owner queue must complete both sequential replacements`);
+        assert.equal(equippedRows[0]!.itemKey, "old-dagger");
         assert.equal(
           getDatabaseStatus(),
           "ok",
-          `trial ${trial}: a losing 23505 is an expected race outcome, not a database fault`,
+          `trial ${trial}: queued replacements must keep database health intact`,
         );
+      }
+    });
+    it("independent stores racing different rings preserve one slot occupant without rejecting", async () => {
+      for (let trial = 0; trial < 10; trial++) {
+        const owner = randomUUID();
+        const first = new PostgresInventoryStore(pool), second = new PostgresInventoryStore(pool);
+        await first.add(owner, "quarry-ring", 1);
+        await first.add(owner, "ruin-ring", 1);
+        const results = await Promise.allSettled([first.equip(owner, "quarry-ring", "ring1"), second.equip(owner, "ruin-ring", "ring1")]);
+        assert.equal(results.filter((result) => result.status === "rejected").length, 0);
+        const values = results.map((result) => result.status === "fulfilled" && result.value);
+        assert.ok(values.filter(Boolean).length >= 1);
+        const rows = (await first.list(owner)).filter((row) => row.equipped);
+        assert.equal(rows.length, 1);
+        assert.equal(rows[0]!.equippedSlot, "ring1");
+        assert.ok(values[rows[0]!.itemKey === "quarry-ring" ? 0 : 1]);
+        assert.equal(getDatabaseStatus(), "ok");
       }
     });
   });

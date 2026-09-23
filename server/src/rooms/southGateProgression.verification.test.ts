@@ -66,25 +66,25 @@ function equip(room: AuditRoom, client: Client, itemKey = "old-dagger", slot: Eq
 it("regional resolution does not change base tables or another region after repeated lookups", () => {
   const before = JSON.stringify([...MONSTER_TYPES]);
   for (let i = 0; i < 100; i++) {
-    const field = monsterTypesForRoom("hunting-ground");
-    const den = monsterTypesForRoom("hunting-den");
+    const field = monsterTypesForRoom("buyeo-novice");
+    const den = monsterTypesForRoom("buyeo-rat-cave");
     assert.equal(field.get(MonsterKind.Rabbit)!.maxHp, 19);
     assert.equal(field.get(MonsterKind.Squirrel)!.expReward, 1);
-    assert.equal(den.get(MonsterKind.Rabbit)!.maxHp, 48);
-    assert.equal(den.get(MonsterKind.Deer)!.expReward, 32);
-    assert.equal(den.get(MonsterKind.Boss)!.expReward, 600);
+    assert.equal(den.get(MonsterKind.Rat)!.maxHp, 48);
+    assert.equal(den.get(MonsterKind.Bat)!.expReward, 26);
+    assert.equal(den.has(MonsterKind.Boss), false);
     assert.deepEqual([...monsterTypesForRoom(undefined)], [...MONSTER_TYPES]);
     assert.deepEqual([...monsterTypesForRoom("unknown")], [...MONSTER_TYPES]);
   }
   assert.equal(JSON.stringify([...MONSTER_TYPES]), before);
 });
 
-for (const name of ["hunting-ground", "hunting-den"]) {
+for (const [name, kind] of [["buyeo-novice", MonsterKind.Rabbit], ["buyeo-rat-cave", MonsterKind.Rat]] as const) {
   it(`${name}: actual rabbit death awards the region's EXP and full loot displayed by API`, async () => {
     const f = await fixture(name);
     try {
-      const [id, runtime] = [...f.room["monsterRuntimes"]].find(([, row]) => row.type.kind === MonsterKind.Rabbit)!;
-      const expected = monsterTypesForRoom(name).get(MonsterKind.Rabbit)!;
+      const [id, runtime] = [...f.room["monsterRuntimes"]].find(([, row]) => row.type.kind === kind)!;
+      const expected = monsterTypesForRoom(name).get(kind)!;
       assert.equal(runtime.hp, expected.maxHp);
       f.room["applyMonsterDamage"](f.client, f.client.userData!, id, expected.maxHp, Date.now());
       await flush();
@@ -93,7 +93,7 @@ for (const name of ["hunting-ground", "hunting-den"]) {
       const actual = (await f.inventoryStore.list(OWNER)).map(row => ({ itemKey: row.itemKey, quantity: row.quantity }));
       assert.deepEqual(actual.sort((a,b) => a.itemKey.localeCompare(b.itemKey)),
         expected.loot.map(row => ({ itemKey: row.itemKey, quantity: row.quantity })).sort((a,b) => a.itemKey.localeCompare(b.itemKey)));
-      const view = buildLootTableView(name).find(row => row.kind === MonsterKind.Rabbit)!;
+      const view = buildLootTableView(name).find(row => row.kind === kind)!;
       assert.equal(view.expReward, expected.expReward);
       assert.deepEqual(view.drops.map(row => row.itemKey), expected.loot.map(row => row.itemKey));
       for (const drop of view.drops) {
@@ -132,7 +132,7 @@ it("50 quest coins buy a dagger; equip changes damage, selling worn gear fails, 
     assert.equal(f.room["totalAttack"](f.client.userData!), 10);
     assert.deepEqual(await f.inventoryStore.getEquippedSlots(OWNER), { weapon: "hunting-blade" });
     assert.equal(await f.currencyStore.getBalance(OWNER), 0);
-    const later = await fixture("hunting-ground", { inventoryStore: f.inventoryStore, currencyStore: f.currencyStore });
+    const later = await fixture("buyeo-novice", { inventoryStore: f.inventoryStore, currencyStore: f.currencyStore });
     try { assert.equal(later.room["totalAttack"](later.client.userData!), 10); }
     finally { later.room.onDispose(); }
   } finally { f.room.onDispose(); }
@@ -190,7 +190,7 @@ it("a sibling session with stale equipment cache cannot sell another session's w
 
 it("a sibling room unequip then sale removes the former wearer's attack bonus", async () => {
   const f = await fixture();
-  const sibling = await fixture("hunting-ground", { inventoryStore: f.inventoryStore,
+  const sibling = await fixture("buyeo-novice", { inventoryStore: f.inventoryStore,
     currencyStore: f.currencyStore, settlementStore: f.settlementStore });
   try {
     await f.inventoryStore.add(OWNER, "old-dagger", 1);
@@ -233,8 +233,8 @@ it("all portals, NPCs, and monster origins remain reachable from each authored r
 
 it("den's full arrival spread is outside each monster's wander plus aggro radius", () => {
   const safe = [{tileX:31,tileY:26}, ...Array.from({length:9},(_,i)=>({tileX:30+i%3,tileY:23+Math.floor(i/3)}))];
-  for (const spawn of MONSTER_SPAWN_DEFINITIONS.filter(row => row.room === "hunting-den")) {
-    const type = monsterTypesForRoom("hunting-den").get(spawn.kind)!;
+  for (const spawn of MONSTER_SPAWN_DEFINITIONS.filter(row => row.room === "buyeo-rat-cave")) {
+    const type = monsterTypesForRoom("buyeo-rat-cave").get(spawn.kind)!;
     for (const point of safe) assert.ok(Math.max(Math.abs(point.tileX-spawn.at.tileX),Math.abs(point.tileY-spawn.at.tileY)) > spawn.wanderRadiusTiles+type.aggroRadiusTiles, `${spawn.id} threatens ${JSON.stringify(point)}`);
   }
 });
@@ -250,7 +250,7 @@ it("boot validation rejects invalid regional EXP and drops even when the base ma
   ]) {
     const resolve = (name: string | undefined) => {
       const map = new Map(monsterTypesForRoom(name));
-      if (name === "hunting-den") map.set(MonsterKind.Rabbit, { ...map.get(MonsterKind.Rabbit)!, ...patch });
+      if (name === "buyeo-rat-cave") map.set(MonsterKind.Rat, { ...map.get(MonsterKind.Rat)!, ...patch });
       return map;
     };
     const result = validateMonsterSpawnDefinitions(MONSTER_SPAWN_DEFINITIONS, MONSTER_TYPES, ITEM_DEFINITIONS,
@@ -260,7 +260,7 @@ it("boot validation rejects invalid regional EXP and drops even when the base ma
 });
 
 it("timid behavior never attacks and every escape candidate increases distance within its leash", () => {
-  const type = monsterTypesForRoom("hunting-ground").get(MonsterKind.Squirrel)!;
+  const type = monsterTypesForRoom("buyeo-novice").get(MonsterKind.Squirrel)!;
   for (let x = -8; x <= 8; x++) for (let y = -8; y <= 8; y++) {
     for (const [dx,dy] of [[0,0],[1,0],[-1,0],[0,1],[0,-1],[2,2]]) {
       const snapshot: MonsterSnapshot = { id:"audit-timid", state:MonsterAiState.Idle, tileX:x, tileY:y,
@@ -281,7 +281,7 @@ it("timid behavior never attacks and every escape candidate increases distance w
 });
 
 it("timid cooldown, trapped leash corner, death deadline and collision fallback preserve movement boundaries", () => {
-  const type = monsterTypesForRoom("hunting-ground").get(MonsterKind.Squirrel)!;
+  const type = monsterTypesForRoom("buyeo-novice").get(MonsterKind.Squirrel)!;
   const snapshot: MonsterSnapshot = { id:"audit-timid", state:MonsterAiState.Idle, tileX:0,tileY:0,
     spawn:{tileX:0,tileY:0}, wanderRadiusTiles:2,nextStepAt:1001,nextAttackAt:0,respawnAt:2000 };
   const target={sessionId:"hunter",tileX:-1,tileY:0};

@@ -71,11 +71,11 @@ test("두 실제 브라우저의 파티, 양방향 교환, 제작이 서버 자�
   await expect(b.getByText("교환 완료", { exact: true })).toBeVisible();
   expect((await bag(a)).find((item) => item.itemKey === "den-fur")?.quantity).toBe(3);
   expect((await bag(b)).find((item) => item.itemKey === "den-fur")?.quantity).toBe(1);
-  await a.getByRole("button", { name: "제작하기", exact: true }).click();
+  await a.locator('.social__recipe').filter({ hasText: "완성: 강화 가죽갑옷" }).getByRole("button", { name: "제작하기", exact: true }).click();
   await expect(a.locator(".social__status")).toContainText("제작을 완료했습니다");
   const crafted = await bag(a);
   expect(crafted.find((item) => item.itemKey === "reinforced-armor")?.quantity).toBe(1);
-  expect(crafted.some((item) => item.itemKey === "padded-armor" || item.itemKey === "den-fur")).toBe(false);
+  expect(crafted.some((item) => item.itemKey === "padded-armor" || item.itemKey === "bear-hide")).toBe(false);
   await b.getByRole("button", { name: "파티 나가기", exact: true }).click();
   await expect(a.locator(".social__member")).toHaveCount(1);
   await expect(b.locator(".social__member")).toHaveCount(0);

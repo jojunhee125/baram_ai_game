@@ -1,4 +1,4 @@
-import { LANDMARK_DEFINITIONS as LANDMARK_DESCRIPTORS } from "@zep-test/shared";
+import { LANDMARK_DEFINITIONS as LANDMARK_DESCRIPTORS, PROGRESSION_REGIONS } from "@zep-test/shared";
 import type { SpawnArea } from "./contracts";
 
 export interface LandmarkDefinition {
@@ -23,22 +23,12 @@ export interface LandmarkDefinition {
  * (`validateLandmarkDefinitions`) checks the two stay in step: same id set, same room per id.
  */
 export const LANDMARK_DEFINITIONS: readonly LandmarkDefinition[] = [
-  {
-    id: "landmark-hunting-forest", room: "hunting-forest",
-    tile: { tileX: 31, tileY: 26, spreadRadiusInTiles: 0 },
-    requiresItemKey: "entry-pass",
-    deniedMessage: "입장권은 다람쥐를 잡아서 획득하세요",
-  },
   { id: "landmark-plaza", room: "plaza" },
   { id: "landmark-grand-plaza", room: "grand-plaza" },
-  { id: "landmark-hunting-ground", room: "hunting-ground", tile: { tileX: 35, tileY: 30, spreadRadiusInTiles: 0 } },
-  {
-    id: "landmark-hunting-den",
-    room: "hunting-den",
+  ...PROGRESSION_REGIONS.map((region) => ({
+    id: `landmark-${region.roomId}`, room: region.roomId,
     tile: { tileX: 31, tileY: 26, spreadRadiusInTiles: 0 },
-    requiresItemKey: "entry-pass",
-    deniedMessage: "입장권은 다람쥐를 잡아서 획득하세요",
-  },
+  })),
 ];
 
 // Sanity check against LANDMARK_DESCRIPTORS is delegated to validateLandmarkDefinitions rather

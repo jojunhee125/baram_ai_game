@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { Direction, PATCH_RATE_MS, TILE_SIZE_PX } from "@zep-test/shared";
+import { Direction, PATCH_RATE_MS, PROGRESSION_MONSTER_NAMES, TILE_SIZE_PX } from "@zep-test/shared";
 import type { MonsterSnapshot } from "../net/roomConnection";
 import {
   prepareHeritageMonsterArt,
@@ -18,7 +18,7 @@ const DIRECTIONS_PER_KIND = 4;
  * reads this array, compares it against its own KINDS table and refuses to bake the sheet if they
  * have drifted, the same guard import-avatar.mjs puts on AVATAR_SKIN_COUNT.
  */
-export const MONSTER_SPRITE_ORDER = ["squirrel", "rabbit", "deer", "boss"] as const;
+export const MONSTER_SPRITE_ORDER = ["squirrel", "rabbit", "deer", "boss", "marsh-slime", "reed-serpent", "cave-bat", "rock-boar", "snow-wolf", "frost-golem", "ruin-sentinel", "cursed-flame", "female-deer", "rat", "bat", "snake", "python", "king-python", "bear", "pyeongung", "tiger", "blue-deer", "red-deer", "wild-boar", "forest-boar", "black-fox", "white-fox", "gumiho"] as const;
 
 /** Catch up within one state-patch interval, rather than trailing the authoritative attack tile. */
 export const MONSTER_STEP_TWEEN_MS = PATCH_RATE_MS;
@@ -66,6 +66,7 @@ const MONSTER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   rabbit: "토끼",
   deer: "사슴",
   [BOSS_KIND]: "보스",
+  ...PROGRESSION_MONSTER_NAMES,
 };
 
 /**

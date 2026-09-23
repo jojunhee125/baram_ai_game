@@ -8,7 +8,7 @@ import { STEP_BY_DIRECTION } from "../game/movement";
 import { MONSTER_SPAWN_DEFINITIONS, MONSTER_TYPES, MonsterKind } from "./monsterDefinitions";
 
 /**
- * Pass F, F-4: `MONSTER_TYPES.aggroRadiusTiles` went from 4/6 (squirrel/rabbit) to 2/2
+ * Pass F, F-4: `MONSTER_TYPES.aggroRadiusTiles` went from 4/6 (rat/bat) to 2/2
  * (`docs/design-hunting-inventory.md` 부록 F). `monsterAi.test.ts` proves the FSM gate itself
  * against a literal fixture that is deliberately decoupled from this table (its own header
  * comment says so), so a typo in `monsterDefinitions.ts` would not fail anything there. This
@@ -20,7 +20,7 @@ import { MONSTER_SPAWN_DEFINITIONS, MONSTER_TYPES, MonsterKind } from "./monster
  */
 const PORT = 2583;
 
-const HUNTING_GROUND = "hunting-ground";
+const HUNTING_GROUND = "buyeo-rat-cave";
 const MOVE_COOLDOWN_MS = 1000 / MAX_MOVES_PER_SECOND + 15;
 
 type AnyRoom = Awaited<ReturnType<ColyseusTestServer["createRoom"]>> & { state: RoomState };
@@ -120,10 +120,15 @@ function shortestPath(
 
 async function walk(client: ClientRoom, room: AnyRoom, path: Direction[]): Promise<void> {
   for (const dir of path) {
+    const at = tileOf(room, client), delta = STEP_BY_DIRECTION[dir];
+    const expected = { tileX: at.tileX + delta.dx, tileY: at.tileY + delta.dy };
     client.send(ClientMessage.Move, { dir });
+    await waitUntil(() => {
+      const current = tileOf(room, client);
+      return current.tileX === expected.tileX && current.tileY === expected.tileY;
+    }, `acknowledged step to ${expected.tileX},${expected.tileY}`);
     await sleep(MOVE_COOLDOWN_MS);
   }
-  void room;
 }
 
 function chebyshev(a: { tileX: number; tileY: number }, b: { tileX: number; tileY: number }): number {
@@ -143,7 +148,7 @@ function chebyshev(a: { tileX: number; tileY: number }, b: { tileX: number; tile
  * `aggroRadiusTiles` (2), makes the live distance bounded and safe for the whole test regardless
  * of where in its box the monster happens to be: `[marginTiles - W, marginTiles + W]` never dips
  * to 2 or below by wandering alone. The floor of that range, `marginTiles - W`, is also chosen to
- * still sit at or under the *old*, pre-Pass-F radius (4 for squirrel, 6 for rabbit) -- so a regression
+ * still sit at or under the *old*, pre-Pass-F radius (4 for rat, 6 for bat) -- so a regression
  * that silently restored the old value would show up here as a monster that starts closing the
  * distance instead of pacing it, which the assertion below would catch.
  */
@@ -253,34 +258,34 @@ afterEach(async () => {
   await testServer.cleanup();
 });
 
-describe("hunting-ground — F-4 aggro radius, against the real MONSTER_TYPES table", () => {
-  it(`the real squirrel aggroRadiusTiles is 2, not the pre-Pass-F 4`, () => {
-    const squirrel = MONSTER_TYPES.get(MonsterKind.Squirrel);
-    assert.ok(squirrel);
-    assert.equal(squirrel.aggroRadiusTiles, 2);
+describe("buyeo-rat-cave — F-4 aggro radius, against the real MONSTER_TYPES table", () => {
+  it(`the real rat aggroRadiusTiles is 2, not the pre-Pass-F 4`, () => {
+    const rat = MONSTER_TYPES.get(MonsterKind.Rat);
+    assert.ok(rat);
+    assert.equal(rat.aggroRadiusTiles, 2);
   });
 
-  it(`the real rabbit aggroRadiusTiles is 2, not the pre-Pass-F 6`, () => {
-    const rabbit = MONSTER_TYPES.get(MonsterKind.Rabbit);
-    assert.ok(rabbit);
-    assert.equal(rabbit.aggroRadiusTiles, 2);
+  it(`the real bat aggroRadiusTiles is 2, not the pre-Pass-F 6`, () => {
+    const bat = MONSTER_TYPES.get(MonsterKind.Bat);
+    assert.ok(bat);
+    assert.equal(bat.aggroRadiusTiles, 2);
   });
 
   it(
-    "a hunter 5 tiles from a live squirrel's spawn is never chased across two wander cycles, " +
+    "a hunter 5 tiles from a live rat's spawn is never chased across two wander cycles, " +
       "but holding at exactly 2 tiles from its live position starts a real chase",
     async () => {
       const room = await createRoom();
       const hunter = await join(room, "hunter");
-      const map = await new TiledMapLoader().load("hunting-ground");
-      const squirrelType = MONSTER_TYPES.get(MonsterKind.Squirrel);
-      assert.ok(squirrelType);
+      const map = await new TiledMapLoader().load("buyeo-rat-cave");
+      const ratType = MONSTER_TYPES.get(MonsterKind.Rat);
+      assert.ok(ratType);
 
       const spawnRow = MONSTER_SPAWN_DEFINITIONS.find(
-        (spawn) => spawn.room === HUNTING_GROUND && spawn.kind === MonsterKind.Squirrel,
+        (spawn) => spawn.room === HUNTING_GROUND && spawn.kind === MonsterKind.Rat,
       );
-      assert.ok(spawnRow, "no squirrel spawn row in the real table");
-      assert.equal(spawnRow.wanderRadiusTiles, 2, "margin math below assumes this row's real wander radius");
+      assert.ok(spawnRow, "no rat spawn row in the real table");
+      assert.equal(spawnRow.wanderRadiusTiles, 1, "margin math below assumes this row's real wander radius");
 
       // margin(5) - wanderRadiusTiles(2) = 3 > aggroRadiusTiles(2): wandering alone can never
       // pull the live distance to this fixed point below 3.
@@ -291,31 +296,31 @@ describe("hunting-ground — F-4 aggro radius, against the real MONSTER_TYPES ta
         spawnRow.at,
         spawnRow.id,
         5,
-        squirrelType.wanderStepIntervalMs,
+        ratType.wanderStepIntervalMs,
       );
 
-      await assertAggroEngagesAtTwo(room, hunter, map, spawnRow.id, squirrelType.chaseStepIntervalMs);
+      await assertAggroEngagesAtTwo(room, hunter, map, spawnRow.id, ratType.chaseStepIntervalMs);
     },
   );
 
   it(
-    "a hunter 6 tiles from a live rabbit's spawn is never chased across two wander cycles, " +
+    "a hunter 6 tiles from a live bat's spawn is never chased across two wander cycles, " +
       "but holding at exactly 2 tiles from its live position starts a real chase",
     async () => {
       const room = await createRoom();
       const hunter = await join(room, "hunter");
-      const map = await new TiledMapLoader().load("hunting-ground");
-      const rabbitType = MONSTER_TYPES.get(MonsterKind.Rabbit);
-      assert.ok(rabbitType);
+      const map = await new TiledMapLoader().load("buyeo-rat-cave");
+      const batType = MONSTER_TYPES.get(MonsterKind.Bat);
+      assert.ok(batType);
 
       const spawnRow = MONSTER_SPAWN_DEFINITIONS.find(
-        (spawn) => spawn.room === HUNTING_GROUND && spawn.kind === MonsterKind.Rabbit,
+        (spawn) => spawn.room === HUNTING_GROUND && spawn.kind === MonsterKind.Bat,
       );
-      assert.ok(spawnRow, "no rabbit spawn row in the real table");
-      assert.equal(spawnRow.wanderRadiusTiles, 3, "margin math below assumes this row's real wander radius");
+      assert.ok(spawnRow, "no bat spawn row in the real table");
+      assert.equal(spawnRow.wanderRadiusTiles, 1, "margin math below assumes this row's real wander radius");
 
-      // margin(6) - wanderRadiusTiles(3) = 3 > aggroRadiusTiles(2): same reasoning as the squirrel
-      // case, sized for the rabbit's wider wander box.
+      // margin(6) - wanderRadiusTiles(3) = 3 > aggroRadiusTiles(2): same reasoning as the rat
+      // case, sized for the bat's wider wander box.
       await assertNoAggroAtMargin(
         room,
         hunter,
@@ -323,18 +328,18 @@ describe("hunting-ground — F-4 aggro radius, against the real MONSTER_TYPES ta
         spawnRow.at,
         spawnRow.id,
         6,
-        rabbitType.wanderStepIntervalMs,
+        batType.wanderStepIntervalMs,
       );
 
-      await assertAggroEngagesAtTwo(room, hunter, map, spawnRow.id, rabbitType.chaseStepIntervalMs);
+      await assertAggroEngagesAtTwo(room, hunter, map, spawnRow.id, batType.chaseStepIntervalMs);
     },
   );
 
-  it("leashRadiusTiles is unchanged (8 for squirrel, 10 for rabbit) -- F-4 touched only aggro", () => {
-    const squirrel = MONSTER_TYPES.get(MonsterKind.Squirrel);
-    const rabbit = MONSTER_TYPES.get(MonsterKind.Rabbit);
-    assert.ok(squirrel && rabbit);
-    assert.equal(squirrel.leashRadiusTiles, 8);
-    assert.equal(rabbit.leashRadiusTiles, 10);
+  it("both current rat-cave kinds have an eight-tile leash", () => {
+    const rat = MONSTER_TYPES.get(MonsterKind.Rat);
+    const bat = MONSTER_TYPES.get(MonsterKind.Bat);
+    assert.ok(rat && bat);
+    assert.equal(rat.leashRadiusTiles, 8);
+    assert.equal(bat.leashRadiusTiles, 8);
   });
 });

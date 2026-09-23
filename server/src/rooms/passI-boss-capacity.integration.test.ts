@@ -3,8 +3,8 @@ import { after, afterEach, before, describe, it } from "node:test";
 import { ColyseusTestServer } from "@colyseus/testing";
 import { matchMaker } from "colyseus";
 import type { RoomState } from "@zep-test/shared";
-import { createGameServer } from "../server";
-import { ROOM_DEFINITIONS } from "./definitions";
+import { createLegacyGameServer as createGameServer } from "./__fixtures__/legacyBoss";
+import { ROOM_DEFINITIONS } from "./__fixtures__/legacyBoss";
 import { MonsterKind } from "./monsterDefinitions";
 
 /**

@@ -19,6 +19,7 @@ import { configureHttpRoutes } from "./http/routes";
 import { observeWebSocketUpgrade } from "./http/wsAuthProbe";
 import type { CollisionMap, TradeStore } from "./rooms/contracts";
 import { ROOM_DEFINITIONS } from "./rooms/definitions";
+import { CRAFTING_RECIPES, validateCraftingRecipes } from "./rooms/craftingSystem";
 import { INTERACTABLE_DEFINITIONS } from "./rooms/interactableDefinitions";
 import { ITEM_DEFINITIONS, MAX_DISTINCT_ITEMS } from "./rooms/itemDefinitions";
 import { LANDMARK_DEFINITIONS, LANDMARK_DESCRIPTORS } from "./rooms/landmarkDefinitions";
@@ -249,6 +250,8 @@ async function validateRoomMaps(): Promise<void> {
   // where a bad authored table is caught, and a duplicate or mistyped item key is the one such
   // fault a redeploy cannot undo — by the time it shows, that key is in somebody's bag.
   const items = validateItemDefinitions(ITEM_DEFINITIONS, MAX_DISTINCT_ITEMS);
+  const craftingErrors = validateCraftingRecipes(CRAFTING_RECIPES, ITEM_DEFINITIONS);
+  if (craftingErrors.length > 0) refuseBoot(`invalid crafting recipes: ${craftingErrors.join("; ")}`);
   for (const warning of items.warnings) {
     console.warn(`[zep-test] ${warning}`);
   }

@@ -159,7 +159,7 @@ class QuestRoom extends MetaverseRoom {
    * `createInteractableIndex` seam is for — the same thing `fixtureSpawns` does for monsters.
    */
   protected override createInteractableIndex(map: CollisionMap): InteractableIndex {
-    return new TableInteractableIndex(GIVER_ROOM, INTERACTABLE_DEFINITIONS, map);
+    return new TableInteractableIndex(GIVER_ROOM, [...INTERACTABLE_DEFINITIONS, { ...INTERACTABLE_DEFINITIONS.find(row => row.id === "buyeo-rat-cave-camp-npc")!, at: { room: GIVER_ROOM, tiles: [{ tileX: 33, tileY: 20 }] } }], map);
   }
 
   override setSimulationInterval(): void {
@@ -179,6 +179,7 @@ async function createRoom(
   spawns: readonly MonsterSpawnDefinition[] = [],
 ): Promise<QuestRoom> {
   const room = new QuestRoom();
+  Object.defineProperty(room, "roomName", { value: "buyeo-novice" });
   room.fixtureSpawns = spawns;
   await room.onCreate({ ...ROOM_OPTIONS, ...overrides });
   return room;
@@ -270,7 +271,7 @@ describe("the authored quest table", () => {
       ],
       INTERACTABLE_DEFINITIONS,
       // A squirrel spawn exists, so only the intended fault fires on each row.
-      [{ id: "s", room: GIVER_ROOM, kind: MonsterKind.Squirrel, at: { tileX: 0, tileY: 0 }, wanderRadiusTiles: 0 }],
+      [{ id: "s", room: "buyeo-novice", kind: MonsterKind.Squirrel, at: { tileX: 0, tileY: 0 }, wanderRadiusTiles: 0 }],
     );
     assert.equal(errors.length, 4, `expected exactly one error per row: ${errors}`);
     assert.ok(errors.some((error) => error.includes("no-such-object")));
@@ -308,11 +309,11 @@ describe("the NPC panel", () => {
     const room = await createRoom({ questStore: store });
     const client = join(room, "hunter");
     await flush();
-    const { from, dir } = approach(GIVER_TILE);
+    const { from, dir } = approach({ tileX: 33, tileY: 20 });
     place(room, "hunter", from);
     room["handleMove"](asRoomClient(client), { dir });
     const panel = sentOfType<InteractableEntered>(client, ServerMessage.InteractableEntered)
-      .find((entry) => entry.objectId === QUEST.giverObjectId) as NpcInteraction | undefined;
+      .find((entry) => entry.objectId === "buyeo-rat-cave-camp-npc") as NpcInteraction | undefined;
     assert.equal(panel?.quests?.find((quest) => quest.questId === "den-trial")?.blocked, true);
 
     release(await inner.list(OWNER));
@@ -348,9 +349,7 @@ describe("the NPC panel", () => {
         requiredCount: QUEST.objective.count,
       } satisfies QuestState,
     );
-    assert.equal((npc as NpcInteraction).quests?.length, 3);
-    assert.equal((npc as NpcInteraction).quests?.[1]?.blocked, true);
-    assert.equal((npc as NpcInteraction).quests?.[2]?.blocked, true);
+    assert.equal((npc as NpcInteraction).quests?.length, 1);
     dispose(room);
   });
 

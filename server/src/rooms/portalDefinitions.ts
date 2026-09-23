@@ -1,42 +1,7 @@
 import type { PortalDefinition } from "./contracts";
+import { PROGRESSION_CONNECTIONS } from "@zep-test/shared";
 
-/**
- * The portal graph. Each row is one-way, so a door you can walk back through is two rows —
- * which is what lets the two sides arrive on different tiles. Design and the rejected
- * map-embedded alternative: `docs/design-portal-object.md`.
- *
- * Coordinates are authored here rather than read from the map, so they are also recorded in
- * `assets/README.md` beside each map's spawn tile. Boot refuses to start if a trigger or an
- * arrival is not walkable (`validateRoomMaps`), but nothing can check that a trigger sits on
- * the tile the map art draws a door on — that stays an eyeball check.
- *
- * Trigger tiles deliberately avoid plaza's spawn row: `metaverseRoom.integration.test.ts`
- * walks the whole of row 20 between x=16 and x=47, and a door on that row would fire mid-test.
- */
 export const PORTAL_DEFINITIONS: readonly PortalDefinition[] = [
-  {
-    id: "hunting-den-forest-door",
-    from: { room: "hunting-den", tiles: [{ tileX: 47, tileY: 25 }, { tileX: 47, tileY: 26 }] },
-    to: { room: "hunting-forest", arrival: { tileX: 31, tileY: 26, spreadRadiusInTiles: 0 } },
-    requiresItemKey: "entry-pass",
-    deniedMessage: "입장권은 다람쥐를 잡아서 획득하세요",
-  },
-  {
-    id: "hunting-forest-south-door",
-    from: { room: "hunting-forest", tiles: [{ tileX: 31, tileY: 27 }, { tileX: 32, tileY: 27 }] },
-    to: { room: "hunting-den", arrival: { tileX: 46, tileY: 25, spreadRadiusInTiles: 0 } },
-  },
-  {
-    id: "plaza-south-door",
-    from: {
-      room: "plaza",
-      tiles: [
-        { tileX: 31, tileY: 25 },
-        { tileX: 32, tileY: 25 },
-      ],
-    },
-    to: { room: "hunting-ground", arrival: { tileX: 35, tileY: 30, spreadRadiusInTiles: 0 } },
-  },
   {
     id: "grand-plaza-north-door",
     from: {
@@ -59,41 +24,5 @@ export const PORTAL_DEFINITIONS: readonly PortalDefinition[] = [
     },
     to: { room: "grand-plaza", arrival: { tileX: 22, tileY: 9, spreadRadiusInTiles: 0 } },
   },
-  {
-    id: "hunting-ground-south-door",
-    from: {
-      room: "hunting-ground",
-      tiles: [
-        { tileX: 35, tileY: 31 },
-        { tileX: 36, tileY: 31 },
-      ],
-    },
-    to: { room: "plaza", arrival: { tileX: 31, tileY: 23, spreadRadiusInTiles: 0 } },
-  },
-  {
-    id: "hunting-ground-north-door",
-    from: {
-      room: "hunting-ground",
-      // The trail's north end, already dirtPath before this door existed
-      // (`docs/design-phase-e-second-hunting-ground.md` §2.2) - no new terrain, just a threshold.
-      tiles: [
-        { tileX: 35, tileY: 8 },
-        { tileX: 36, tileY: 8 },
-      ],
-    },
-    to: { room: "hunting-den", arrival: { tileX: 31, tileY: 26, spreadRadiusInTiles: 0 } },
-    requiresItemKey: "entry-pass",
-    deniedMessage: "입장권은 다람쥐를 잡아서 획득하세요",
-  },
-  {
-    id: "hunting-den-south-door",
-    from: {
-      room: "hunting-den",
-      tiles: [
-        { tileX: 31, tileY: 27 },
-        { tileX: 32, tileY: 27 },
-      ],
-    },
-    to: { room: "hunting-ground", arrival: { tileX: 35, tileY: 9, spreadRadiusInTiles: 0 } },
-  },
+  ...PROGRESSION_CONNECTIONS,
 ];

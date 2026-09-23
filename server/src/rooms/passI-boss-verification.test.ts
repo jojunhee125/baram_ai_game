@@ -1,3 +1,4 @@
+import { LegacyBossRoom, MONSTER_SPAWN_DEFINITIONS, MONSTER_TYPES } from "./__fixtures__/legacyBoss";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
@@ -14,13 +15,11 @@ import {
 import type { BossStateStore } from "../db/bossStateStore";
 import type { InventoryRow, InventoryStore } from "../db/inventoryStore";
 import type { LandmarkIndex, RoomCreateOptions, SpawnArea } from "./contracts";
-import { ROOM_DEFINITIONS } from "./definitions";
+import { ROOM_DEFINITIONS } from "./__fixtures__/legacyBoss";
 import { buildLootTableView } from "./lootTableView";
 import { MetaverseRoom } from "./metaverseRoom";
 import {
   BOSS_RESPAWN_MS,
-  MONSTER_SPAWN_DEFINITIONS,
-  MONSTER_TYPES,
   MonsterKind,
   type MonsterSpawnDefinition,
   type MonsterType,
@@ -219,7 +218,7 @@ function asRoomClient(client: FakeClient): RoomClient {
   return client as unknown as RoomClient;
 }
 
-class BossRoom extends MetaverseRoom {
+class BossRoom extends LegacyBossRoom {
   fixtureSpawns: readonly MonsterSpawnDefinition[] = [];
   fixtureTypes: ReadonlyMap<MonsterKind, MonsterType> = FIXTURE_TYPES;
   fixtureLandmark: LandmarkIndex | null = null;
@@ -1404,31 +1403,21 @@ describe("VERIFY T6 — a wipe resets the boss, one death does not", () => {
 
 // -- the boss's public surface: the loot-table panel ---------------------------------------------
 
-describe("VERIFY the boss reaches the loot-table panel of both hunting rooms", () => {
-  it("lists the boss with its Korean name and the golden helmet at 25%", () => {
-    // `GET /api/loot-table/:roomName` is derived from the same tables, so the new kind and the new
-    // item show up there without a line of route code — which is exactly why it is worth
-    // asserting once: a `possession` drop is the first of its kind in this panel.
-    for (const roomName of ["hunting-ground", "hunting-den"]) {
-      const views = buildLootTableView(roomName);
-      const boss = views.find((view) => view.kind === MonsterKind.Boss);
-      assert.ok(boss, `${roomName}'s panel is missing the boss`);
-      assert.equal(boss.name, "보스");
-      assert.deepEqual(boss.drops, [
-        { itemKey: "golden-helmet", name: "황금투구", icon: "golden-helmet", chancePercent: 25, quantity: 1 },
-        ...(roomName === "hunting-den" ? [{ itemKey: "iron-blade", name: "철검", icon: "old-dagger", chancePercent: 50, quantity: 1, sellValue: 120 }] : []),
-      ]);
-    }
+describe("VERIFY the dormant boss stays outside the active loot-table panel", () => {
+  it("keeps the boss drop metadata available for archived combat fixtures", () => {
+    const boss = MONSTER_TYPES.get(MonsterKind.Boss)!;
+    assert.equal(boss.expReward, 600);
+    assert.deepEqual(boss.loot, [{ itemKey: "golden-helmet", chance: 0.25, quantity: 1 }]);
   });
 
-  it("puts the boss last, after the ordinary kinds of its room", () => {
-    // MONSTER_TYPES declaration order is display order, and the boss row was appended — so the
-    // panel reads squirrel/rabbit/deer first and the 6-hour event last, without a sort.
-    for (const roomName of ["hunting-ground", "hunting-den"]) {
+  it("omits the boss from every active hunting room and retires the old rooms", () => {
+    for (const roomName of ["buyeo-novice", "buyeo-rat-cave", "buyeo-snake-cave", "buyeo-bear-cave", "buyeo-deer-cave", "buyeo-pig-cave", "buyeo-fox-cave"]) {
       const kinds = buildLootTableView(roomName).map((view) => view.kind);
-      assert.equal(kinds.at(-1), MonsterKind.Boss, `${roomName}: ${kinds.join(", ")}`);
       assert.ok(kinds.length >= 2);
+      assert.ok(!kinds.includes(MonsterKind.Boss));
     }
+    assert.deepEqual(buildLootTableView("hunting-ground"), []);
+    assert.deepEqual(buildLootTableView("hunting-den"), []);
   });
 
   it("leaves a room with no spawn rows without a panel at all", () => {

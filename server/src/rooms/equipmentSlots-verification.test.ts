@@ -770,7 +770,7 @@ describe(
       assert.deepEqual(await store.getEquippedSlots(owner), { ring1: "ring-fixture-a", ring2: "ring-fixture-b" });
     });
 
-    it("two concurrent equips both targeting ring1 still let exactly one win, same as the armor-slot race", async () => {
+    it("one store queues two ring1 equips and the second replaces the first", async () => {
       const store = new PostgresInventoryStore(pool);
       const owner = randomUUID();
       await store.add(owner, "ring-fixture-c", 1);
@@ -782,11 +782,11 @@ describe(
       ]);
       assert.equal(results.filter((r) => r.status === "rejected").length, 0);
       const values = (results as PromiseFulfilledResult<boolean>[]).map((r) => r.value);
-      assert.equal(values.filter((v) => v).length, 1, "exactly one of the two same-slot ring equips must win");
+      assert.deepEqual(values, [true, true], "both queued ring equips must complete");
 
       const equipped = await store.getEquippedSlots(owner);
       assert.equal(Object.keys(equipped).length, 1);
-      assert.equal(["ring-fixture-c", "ring-fixture-d"].includes(equipped.ring1 ?? ""), true);
+      assert.equal(equipped.ring1, "ring-fixture-d");
     });
   },
 );

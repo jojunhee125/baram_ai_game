@@ -1,3 +1,4 @@
+import { MONSTER_SPAWN_DEFINITIONS, MONSTER_TYPES } from "./__fixtures__/legacyBoss";
 import assert from "node:assert/strict";
 import { after, afterEach, before, describe, it } from "node:test";
 import { ColyseusTestServer } from "@colyseus/testing";
@@ -14,15 +15,13 @@ import {
   type RoomState,
 } from "@zep-test/shared";
 import { TiledMapLoader } from "../game/tiledMap";
-import { createGameServer } from "../server";
-import { ROOM_DEFINITIONS } from "./definitions";
+import { createLegacyGameServer as createGameServer } from "./__fixtures__/legacyBoss";
+import { ROOM_DEFINITIONS } from "./__fixtures__/legacyBoss";
 import { MetaverseRoom } from "./metaverseRoom";
 import {
-  MONSTER_SPAWN_DEFINITIONS,
-  MONSTER_TYPES,
   MonsterKind,
 } from "./monsterDefinitions";
-import { PORTAL_DEFINITIONS } from "./portalDefinitions";
+import { PORTAL_DEFINITIONS } from "./__fixtures__/legacyBoss";
 
 /**
  * node:test runs each file in its own process and every suite that listens needs a port no

@@ -1,0 +1,912 @@
+{
+  "items": [
+    {
+      "key": "acorn",
+      "name": "도토리",
+      "icon": "acorn",
+      "sellValue": 4
+    },
+    {
+      "key": "carrot",
+      "name": "당근",
+      "icon": "carrot",
+      "sellValue": 6
+    },
+    {
+      "key": "copper-coin",
+      "name": "구리 동전",
+      "icon": "copper-coin",
+      "sellValue": 8
+    },
+    {
+      "key": "herb",
+      "name": "약초",
+      "icon": "herb",
+      "sellValue": 3,
+      "consumable": {
+        "healAmount": 30
+      }
+    },
+    {
+      "key": "old-dagger",
+      "name": "낡은 단검",
+      "icon": "old-dagger",
+      "sellValue": 10,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 2
+        }
+      }
+    },
+    {
+      "key": "entry-pass",
+      "name": "입장권",
+      "icon": "entry-pass",
+      "possession": true
+    },
+    {
+      "key": "leather-armor",
+      "name": "가죽 갑옷",
+      "icon": "leather-armor",
+      "possession": true,
+      "equipment": {
+        "slot": "armor",
+        "stats": {
+          "damageReduction": 0.2
+        }
+      }
+    },
+    {
+      "key": "golden-helmet",
+      "name": "황금투구",
+      "icon": "golden-helmet",
+      "possession": true,
+      "equipment": {
+        "slot": "helmet",
+        "stats": {
+          "damageReduction": 0.15
+        }
+      }
+    },
+    {
+      "key": "den-fur",
+      "name": "굴짐승 털",
+      "icon": "acorn",
+      "sellValue": 10
+    },
+    {
+      "key": "antler",
+      "name": "단단한 뿔",
+      "icon": "carrot",
+      "sellValue": 18
+    },
+    {
+      "key": "hunting-blade",
+      "name": "사냥꾼 검",
+      "icon": "old-dagger",
+      "sellValue": 45,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 6
+        }
+      }
+    },
+    {
+      "key": "iron-blade",
+      "name": "철검",
+      "icon": "old-dagger",
+      "sellValue": 120,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 10
+        }
+      }
+    },
+    {
+      "key": "padded-armor",
+      "name": "누비옷",
+      "icon": "leather-armor",
+      "sellValue": 25,
+      "equipment": {
+        "slot": "armor",
+        "stats": {
+          "damageReduction": 0.15
+        }
+      }
+    },
+    {
+      "key": "reinforced-armor",
+      "name": "강화 가죽갑옷",
+      "icon": "leather-armor",
+      "sellValue": 75,
+      "equipment": {
+        "slot": "armor",
+        "stats": {
+          "damageReduction": 0.3
+        }
+      }
+    },
+    {
+      "key": "forest-resin",
+      "name": "숲의 수지",
+      "icon": "acorn",
+      "sellValue": 16
+    },
+    {
+      "key": "ancient-bark",
+      "name": "오래된 나무껍질",
+      "icon": "carrot",
+      "sellValue": 28
+    },
+    {
+      "key": "forest-cloak",
+      "name": "숲지기 망토",
+      "icon": "leather-armor",
+      "sellValue": 90,
+      "equipment": {
+        "slot": "cloak",
+        "stats": {
+          "damageReduction": 0.1
+        }
+      }
+    },
+    {
+      "key": "veteran-blade",
+      "name": "노련한 사냥검",
+      "icon": "old-dagger",
+      "sellValue": 145,
+      "equipment": {
+        "slot": "weapon",
+        "requirement": {
+          "minLevel": 6,
+          "classes": [
+            "warrior",
+            "rogue"
+          ]
+        },
+        "stats": {
+          "attackDamage": 12
+        }
+      }
+    },
+    {
+      "key": "mystic-cloak",
+      "name": "신비한 숲 망토",
+      "icon": "leather-armor",
+      "sellValue": 110,
+      "equipment": {
+        "slot": "cloak",
+        "requirement": {
+          "minLevel": 7,
+          "classes": [
+            "shaman",
+            "cleric"
+          ]
+        },
+        "stats": {
+          "damageReduction": 0.13
+        }
+      }
+    },
+    {
+      "key": "wetland-sword",
+      "icon": "wetland-sword",
+      "name": "물안개 습지 검",
+      "sellValue": 60,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 16
+        },
+        "requirement": {
+          "minLevel": 10,
+          "classes": [
+            "warrior"
+          ]
+        }
+      }
+    },
+    {
+      "key": "wetland-dagger",
+      "icon": "wetland-dagger",
+      "name": "물안개 습지 단도",
+      "sellValue": 60,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 14
+        },
+        "requirement": {
+          "minLevel": 10,
+          "classes": [
+            "rogue"
+          ]
+        }
+      }
+    },
+    {
+      "key": "wetland-staff",
+      "icon": "wetland-staff",
+      "name": "물안개 습지 지팡이",
+      "sellValue": 60,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 13
+        },
+        "requirement": {
+          "minLevel": 10,
+          "classes": [
+            "shaman"
+          ]
+        }
+      }
+    },
+    {
+      "key": "wetland-charm",
+      "icon": "wetland-charm",
+      "name": "물안개 습지 부적",
+      "sellValue": 60,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 18
+        },
+        "requirement": {
+          "minLevel": 10,
+          "classes": [
+            "cleric"
+          ]
+        }
+      }
+    },
+    {
+      "key": "wetland-armor",
+      "icon": "wetland-armor",
+      "name": "물안개 습지 갑옷",
+      "sellValue": 45,
+      "equipment": {
+        "slot": "armor",
+        "stats": {
+          "damageReduction": 0.32
+        },
+        "requirement": {
+          "minLevel": 10
+        }
+      }
+    },
+    {
+      "key": "wetland-helmet",
+      "icon": "wetland-helmet",
+      "name": "물안개 습지 투구",
+      "sellValue": 30,
+      "equipment": {
+        "slot": "helmet",
+        "stats": {
+          "damageReduction": 0.16
+        },
+        "requirement": {
+          "minLevel": 10
+        }
+      }
+    },
+    {
+      "key": "wetland-boots",
+      "icon": "wetland-boots",
+      "name": "물안개 습지 장화",
+      "sellValue": 25,
+      "equipment": {
+        "slot": "shoes",
+        "stats": {
+          "damageReduction": 0.04
+        },
+        "requirement": {
+          "minLevel": 10
+        }
+      }
+    },
+    {
+      "key": "wetland-cloak",
+      "icon": "wetland-cloak",
+      "name": "물안개 습지 망토",
+      "sellValue": 25,
+      "equipment": {
+        "slot": "cloak",
+        "stats": {
+          "damageReduction": 0.14
+        },
+        "requirement": {
+          "minLevel": 10
+        }
+      }
+    },
+    {
+      "key": "marsh-fiber",
+      "icon": "marsh-fiber",
+      "name": "늪풀 섬유",
+      "sellValue": 18
+    },
+    {
+      "key": "serpent-scale",
+      "icon": "serpent-scale",
+      "name": "갈대뱀 비늘",
+      "sellValue": 24
+    },
+    {
+      "key": "swamp-pearl",
+      "icon": "swamp-pearl",
+      "name": "늪의 진주",
+      "sellValue": 60
+    },
+    {
+      "key": "marsh-tonic",
+      "icon": "marsh-tonic",
+      "name": "물안개 습지 회복약",
+      "sellValue": 6,
+      "consumable": {
+        "healAmount": 75
+      }
+    },
+    {
+      "key": "quarry-sword",
+      "icon": "quarry-sword",
+      "name": "붉은 채석장 검",
+      "sellValue": 120,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 24
+        },
+        "requirement": {
+          "minLevel": 15,
+          "classes": [
+            "warrior"
+          ]
+        }
+      }
+    },
+    {
+      "key": "quarry-dagger",
+      "icon": "quarry-dagger",
+      "name": "붉은 채석장 단도",
+      "sellValue": 120,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 22
+        },
+        "requirement": {
+          "minLevel": 15,
+          "classes": [
+            "rogue"
+          ]
+        }
+      }
+    },
+    {
+      "key": "quarry-staff",
+      "icon": "quarry-staff",
+      "name": "붉은 채석장 지팡이",
+      "sellValue": 120,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 20
+        },
+        "requirement": {
+          "minLevel": 15,
+          "classes": [
+            "shaman"
+          ]
+        }
+      }
+    },
+    {
+      "key": "quarry-charm",
+      "icon": "quarry-charm",
+      "name": "붉은 채석장 부적",
+      "sellValue": 120,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 28
+        },
+        "requirement": {
+          "minLevel": 15,
+          "classes": [
+            "cleric"
+          ]
+        }
+      }
+    },
+    {
+      "key": "quarry-armor",
+      "icon": "quarry-armor",
+      "name": "붉은 채석장 갑옷",
+      "sellValue": 90,
+      "equipment": {
+        "slot": "armor",
+        "stats": {
+          "damageReduction": 0.36
+        },
+        "requirement": {
+          "minLevel": 15
+        }
+      }
+    },
+    {
+      "key": "quarry-helmet",
+      "icon": "quarry-helmet",
+      "name": "붉은 채석장 투구",
+      "sellValue": 60,
+      "equipment": {
+        "slot": "helmet",
+        "stats": {
+          "damageReduction": 0.18
+        },
+        "requirement": {
+          "minLevel": 15
+        }
+      }
+    },
+    {
+      "key": "quarry-ring",
+      "icon": "quarry-ring",
+      "name": "붉은 채석장 반지",
+      "sellValue": 50,
+      "equipment": {
+        "slot": "ring",
+        "stats": {
+          "attackDamage": 1,
+          "damageReduction": 0.02
+        },
+        "requirement": {
+          "minLevel": 15
+        }
+      }
+    },
+    {
+      "key": "quarry-necklace",
+      "icon": "quarry-necklace",
+      "name": "붉은 채석장 목걸이",
+      "sellValue": 50,
+      "equipment": {
+        "slot": "necklace",
+        "stats": {
+          "damageReduction": 0.06
+        },
+        "requirement": {
+          "minLevel": 15
+        }
+      }
+    },
+    {
+      "key": "iron-ore",
+      "icon": "iron-ore",
+      "name": "철광석",
+      "sellValue": 28
+    },
+    {
+      "key": "bat-wing",
+      "icon": "bat-wing",
+      "name": "박쥐 날개",
+      "sellValue": 36
+    },
+    {
+      "key": "rough-crystal",
+      "icon": "rough-crystal",
+      "name": "거친 수정",
+      "sellValue": 90
+    },
+    {
+      "key": "quarry-tonic",
+      "icon": "quarry-tonic",
+      "name": "붉은 채석장 회복약",
+      "sellValue": 10,
+      "consumable": {
+        "healAmount": 120
+      }
+    },
+    {
+      "key": "frost-sword",
+      "icon": "frost-sword",
+      "name": "서리 설원 검",
+      "sellValue": 210,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 34
+        },
+        "requirement": {
+          "minLevel": 20,
+          "classes": [
+            "warrior"
+          ]
+        }
+      }
+    },
+    {
+      "key": "frost-dagger",
+      "icon": "frost-dagger",
+      "name": "서리 설원 단도",
+      "sellValue": 210,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 31
+        },
+        "requirement": {
+          "minLevel": 20,
+          "classes": [
+            "rogue"
+          ]
+        }
+      }
+    },
+    {
+      "key": "frost-staff",
+      "icon": "frost-staff",
+      "name": "서리 설원 지팡이",
+      "sellValue": 210,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 28
+        },
+        "requirement": {
+          "minLevel": 20,
+          "classes": [
+            "shaman"
+          ]
+        }
+      }
+    },
+    {
+      "key": "frost-charm",
+      "icon": "frost-charm",
+      "name": "서리 설원 부적",
+      "sellValue": 210,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 39
+        },
+        "requirement": {
+          "minLevel": 20,
+          "classes": [
+            "cleric"
+          ]
+        }
+      }
+    },
+    {
+      "key": "frost-armor",
+      "icon": "frost-armor",
+      "name": "서리 설원 갑옷",
+      "sellValue": 160,
+      "equipment": {
+        "slot": "armor",
+        "stats": {
+          "damageReduction": 0.4
+        },
+        "requirement": {
+          "minLevel": 20
+        }
+      }
+    },
+    {
+      "key": "frost-helmet",
+      "icon": "frost-helmet",
+      "name": "서리 설원 투구",
+      "sellValue": 110,
+      "equipment": {
+        "slot": "helmet",
+        "stats": {
+          "damageReduction": 0.2
+        },
+        "requirement": {
+          "minLevel": 20
+        }
+      }
+    },
+    {
+      "key": "frost-boots",
+      "icon": "frost-boots",
+      "name": "서리 설원 장화",
+      "sellValue": 90,
+      "equipment": {
+        "slot": "shoes",
+        "stats": {
+          "damageReduction": 0.06
+        },
+        "requirement": {
+          "minLevel": 20
+        }
+      }
+    },
+    {
+      "key": "frost-cloak",
+      "icon": "frost-cloak",
+      "name": "서리 설원 망토",
+      "sellValue": 90,
+      "equipment": {
+        "slot": "cloak",
+        "stats": {
+          "damageReduction": 0.18
+        },
+        "requirement": {
+          "minLevel": 20
+        }
+      }
+    },
+    {
+      "key": "white-fur",
+      "icon": "white-fur",
+      "name": "흰 털",
+      "sellValue": 42
+    },
+    {
+      "key": "frost-shard",
+      "icon": "frost-shard",
+      "name": "서리 파편",
+      "sellValue": 54
+    },
+    {
+      "key": "ice-heart",
+      "icon": "ice-heart",
+      "name": "얼음 심장",
+      "sellValue": 140
+    },
+    {
+      "key": "frost-tonic",
+      "icon": "frost-tonic",
+      "name": "서리 설원 회복약",
+      "sellValue": 15,
+      "consumable": {
+        "healAmount": 180
+      }
+    },
+    {
+      "key": "ruin-sword",
+      "icon": "ruin-sword",
+      "name": "고대 유적 검",
+      "sellValue": 350,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 46
+        },
+        "requirement": {
+          "minLevel": 25,
+          "classes": [
+            "warrior"
+          ]
+        }
+      }
+    },
+    {
+      "key": "ruin-dagger",
+      "icon": "ruin-dagger",
+      "name": "고대 유적 단도",
+      "sellValue": 350,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 42
+        },
+        "requirement": {
+          "minLevel": 25,
+          "classes": [
+            "rogue"
+          ]
+        }
+      }
+    },
+    {
+      "key": "ruin-staff",
+      "icon": "ruin-staff",
+      "name": "고대 유적 지팡이",
+      "sellValue": 350,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 38
+        },
+        "requirement": {
+          "minLevel": 25,
+          "classes": [
+            "shaman"
+          ]
+        }
+      }
+    },
+    {
+      "key": "ruin-charm",
+      "icon": "ruin-charm",
+      "name": "고대 유적 부적",
+      "sellValue": 350,
+      "equipment": {
+        "slot": "weapon",
+        "stats": {
+          "attackDamage": 52
+        },
+        "requirement": {
+          "minLevel": 25,
+          "classes": [
+            "cleric"
+          ]
+        }
+      }
+    },
+    {
+      "key": "ruin-armor",
+      "icon": "ruin-armor",
+      "name": "고대 유적 갑옷",
+      "sellValue": 275,
+      "equipment": {
+        "slot": "armor",
+        "stats": {
+          "damageReduction": 0.44
+        },
+        "requirement": {
+          "minLevel": 25
+        }
+      }
+    },
+    {
+      "key": "ruin-helmet",
+      "icon": "ruin-helmet",
+      "name": "고대 유적 투구",
+      "sellValue": 190,
+      "equipment": {
+        "slot": "helmet",
+        "stats": {
+          "damageReduction": 0.22
+        },
+        "requirement": {
+          "minLevel": 25
+        }
+      }
+    },
+    {
+      "key": "ruin-ring",
+      "icon": "ruin-ring",
+      "name": "고대 유적 반지",
+      "sellValue": 150,
+      "equipment": {
+        "slot": "ring",
+        "stats": {
+          "attackDamage": 2,
+          "damageReduction": 0.03
+        },
+        "requirement": {
+          "minLevel": 25
+        }
+      }
+    },
+    {
+      "key": "ruin-necklace",
+      "icon": "ruin-necklace",
+      "name": "고대 유적 목걸이",
+      "sellValue": 150,
+      "equipment": {
+        "slot": "necklace",
+        "stats": {
+          "damageReduction": 0.08
+        },
+        "requirement": {
+          "minLevel": 25
+        }
+      }
+    },
+    {
+      "key": "ancient-shard",
+      "icon": "ancient-shard",
+      "name": "고대 파편",
+      "sellValue": 60
+    },
+    {
+      "key": "spirit-dust",
+      "icon": "spirit-dust",
+      "name": "영혼 가루",
+      "sellValue": 78
+    },
+    {
+      "key": "guardian-core",
+      "icon": "guardian-core",
+      "name": "수호자의 핵",
+      "sellValue": 210
+    },
+    {
+      "key": "ruin-tonic",
+      "icon": "ruin-tonic",
+      "name": "고대 유적 회복약",
+      "sellValue": 22,
+      "consumable": {
+        "healAmount": 260
+      }
+    }
+  ],
+  "quests": [
+    {
+      "id": "first-hunt",
+      "reward": {
+        "currencyDelta": 50
+      },
+      "count": 3
+    },
+    {
+      "id": "den-trial",
+      "reward": {
+        "currencyDelta": 90
+      },
+      "count": 3
+    },
+    {
+      "id": "forest-trial",
+      "reward": {
+        "currencyDelta": 140
+      },
+      "count": 4
+    },
+    {
+      "id": "wetland-survey",
+      "reward": {
+        "currencyDelta": 200
+      },
+      "count": 6
+    },
+    {
+      "id": "wetland-trial",
+      "reward": {
+        "currencyDelta": 300
+      },
+      "count": 8
+    },
+    {
+      "id": "quarry-survey",
+      "reward": {
+        "currencyDelta": 350
+      },
+      "count": 6
+    },
+    {
+      "id": "quarry-trial",
+      "reward": {
+        "currencyDelta": 500
+      },
+      "count": 8
+    },
+    {
+      "id": "frost-survey",
+      "reward": {
+        "currencyDelta": 550
+      },
+      "count": 6
+    },
+    {
+      "id": "frost-trial",
+      "reward": {
+        "currencyDelta": 800
+      },
+      "count": 8
+    },
+    {
+      "id": "ruin-survey",
+      "reward": {
+        "currencyDelta": 800
+      },
+      "count": 6
+    },
+    {
+      "id": "ruin-trial",
+      "reward": {
+        "currencyDelta": 1200
+      },
+      "count": 8
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import { CLASS_DEFINITIONS, EQUIPMENT_SLOTS, type EquipmentMetadata, type PlayerClassKey } from "@zep-test/shared";
+import { CLASS_DEFINITIONS, EQUIPMENT_SLOTS, type EquipmentMetadata, type EquipmentSlot, type PlayerClassKey } from "@zep-test/shared";
 
 /**
  * Same-origin like `profile.ts`, and for the same reason: in production the game server serves
@@ -22,6 +22,7 @@ export interface InventoryItem {
   icon: string;
   quantity: number;
   equipped: boolean;
+  equippedSlot?: EquipmentSlot;
   tradeable?: boolean;
   equipment?: EquipmentMetadata;
   /** Present only on equipment rows; its absence is what tells a row apart from a possession. */
@@ -85,6 +86,7 @@ function readItems(body: unknown, strict: boolean): readonly InventoryItem[] {
   return items.filter(isInventoryItem).map((item) => ({
     ...item,
     equipment: readEquipmentMetadata(item.equipment),
+    equippedSlot: item.equipped && EQUIPMENT_SLOTS.includes(item.equippedSlot as EquipmentSlot) ? item.equippedSlot : undefined,
   }));
 }
 

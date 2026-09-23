@@ -1,4 +1,4 @@
-import { isPlayerClassKey } from "@zep-test/shared";
+import { isPlayerClassKey, LEVEL_CAP, EQUIPMENT_SLOTS } from "@zep-test/shared";
 import type { ItemDefinition } from "../rooms/contracts";
 
 /** Boot-validation outcome. Every error refuses boot; warnings are authoring smells only. */
@@ -53,8 +53,11 @@ export function validateItemDefinitions(
       errors.push(`${label} has a sellValue that is not a positive safe integer`);
     }
     if (item.equipment !== undefined) {
+      if (!(EQUIPMENT_SLOTS as readonly string[]).filter((slot) => slot !== "ring1" && slot !== "ring2").concat("ring").includes(item.equipment.slot)) {
+        errors.push(`${label} has an invalid equipment slot`);
+      }
       const requirement = item.equipment.requirement;
-      if (requirement?.minLevel !== undefined && (!Number.isSafeInteger(requirement.minLevel) || requirement.minLevel < 1)) {
+      if (requirement?.minLevel !== undefined && (!Number.isSafeInteger(requirement.minLevel) || requirement.minLevel < 1 || requirement.minLevel > LEVEL_CAP)) {
         errors.push(`${label} has an invalid minimum equipment level`);
       }
       if (requirement?.classes !== undefined && (requirement.classes.length === 0 ||
@@ -71,6 +74,9 @@ export function validateItemDefinitions(
           errors.push(`${label} has an invalid equipment stat "${stat}"`);
         }
       }
+    }
+    if (item.consumable !== undefined && (!Number.isSafeInteger(item.consumable.healAmount) || item.consumable.healAmount < 1 || item.equipment !== undefined || item.possession === true)) {
+      errors.push(`${label} has an invalid healing consumable`);
     }
   }
 

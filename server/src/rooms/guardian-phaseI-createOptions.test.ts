@@ -23,7 +23,7 @@ import { ROOM_DEFINITIONS } from "./definitions";
 const PORT = 2597;
 
 const GRAND_PLAZA = "grand-plaza";
-const HUNTING_DEN = "hunting-den";
+const HUNTING_DEN = "buyeo-rat-cave";
 
 interface ClientRoom {
   readonly sessionId: string;

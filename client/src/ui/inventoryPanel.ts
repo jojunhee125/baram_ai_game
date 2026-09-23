@@ -28,6 +28,12 @@ export const ITEM_ICON_ORDER = [
   "entry-pass",
   "leather-armor",
   "golden-helmet",
+  "wetland-sword", "wetland-dagger", "wetland-staff", "wetland-charm", "wetland-armor", "wetland-helmet", "wetland-boots", "wetland-cloak", "marsh-fiber", "serpent-scale", "swamp-pearl", "marsh-tonic",
+  "quarry-sword", "quarry-dagger", "quarry-staff", "quarry-charm", "quarry-armor", "quarry-helmet", "quarry-ring", "quarry-necklace", "iron-ore", "bat-wing", "rough-crystal", "quarry-tonic",
+  "frost-sword", "frost-dagger", "frost-staff", "frost-charm", "frost-armor", "frost-helmet", "frost-boots", "frost-cloak", "white-fur", "frost-shard", "ice-heart", "frost-tonic",
+  "ruin-sword", "ruin-dagger", "ruin-staff", "ruin-charm", "ruin-armor", "ruin-helmet", "ruin-ring", "ruin-necklace", "ancient-shard", "spirit-dust", "guardian-core", "ruin-tonic",
+  "rabbit-meat", "rat-meat", "bat-meat", "snake-meat", "good-snake-meat", "strength-helmet-1",
+  "bear-hide", "bear-gall", "tiger-hide", "deer-meat", "wild-pork", "forest-pork", "fox-fur", "square-shield",
 ] as const;
 
 /** One frame of items.png at 1x. The HUD column is CSS-sized, so this is CSS pixels. */
@@ -56,6 +62,7 @@ const EQUIPMENT_ITEM_SLOTS: Partial<Record<string, EquipmentSlot>> = {
   "forest-cloak": EquipmentSlot.Cloak,
   "veteran-blade": EquipmentSlot.Weapon,
   "mystic-cloak": EquipmentSlot.Cloak,
+  "strength-helmet-1": EquipmentSlot.Helmet,
 };
 
 function itemSlot(item: InventoryItem): EquipmentSlot | undefined {
@@ -191,11 +198,11 @@ export class InventoryPanel {
   }
 
   private applyEquipEligibility(row: HTMLElement, item: InventoryItem): void {
-    const button = row.querySelector<HTMLButtonElement>(".bag__equip");
-    if (!button) return;
     const requirement = this.requirementOf(item);
-    button.disabled = !item.equipped && requirement !== null && !requirement.eligible;
-    button.title = button.disabled ? requirement!.label : "";
+    for (const button of row.querySelectorAll<HTMLButtonElement>(".bag__equip")) {
+      button.disabled = !item.equipped && requirement !== null && !requirement.eligible;
+      button.title = button.disabled ? requirement!.label : "";
+    }
   }
 
   constructor(
@@ -282,7 +289,14 @@ export class InventoryPanel {
     }
     if (event.itemKey !== null) this.observedSlots.set(event.itemKey, event.slot);
     for (const item of this.items.values()) {
-      if (this.resolveSlot(item) === event.slot) item.equipped = item.itemKey === event.itemKey;
+      if (item.itemKey === event.itemKey) {
+        item.equipped = true;
+        item.equippedSlot = event.slot;
+      } else if (this.resolveSlot(item) === event.slot) {
+        item.equipped = false;
+        item.equippedSlot = undefined;
+        this.observedSlots.delete(item.itemKey);
+      }
     }
     if (event.itemKey !== null && !this.items.has(event.itemKey)) {
       this.unknownSlots.add(event.slot);
@@ -304,6 +318,10 @@ export class InventoryPanel {
     this.applySlot(event.slot, this.unknownSlots.has(event.slot)
       ? { name: "장비 정보 확인 필요", icon: "" }
       : this.resolveEquippedItem(event.itemKey));
+    for (const item of this.items.values()) {
+      const row = this.findRow(item.itemKey);
+      if (row && item.equipment?.slot === "ring") this.ensureRingActions(row, item);
+    }
     this.renderComparisons();
     if (this.unknownSlots.has(event.slot) && !this.replayingChanges && !this.resolvingUnknownEquipment) {
       this.resolvingUnknownEquipment = true;
@@ -723,10 +741,42 @@ export class InventoryPanel {
   }
 
   private resolveSlot(item: InventoryItem): EquipmentSlot | undefined {
-    return this.observedSlots.get(item.itemKey) ?? itemSlot(item);
+    if (item.equipment?.slot === "ring" && !item.equipped) return undefined;
+    return item.equippedSlot ?? this.observedSlots.get(item.itemKey) ?? itemSlot(item);
+  }
+
+  private ensureRingActions(row: HTMLElement, item: InventoryItem): void {
+    let actions = row.querySelector<HTMLElement>(".bag__actions");
+    if (!actions) {
+      actions = document.createElement("div");
+      actions.className = "bag__actions";
+      row.append(actions);
+    }
+    actions.querySelectorAll(".bag__equip").forEach(button => button.remove());
+    const currentSlot = this.resolveSlot(item);
+    row.dataset.slot = currentSlot ?? "";
+    row.dataset.equipped = String(item.equipped);
+    const slots = item.equipped ? currentSlot ? [currentSlot] : [] : [EquipmentSlot.Ring1, EquipmentSlot.Ring2];
+    for (const slot of slots) {
+      const equip = document.createElement("button");
+      equip.type = "button";
+      equip.className = "bag__equip";
+      equip.textContent = item.equipped ? "해제" : `반지 ${slot === EquipmentSlot.Ring1 ? "1" : "2"} 장착`;
+      equip.addEventListener("click", event => {
+        if (item.equipped) this.onUnequipItem(slot);
+        else this.onEquipItem(item.itemKey, slot);
+        if (event.detail > 0) equip.blur();
+      });
+      actions.append(equip);
+    }
+    this.applyEquipEligibility(row, item);
   }
 
   private ensureEquipAction(row: HTMLElement, item: InventoryItem): void {
+    if (item.equipment?.slot === "ring") {
+      this.ensureRingActions(row, item);
+      return;
+    }
     const slot = this.resolveSlot(item);
     if (slot === undefined) return;
     row.dataset.slot = slot;

@@ -19,6 +19,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Canvas, SCALE, SRC_TILE, TILE, encodePng, upscale } from "./lib/png.mjs";
+import { PROGRESSION_KINDS, renderProgressionItem, renderProgressionMonster } from "./lib/progression-art.mjs";
 
 const ASSETS_DIR = resolve(fileURLToPath(new URL("../assets", import.meta.url)));
 const MONSTER_SPRITES_TS = resolve(
@@ -529,6 +530,7 @@ const KINDS = [
 ];
 
 function buildMonsterFrame(spec, direction, step) {
+  if (PROGRESSION_KINDS.includes(spec.kind)) return renderProgressionMonster(spec.kind, direction, step);
   const label = `${spec.kind}/${direction}/${step}`;
   const native = new Canvas(SRC_TILE, SRC_TILE);
   paintRows(native, spec.bodies[step], spec.palette, 0, 0, SRC_TILE, `${label} body`);
@@ -774,6 +776,10 @@ const ITEMS = [
 function buildItemSheet() {
   const sheet = new Canvas(ITEMS.length * TILE, TILE);
   ITEMS.forEach((item, index) => {
+    if (item.render) {
+      sheet.blit(item.render(), index * TILE, 0);
+      return;
+    }
     const native = new Canvas(SRC_TILE, SRC_TILE);
     paintRows(native, item.rows, ITEM_PALETTE, 0, 0, SRC_TILE, `item ${item.icon}`);
     sheet.blit(upscale(native, SCALE), index * TILE, 0);
@@ -790,7 +796,7 @@ function buildItemSheet() {
  */
 function readOrderArray(file, name) {
   const source = readFileSync(file, "utf8");
-  const match = new RegExp(`${name}\\s*=\\s*\\[([\\s\\S]*?)\\]`).exec(source);
+  const match = new RegExp(`${name}\\s*(?::[^=]+)?=\\s*\\[([\\s\\S]*?)\\]`).exec(source);
   if (!match) throw new Error(`${file}: ${name} not found`);
   return [...match[1].matchAll(/"([^"]+)"/g)].map((entry) => entry[1]);
 }
@@ -896,6 +902,10 @@ function write(relativePath, contents, canvas) {
   );
   console.log(`  sha256 ${createHash("sha256").update(contents).digest("hex")}`);
 }
+
+KINDS.push(...PROGRESSION_KINDS.map(kind => ({ kind })));
+const progressionIconOrder = readOrderArray(resolve(ASSETS_DIR, "../shared/src/progression.ts"), "PROGRESSION_ITEM_ICON_ORDER");
+ITEMS.push(...progressionIconOrder.map((icon, index) => ({ icon, render: () => renderProgressionItem(icon, index) })));
 
 assertOrderMatches(
   MONSTER_SPRITES_TS,

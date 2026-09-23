@@ -1,4 +1,5 @@
 import type Phaser from "phaser";
+import { progressionMinimapColor } from "../world/progressionTerrain";
 
 /** One map baked at one pixel per tile. Immutable for the room's lifetime. */
 export interface MinimapTerrain {
@@ -56,9 +57,9 @@ export function buildMinimapTerrain(
     for (let x = 0; x < cols; x += 1) {
       const blocked = collision.getTileAt(x, y)?.collides === true;
       const ground = map.getTileAt(x, y, false, "ground")?.index;
-      const color = mapKey === "hunting-den" ? (blocked ? CAVE_WALL : CAVE_FLOOR)
+      const color = progressionMinimapColor(mapKey, blocked, ground) ?? (mapKey === "hunting-den" ? (blocked ? CAVE_WALL : CAVE_FLOOR)
         : mapKey === "hunting-forest" ? (blocked ? [26, 49, 37] as const : ground === 4 || ground === 5 ? ROAD : [65, 90, 55] as const)
-        : blocked ? WALL : ground === 3 || ground === 8 ? GRASS : ground === 4 || ground === 5 ? ROAD : FLOOR;
+        : blocked ? WALL : ground === 3 || ground === 8 ? GRASS : ground === 4 || ground === 5 ? ROAD : FLOOR);
       paint(image.data, (y * cols + x) * 4, color);
     }
   }

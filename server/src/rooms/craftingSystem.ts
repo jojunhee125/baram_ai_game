@@ -1,6 +1,8 @@
 import { ServerMessage, type CraftingRecipeView, type CraftResult } from "@zep-test/shared";
 import type { SettlementStore } from "../db/settlementStore";
 import { ITEM_DEFINITIONS } from "./itemDefinitions";
+import { PROGRESSION_RECIPES } from "./progressionDefinitions";
+import type { ItemDefinition } from "./contracts";
 import { objectPayload, refreshEconomy, SocialBudget, type SocialHost } from "./socialRuntime";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -9,8 +11,28 @@ const ingredient = (itemKey: string, quantity: number) => ({
 });
 export const CRAFTING_RECIPES: readonly CraftingRecipeView[] = [{
   recipeId: "reinforced-armor", name: "강화 가죽갑옷 제작", currencyCost: 30,
-  ingredients: [ingredient("padded-armor", 1), ingredient("den-fur", 3)], output: ingredient("reinforced-armor", 1),
-}];
+  ingredients: [ingredient("padded-armor", 1), ingredient("bear-hide", 3)], output: ingredient("reinforced-armor", 1),
+}, ...PROGRESSION_RECIPES];
+
+export function validateCraftingRecipes(recipes: readonly CraftingRecipeView[], items: readonly ItemDefinition[]): readonly string[] {
+  const errors: string[] = [];
+  const keys = new Set(items.map((item) => item.key));
+  const ids = new Set<string>();
+  for (const recipe of recipes) {
+    if (recipe.recipeId.trim().length === 0 || ids.has(recipe.recipeId)) errors.push(`duplicate or empty recipe "${recipe.recipeId}"`);
+    ids.add(recipe.recipeId);
+    if (!Number.isSafeInteger(recipe.currencyCost) || recipe.currencyCost < 1 || recipe.ingredients.length === 0) errors.push(`invalid cost or ingredients for recipe "${recipe.recipeId}"`);
+    const inputs = new Set<string>();
+    for (const entry of recipe.ingredients) {
+      if (inputs.has(entry.itemKey) || entry.itemKey === recipe.output.itemKey) errors.push(`duplicate or circular ingredient in recipe "${recipe.recipeId}"`);
+      inputs.add(entry.itemKey);
+    }
+    for (const entry of [...recipe.ingredients, recipe.output]) {
+      if (!keys.has(entry.itemKey) || !Number.isSafeInteger(entry.quantity) || entry.quantity < 1) errors.push(`invalid item "${entry.itemKey}" in recipe "${recipe.recipeId}"`);
+    }
+  }
+  return errors;
+}
 
 export class CraftingSystem {
   private readonly budget = new SocialBudget();
