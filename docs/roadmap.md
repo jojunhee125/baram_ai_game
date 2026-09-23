@@ -1,6 +1,6 @@
 # 2009–2010 PC 감성 MMORPG 로드맵
 
-> **2026-09-23 사냥 콘텐츠 교체 상태:** 부여 7개 대표 사냥 지역, 허브 연결, 몬스터·아이템·퀘스트 대체를 구현했다. 전체 server suite 1249/1249, shared 26/26, 관련 browser suite와 typecheck/build가 통과했다. 지도는 로컬 대표 지형이며 역사적 원작 맵 복원본이 아니다. 실 PostgreSQL·장시간 플레이·전체 제품 browser·운영 배포는 미실행이다. 세부 근거와 한계는 [구현 기록](implementation-2026-09-23-original-hunting-content.md)을 따른다. 이전 방향 보정은 아래의 결정 이력으로 보존한다.
+> **2026-09-23 사냥 콘텐츠 교체 상태:** 부여 7개 대표 사냥 지역, 허브 연결, 몬스터·아이템·퀘스트 대체를 구현했다. 전체 server suite 1249/1249, shared 26/26, 관련 browser suite와 typecheck/build가 통과했다. 구현은 [4ae0045](https://github.com/jojunhee125/baram_ai_game/commit/4ae00455ada8ffb64cca0bb2012bcb8a6ee849ab)로 origin/main에 push됐다. 지도는 로컬 대표 지형이며 역사적 원작 맵 복원본이 아니다. 실 PostgreSQL·장시간 플레이·전체 제품 browser·운영 배포는 미실행이다. 세부 근거와 한계는 [구현 기록](implementation-2026-09-23-original-hunting-content.md)을 따른다. 이전 방향 보정은 아래의 결정 이력으로 보존한다.
 
 
 > **2026-09-23 소셜·경제 구현 승인:** 파티(E+F), 플레이어 거래(G), 제작(H)의 승인 범위를 구현하고 서버·실 PostgreSQL·WebSocket·UI 검증을 마쳤다. 직렬 실 PostgreSQL 전체 suite 1322/1322 통과했다. 배포되지는 않았다. 500 CCU 성능 검증과 APISIX SSO PoC는 미실행이며, 부하 검증 계획은 [구현 기록](implementation-2026-09-23-social-economy.md)에 있다. [범위 승인](design-2026-09-23-social-economy.md) · [결정 로그](decisions.md).
@@ -196,7 +196,7 @@ R07은 첫 테마·첫 보스부터 완성한다. R10은 앞 단계 플레이가
 
 **2026-09-23 구현 이력:** 습지·채석장·설원·유적과 아이템 48개를 포함한 Lv1~30 창작 확장은 당시 기준으로 구현·관련 범위 검증했다. 이후 승인된 원작 사냥터 콘텐츠 교체는 부여 대표 지역 7곳, 연결 14개, 몬스터 18종, 신규 아이템 14종을 대상으로 구현·관련 검증했다. 기존 아이템 67종과 11개 퀘스트 기록은 보존했고, 기존 아이템 중 48종은 신규 획득 경로에서 제외했다. 2009~2010년의 정확한 지역 구성·맵 층수·출현률·드롭을 입증하는 역사 자료는 확인되지 않았다. [교체 구현 기록](implementation-2026-09-23-original-hunting-content.md) · [이전 확장 기록](implementation-2026-09-23-level30-regions-items.md) · [방향 결정](decisions.md).
 
-사용자는 실제 화면 확인보다 코드 작업을 우선했다. A+B+C+D+I는 구현·관련 검증을 마쳤으며, 2026-09-23에는 E+F+G+H 전체 코드 구현도 승인됐다. 해당 소셜·경제 범위는 구현·검증 완료(직렬 실 PostgreSQL 전체 suite 1322/1322)다. 원작 사냥 콘텐츠 교체도 구현·관련 검증을 마쳤다. 사용자가 구현·문서 변경의 commit·push를 승인했으며, 이번 변경 묶음은 현재 커밋·푸시 준비 중이다. 실제 Git 반영 결과는 완료 후 기록한다. 배포는 승인·수행되지 않았다.
+사용자는 실제 화면 확인보다 코드 작업을 우선했다. A+B+C+D+I는 구현·관련 검증을 마쳤으며, 2026-09-23에는 E+F+G+H 전체 코드 구현도 승인됐다. 해당 소셜·경제 범위는 구현·검증 완료(직렬 실 PostgreSQL 전체 suite 1322/1322)다. 원작 사냥 콘텐츠 교체는 구현·관련 검증을 마쳤고 [4ae0045](https://github.com/jojunhee125/baram_ai_game/commit/4ae00455ada8ffb64cca0bb2012bcb8a6ee849ab)로 origin/main에 push됐다. 배포는 승인·수행되지 않았다.
 
 | 구분 | 다음 범위 | 현재 상태 |
 |---|---|---|

@@ -3,7 +3,7 @@
 ## 2026-09-23 — 원작 사냥터 기준표 확정 및 기존 콘텐츠 교체 승인
 
 - 사용자는 다음 코드 작업으로 2009~2010년 PC 바람의나라 원작 사냥터 기준표를 확정하고 기존 사냥터·지역 맵·몬스터·드롭을 교체하도록 승인했다. 저장된 캐릭터 정체성, EXP 성장 구조와 레벨 상한 30은 유지한다. 역사 자료로 확인되지 않은 맵이나 명칭을 원작과 동일하다고 단정하지 않는다.
-- 구현·기록 검증 완료: shared 26/26 및 server 1249/1249, 관련 browser suite, typecheck/build 통과. 실 PostgreSQL·장시간 플레이·전체 제품 browser·배포는 미실행이다. 역사적 근거와 상세 검증은 [구현 기록](implementation-2026-09-23-original-hunting-content.md)에 있다. 사용자가 commit·push를 승인했으며, 이번 변경 묶음은 현재 준비 중이다.
+- 구현·기록 검증 완료: shared 26/26 및 server 1249/1249, 관련 browser suite, typecheck/build 통과. 실 PostgreSQL·장시간 플레이·전체 제품 browser·배포는 미실행이다. 역사적 근거와 상세 검증은 [구현 기록](implementation-2026-09-23-original-hunting-content.md)에 있다. 구현은 [4ae0045](https://github.com/jojunhee125/baram_ai_game/commit/4ae00455ada8ffb64cca0bb2012bcb8a6ee849ab)로 origin/main에 push됐다.
 
 ## 2026-09-23 — 소셜·경제 기능 E+F+G+H 구현 승인
 
@@ -14,7 +14,7 @@
 
 - 사용자가 현재 상태를 로드맵과 프로젝트 기록에 반영한 뒤 commit·push하도록 지시했다. 현재 기준은 A+B+C+D+I 및 리뷰 수정 완료, R02/R06/R07 부분 구현, 그리고 원작 사냥 콘텐츠 교체 구현·관련 검증 완료다.
 - Git에 보존되는 PROJECT_MEMORY·로드맵·규칙 문서와 저장소 바깥 인계/메모리 안내를 같은 기준으로 맞춘다. 과거 기록은 날짜가 있는 이력으로 보존하고, 전체 browser·새 SQL 실DB·원화·장시간 플레이·운영 배포 미완료를 명시한다.
-- [병렬 코드 묶음 기록](implementation-2026-09-23-parallel-code-bundle.md) 및 [원작 사냥 콘텐츠 교체 기록](implementation-2026-09-23-original-hunting-content.md). 현재 변경 묶음은 commit·push 준비 중이며 원격 반영 여부는 완료 후 기록한다.
+- [병렬 코드 묶음 기록](implementation-2026-09-23-parallel-code-bundle.md) 및 [원작 사냥 콘텐츠 교체 기록](implementation-2026-09-23-original-hunting-content.md). 구현 묶음은 [4ae0045](https://github.com/jojunhee125/baram_ai_game/commit/4ae00455ada8ffb64cca0bb2012bcb8a6ee849ab)로 origin/main에 push됐다.
 
 ## 2026-09-23 — 병렬 코드 묶음 착수 승인
 
